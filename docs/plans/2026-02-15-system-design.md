@@ -186,6 +186,10 @@ stock-outbox                      -> Redis Stream
 dead-letter:stock-commands        -> Redis Stream (failed messages after MAX_RETRIES)
 ```
 
+**API response semantics:** The `/stock/find/{item_id}` endpoint returns `{"stock": available_stock + reserved_stock, "price": price}`. The sum represents total stock (matching the benchmark's consistency checks), while internally the two-column model tracks reservations separately. The benchmark verifies `stock_sold + stock_remaining = initial_stock`, so `stock_remaining` must reflect the total regardless of reservation state.
+
+**batch_init migration:** The benchmark's `batch_init` endpoint populates items via `MSET`. With the new Hash-based model, `batch_init` must use `HSET item:{id} available_stock {stock} reserved_stock 0 price {price}` for each item. A Redis pipeline batches these for performance.
+
 ### 5.3 Payment Redis — Two-Column Reservation Model
 
 ```
@@ -215,21 +219,36 @@ dead-letter:payment-commands         -> Redis Stream (failed messages after MAX_
 ```
 STARTED
   |
-  | TCC Try -> Stock (reserve items)
+  | TCC Try -> Stock (reserve items sequentially; WAL records each item)
   v
-STOCK_RESERVED ----[fail]----> CANCELLING_STOCK ----> FAILED
-  |
-  | TCC Try -> Payment (reserve credit)
-  v
-PAYMENT_RESERVED --[fail]----> CANCELLING_ALL ------> FAILED
-  |                            (cancel stock + payment)
-  | TCC Confirm -> Stock + Payment (in parallel)
-  v
-CONFIRMING --------[timeout]--> retry confirms (idempotent)
-  |
-  v
-COMPLETED
+STOCK_RESERVING --[partial fail]--> CANCELLING_STOCK ---+
+  |                                  (cancel only items  |
+  | all items reserved               already reserved)   |
+  v                                                      |
+STOCK_RESERVED                                           |
+  |                                                      |
+  | TCC Try -> Payment (reserve credit)                  |
+  v                                                      |
+PAYMENT_RESERVED --[fail]----> CANCELLING_ALL ------+    |
+  |                            (cancel stock +      |    |
+  | TCC Confirm -> Stock + Payment (in parallel)    |    |
+  v                                                 |    |
+CONFIRMING --------[timeout]--> retry confirms      |    |
+  |                 [permanent fail]--> CANCELLING_ALL    |
+  v                                     |                |
+COMPLETED                               v                v
+                                     FAILED (after all cancels confirmed)
+                                       |
+                                       | [cancel fails after MAX_RETRIES]
+                                       v
+                                     ABANDONED (DLQ — manual intervention)
 ```
+
+**Multi-item reservation:** Orders may contain N items. Each is reserved via a separate Lua script call. The WAL records which items have been successfully reserved (`saga:{saga_id}:state.items_reserved` list). If item K of N fails, the orchestrator cancels items 1..K-1 individually. On crash recovery, the WAL tells the orchestrator exactly which items need cancellation.
+
+**Compensation failure:** If Cancel commands fail after `MAX_RETRIES` (default: 3), the saga transitions to ABANDONED and is written to the Dead Letter Queue. Reservation TTLs (60s) act as the ultimate safety net — even abandoned sagas will auto-release resources when TTLs expire.
+
+**Confirm failure:** If Confirm fails because the reservation TTL expired (permanent failure, not transient), the saga transitions to CANCELLING_ALL rather than retrying infinitely. The Confirm Lua script returns distinct error codes: `1` = success, `0` = already confirmed (idempotent), `-1` = reservation expired (permanent failure).
 
 ### 6.2 WAL (Write-Ahead Log) Protocol
 
@@ -237,11 +256,16 @@ Inspired by classical database WAL and Temporal's durable execution model. Every
 
 | State | WAL Entry | Next Action |
 |-------|-----------|-------------|
-| STARTED | `{saga_id, step: "start", status: "pending"}` | Send TCC Try to Stock |
+| STARTED | `{saga_id, step: "start", status: "pending"}` | Send TCC Try to Stock (item 1) |
+| STOCK_RESERVING | `{saga_id, step: "stock_reserving", items_reserved: [...]}` | Send TCC Try to Stock (next item) |
 | STOCK_RESERVED | `{saga_id, step: "stock_reserved", status: "completed"}` | Send TCC Try to Payment |
 | PAYMENT_RESERVED | `{saga_id, step: "payment_reserved", status: "completed"}` | Send TCC Confirm to both |
 | CONFIRMING | `{saga_id, step: "confirming", status: "pending"}` | Wait for confirms |
 | COMPLETED | `{saga_id, step: "completed", status: "done"}` | Store result, notify HTTP handler |
+| CANCELLING_STOCK | `{saga_id, step: "cancelling_stock", items_to_cancel: [...]}` | Send TCC Cancel for reserved items |
+| CANCELLING_ALL | `{saga_id, step: "cancelling_all"}` | Send TCC Cancel to Stock + Payment |
+| FAILED | `{saga_id, step: "failed", reason: "..."}` | Store result, notify HTTP handler |
+| ABANDONED | `{saga_id, step: "abandoned"}` | Write to DLQ, rely on reservation TTLs |
 | FAILED | `{saga_id, step: "failed", status: "done", error: "..."}` | Cancel active reservations, notify |
 
 ### 6.3 Crash Recovery Protocol
@@ -393,6 +417,8 @@ return 1
 ---
 
 ## 8. Inter-Service Communication
+
+Our inter-service communication layer embodies the **Staged Event-Driven Architecture (SEDA)** [7]: each service acts as an independent stage connected by explicit queues (Redis Streams), with per-stage backpressure managed through consumer groups and bounded stream lengths. This decouples request admission from processing, preventing cascade failures under load. The partitioned checkout-log approach also draws from the Calvin line of deterministic execution [4], with recent advances in Aria [6] and HDCC [9] demonstrating that deterministic ordering remains state-of-the-art for partitioned workloads.
 
 ### 8.1 Event Flow (Redis Streams)
 
@@ -658,9 +684,9 @@ async def reconcile():
 
 [7] Welsh, M., Culler, D. & Brewer, E. "SEDA: An Architecture for Well-Conditioned, Scalable Internet Services." *Proceedings of the 18th ACM Symposium on Operating Systems Principles (SOSP)*, pp. 230-243. ACM, 2001.
 
-[8] Daraghmi, E. & Zhang, S. "Enhancing Saga Pattern for Distributed Transactions within a Microservices Architecture." *Applied Sciences (MDPI)*, 12(12), 6242, 2022.
+[8] Daraghmi, E., Zhang, C-P. & Yuan, S-M. "Enhancing Saga Pattern for Distributed Transactions within a Microservices Architecture." *Applied Sciences (MDPI)*, 12(12), 6242, 2022.
 
-[9] Lu, Y. et al. "A Hybrid Approach to Integrating Deterministic and Non-Deterministic Concurrency Control." *Proceedings of the VLDB Endowment*, 18, pp. 1376+, 2025.
+[9] Hong, Y., Zhao, H., Lu, W., Du, X., Chen, Y., Pan, A. & Zheng, L. "A Hybrid Approach to Integrating Deterministic and Non-Deterministic Concurrency Control." *Proceedings of the VLDB Endowment*, 18, pp. 1376+, 2025.
 
 [10] Kleppmann, M. *Designing Data-Intensive Applications*. O'Reilly Media, 2017.
 
