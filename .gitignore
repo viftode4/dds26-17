@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+!env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment / secrets (root-level dotenv files only)
+/.env
+*.env.local
+# Note: env/ directory with Redis configs is intentionally tracked (local dev only)
+
+# Redis
+dump.rdb
+
+# Docker
+*.log
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Template (cloned reference, not part of project)
+_template/
+
+# Serena
+.serena/
