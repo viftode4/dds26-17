@@ -1,187 +1,145 @@
-# Distributed Data Systems — Course Project
+# [Projects for Distributed Data Systems Course](https://docs.google.com/document/d/1OAHOSXucovy6m1RG_4UgwMbVr7dED9Xng5Bqk5ftgVw/edit?tab=t.0#heading=h.is6brajmt6us)
 
-## Overview
+The goal of this year’s project is to implement a set of microservices that need to coordinate in order to guarantee data consistency. 
 
-The goal of this year's project is to implement a set of **microservices** that need to coordinate in order to guarantee **data consistency**.
+This project reflects the best practices that are in use already in the development world. There we want to see the effect of different technologies and design patterns on data management aspects of microservices (SAGAs, 2PC, consistency, performance, scalability, fault tolerance).
 
-This project reflects best practices already in use in the development world. We want to see the effect of different technologies and design patterns on data management aspects of microservices — including **SAGAs**, **2PC**, **consistency**, **performance**, **scalability**, and **fault tolerance**.
+We will judge all project implementations according to their difficulty, the quality of the solution, and the number of things that the students have learned in the process. Those will be assessed during a rigorous interview, at the end of the course. So, we can promise you that we will be fair and will take those into account. *The goal of a master lecture is to learn, not to count beans for grades.* 
 
-> We will judge all project implementations according to their **difficulty**, the **quality of the solution**, and the **number of things that the students have learned** in the process. Those will be assessed during a rigorous interview at the end of the course.
->
-> The goal of a master lecture is to learn, not to count beans for grades.
+**Evaluation Criteria:**
 
----
+* **Consistency** (we do not lose money, nor item counts) 
+* **Performance** (latency & throughput) 
+* **Architecture Difficulty** (e.g., synchronous, asynchronous / event-driven)
 
-## Evaluation Criteria
+## Microservice-architecture
 
-| Criterion | Description |
-|-----------|-------------|
-| **Consistency** | We do not lose money, nor item counts |
-| **Performance** | Latency & throughput |
-| **Architecture Difficulty** | e.g., synchronous vs. asynchronous / event-driven |
+Implementing Microservices with Python Flask and Redis. We provide a project template: [https://github.com/delftdata/wdm-project-template](https://github.com/delftdata/wdm-project-template). If you want to use another Python framework (e.g., async Flask with Quart, etc.) you have the right to do so. Just bear in mind that you cannot use any other language and you cannot change the following external-world-facing API described below (and already implemented in the template).
 
----
+### Microservice Endpoints to Implement (already in the template)
 
-## Microservice Architecture
+Those have to adhere to the principles of microservices design. 
+[https://martinfowler.com/articles/microservices.html](https://martinfowler.com/articles/microservices.html)
+Pay special attention to the section “Decentralized Data Management”.
 
-Implement microservices with **Python Flask** and **Redis**.
+We have prepared a template for your project, where we have implemented the “API” of each microservice here: 
+[https://github.com/delftdata/wdm-project-template](https://github.com/delftdata/wdm-project-template)
 
-- **Project template:** <https://github.com/delftdata/wdm-project-template>
-- You may use another Python framework (e.g., async Flask with **Quart**), but:
-  - You **cannot** use any other language.
-  - You **cannot** change the external-world-facing API described below.
+### API Reference (implemented in the Python template we provided)
 
-Microservice design must adhere to: <https://martinfowler.com/articles/microservices.html>
-> Pay special attention to the section **"Decentralized Data Management"**.
+#### Order Service
 
----
+* **/orders/create/{user\_id}** 
+  * POST \- creates an order for the given user, and returns an order\_id 
+  * Output JSON fields: 
+    * “order-iduser\_id” \- the orderuser’s id 
+* **/orders/find/{order\_id}** 
+  * GET \- retrieves the information of an order (id, payment status, items included and user id) 
+  * Output JSON fields: 
+    * “order\_id” \- the order’s id 
+    * “paid” (true/false) 
+    * “items” \- list of item ids that are included in the order 
+    * “user\_id” \- the user’s id that made the order 
+    * “total\_cost” \- the total cost of the items in the order 
+* **/orders/addItem/{order\_id}/{item\_id}/{quantity}** 
+  * POST \- adds a given item in the order given 
+* **/orders/checkout/{order\_id}** 
+  * POST \- makes the payment (via calling the payment service), subtracts the stock (via the stock service) and returns a status (success/failure).
 
-## API Reference
+#### Stock Service
 
-### Order Service
+* **/stock/find/{item\_id}** 
+  * GET \- returns an item’s stock availability and price. 
+  * Output JSON fields: 
+    * “stock” \- the item’s stock 
+    * “price” \- the item’s price 
+* **/stock/subtract/{item\_id}/{amount}** 
+  * POST \- subtracts an item from stock by the amount specified. 
+* **/stock/add/{item\_id}/{amount}** 
+  * POST \- adds the given number of stock items to the item count in the stock 
+* **/stock/item/create/{price}** 
+  * POST \- adds an item and its price, and returns its ID. 
+  * Output JSON fields: 
+    * “item\_id” \- the item’s id
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/orders/create/{user_id}` | `POST` | Creates an order for the given user, returns an `order_id` |
-| `/orders/find/{order_id}` | `GET` | Retrieves order information |
-| `/orders/addItem/{order_id}/{item_id}/{quantity}` | `POST` | Adds a given item to the order |
-| `/orders/checkout/{order_id}` | `POST` | Makes the payment, subtracts stock, returns success/failure |
+#### Payment Service
 
-**`/orders/create/{user_id}`** response:
-```json
-{ "user_id": "<user's id>" }
-```
+* **/payment/pay/{user\_id}/{amount}** 
+  * POST \- subtracts the amount of the order from the user’s credit (returns failure if credit is not enough) 
+* **/payment/add\_funds/{user\_id}/{amount}** 
+  * POST \- adds funds (amount) to the user’s (user\_id) account 
+  * Output JSON fields: 
+    * “done” (true/false) 
+* **/payment/create\_user** 
+  * POST \- creates a user with 0 credit 
+   * Output JSON fields: 
+     * “user\_id” \- the user’s id 
+* **/payment/find\_user/{user\_id}** 
+   * GET \- returns the user information 
+  * Output JSON fields: 
+    * “user\_id” \- the user’s id 
+    * “credit” \- the user’s credit
 
-**`/orders/find/{order_id}`** response:
-```json
-{
-  "order_id": "<order's id>",
-  "paid": true,
-  "items": ["<item_id>", "..."],
-  "user_id": "<user's id>",
-  "total_cost": 0.00
-}
-```
+For response status codes you can use the generic ones. 400 for failure and 200 for success on every request. For a more detailed list, you can check [https://developer.mozilla.org/en-US/docs/Web/HTTP/Status](https://developer.mozilla.org/en-US/docs/Web/HTTP/Status) but make sure you keep the failures to 4xx codes, and the successes to 2xx codes.
 
-### Stock Service
+#### SAGAs vs Two-Phase Commit vs Managed
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/stock/find/{item_id}` | `GET` | Returns item stock availability and price |
-| `/stock/subtract/{item_id}/{amount}` | `POST` | Subtracts amount from item stock |
-| `/stock/add/{item_id}/{amount}` | `POST` | Adds amount to item stock |
-| `/stock/item/create/{price}` | `POST` | Creates an item with given price, returns its ID |
+You will have to choose, according to the database backend that you are implementing with, whether you can perform two-phase commits using the Open XA standard, SAGAs \[4\] or a distributed database system offering transactions (the database needs to be scalable and to support multi-partition transactions).
 
-**`/stock/find/{item_id}`** response:
-```json
-{ "stock": 0, "price": 0.00 }
-```
+A rough description of SAGAs can be found here: [https://microservices.io/patterns/data/saga.html](https://microservices.io/patterns/data/saga.html) please use the internet and youtube for more information on what that is.
 
-**`/stock/item/create/{price}`** response:
-```json
-{ "item_id": "<item's id>" }
-```
+## Further Notes on Evaluation
 
-### Payment Service
+#### Scalability 
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/payment/pay/{user_id}/{amount}` | `POST` | Subtracts amount from user's credit (fails if insufficient) |
-| `/payment/add_funds/{user_id}/{amount}` | `POST` | Adds funds to user's account |
-| `/payment/create_user` | `POST` | Creates a user with 0 credit |
-| `/payment/find_user/{user_id}` | `GET` | Returns user information |
+Your architecture needs to be scalable and elastic to accommodate the varying load. However, the way that it scales needs to be efficient.
 
-**`/payment/add_funds/{user_id}/{amount}`** response:
-```json
-{ "done": true }
-```
+#### Consistency 
 
-**`/payment/create_user`** response:
-```json
-{ "user_id": "<user's id>" }
-```
+Your transaction implementation needs to provide some kind of consistency guarantee (e.g., eventual consistency, serializability, snapshot isolation). 
 
-**`/payment/find_user/{user_id}`** response:
-```json
-{ "user_id": "<user's id>", "credit": 0.00 }
-```
+#### Availability 
 
-### HTTP Status Codes
+The system needs to be available during any load scenario.
 
-- **2xx** — Success
-- **4xx** — Failure (use `400` as a generic failure code)
-- Reference: <https://developer.mozilla.org/en-US/docs/Web/HTTP/Status>
+#### Fault Tolerance 
 
----
+Machine failures can happen at any time in a distributed system. Try to handle cases of failures that can happen in the middle of a transaction (checkout). For example, the payment microservice might die after receiving a rollback message from the order microservice and haven’t committed that rollback yet to its database. 
 
-## Transaction Strategy: SAGAs vs 2PC vs Managed
+#### Transaction Performance
 
-Choose your approach based on the database backend:
+Try to reach as high throughput with as low latency as possible while trying to remain efficient. 
 
-- **Two-Phase Commit (2PC)** using the Open XA standard
-- **SAGAs** — <https://microservices.io/patterns/data/saga.html>
-- **Managed** — a distributed database offering multi-partition transactions
+#### Event-Driven Design
 
----
+Event-driven asynchronous architectures are far more performant and difficult to implement compared to a synchronous architecture with REST calls between the microservices. A solution like that will get extra points. (reactive microservices)
 
-## Detailed Evaluation Dimensions
+#### Difficulty 
 
-### Scalability
-Architecture must be **scalable and elastic** to accommodate varying load — but scaling needs to be **efficient**.
+Some systems might be easier on some aspects of the implementation compared to others. So the difficulty of implementation will play a role in the evaluation. 
 
-### Consistency
-Transaction implementation must provide a consistency guarantee (e.g., eventual consistency, serializability, snapshot isolation).
+## Provided Benchmark
 
-### Availability
-The system must remain **available under any load scenario**.
+To test microservices you can use postman ([https://www.getpostman.com/](https://www.getpostman.com/)) and to stress test service you can use [http://locust.io](http://locust.io). We provide some [basic stress and consistency tests](https://github.com/delftdata/wdm-project-benchmark) that will help you during the development of the system. For basic correctness tests, you could take a look at the test folder in [the template project](https://github.com/delftdata/wdm-project-template). You could also try to create a better benchmark for some bonus points. Your code will be checked against 20 CPUs max. We will kill one container at a time and give it some seconds to recover.
 
-### Fault Tolerance
-Handle failures that occur **mid-transaction** (e.g., during checkout). Example: the payment microservice dies after receiving a rollback message but before committing the rollback to its database.
+## **Deliverables (all dates refer to 11.59pm)**
 
-### Transaction Performance
-Maximize **throughput** with minimal **latency** while remaining efficient.
+* February 16th: group formation 
+* Phase 1: 13th March: 
+  * Implement two-phase commit and SAGAs protocols in Flask \+ Redis 
+  * Fault-tolerance: we should be able to fail a container, and your system should be able to recover. This includes killing a database, or a service instance. 
+  * We will evaluate your system by failing a single container, letting the system recover, then fail another, etc. 
+  * Your system should remain consistent. 
+  * Stretch-goal: high-performance (i.e., zero down-time) under failures 
+  * Criteria: performance, consistency 
+  * Deliverable: 
+  Public Github repository link; {username}/dds26-{team\#} (team\# is your group number on brightspace) 
+  * This benchmark should be able to work on a local machine without changes: 
+  * [https://github.com/delftdata/wdm-project-benchmark](https://github.com/delftdata/wdm-project-benchmark) 
+* Phase 2 (final deliverable, 1st April): 
+  * Goal: abstract away the Two-phase commit protocol and SAGAs into a separate software artifact that we will call an Orchestrator. 
+  * The old project should be rewritten in a way that it makes use of the orchestrator, instead of implementing two-phase commit-like behavior in application code. 
+  * You will share, again, a github repository with the implementation of the orchestrator, and give us an implementation of the Shopping-cart project that uses that orchestrator. 
+ 
 
-### Event-Driven Design
-Asynchronous event-driven architectures are more performant (and harder to implement) than synchronous REST-based communication. **Extra points** for reactive microservices.
-
-### Difficulty
-Implementation difficulty is factored into evaluation — some approaches are harder on certain aspects.
-
-### Benchmarking
-- Manual testing: [Postman](https://www.getpostman.com/)
-- Stress testing: [Locust](http://locust.io)
-- Provided tests: see the `test` folder in the template project
-- **Max resources:** 20 CPUs
-- **Failure testing:** one container killed at a time, with recovery time allowed
-- **Bonus:** create a better benchmark
-
----
-
-## Deliverables
-
-> All deadlines refer to **11:59 PM**.
-
-### Group Formation
-**February 18th**
-
-### Phase 1 — System Design (March 3rd)
-- Transaction protocol and planned architecture
-- Message-flow style description (e.g., [2PC message flow](https://en.wikipedia.org/wiki/Two-phase_commit_protocol))
-- **Format:** PDF document, max 2 pages (mostly diagrams, few explanations)
-- **Submit on:** Brightspace
-
-### Phase 2 — Implementation (March 21st)
-- Implement transactional protocol in **Flask + Redis**
-- **Criteria:** performance, consistency
-- **Deliverable:** Private GitHub repository `{username}/dds25-{team#}`
-  - Add collaborators: `kpsarakis`, `asteriosk`, `GiorgosChristodoulou`
-- Must work with the benchmark without changes: <https://github.com/delftdata/wdm-project-benchmark>
-
-### Phase 3 — Final Deliverable (April 11th)
-- **Fault tolerance:** system must recover from individual container failures (databases or service instances)
-- Testing approach: fail one container → let system recover → fail another → repeat
-- System **must remain consistent** throughout
-- **Stretch goal:** high-performance with **zero downtime** under failures
-
-### `contributions.txt`
-A top-level file where each team member describes their contribution in one sentence (e.g., code, architecture, documentation, experiments, psychological support, beer, cookies, etc.).
+contributions.txt should be a file at the top-level directory of your repository where each member describes (in a sentence) what they have contributed to the project (e.g., code, architecture, documentation, experiments, psychological support, beer, cookies, etc.). 
