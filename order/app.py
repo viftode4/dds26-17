@@ -6,27 +6,50 @@ import uuid
 from collections import defaultdict
 
 import redis
-import requests
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
 
 from msgspec import msgpack, Struct
 from flask import Flask, jsonify, abort, Response
+
+import saga
+import tpc
+import recovery
 
 
 DB_ERROR_STR = "DB error"
 REQ_ERROR_STR = "Requests error"
 
 GATEWAY_URL = os.environ['GATEWAY_URL']
+TX_MODE = os.environ.get('TX_MODE', 'saga')
 
 app = Flask("order-service")
 
-db: redis.Redis = redis.Redis(host=os.environ['REDIS_HOST'],
-                              port=int(os.environ['REDIS_PORT']),
-                              password=os.environ['REDIS_PASSWORD'],
-                              db=int(os.environ['REDIS_DB']))
+# --- Redis connections ---
+retry_strategy = Retry(ExponentialBackoff(), retries=5)
+
+db: redis.Redis = redis.Redis(
+    host=os.environ['REDIS_HOST'],
+    port=int(os.environ['REDIS_PORT']),
+    password=os.environ['REDIS_PASSWORD'],
+    db=int(os.environ['REDIS_DB']),
+    retry_on_timeout=True,
+    retry=retry_strategy,
+)
+
+event_bus: redis.Redis = redis.Redis(
+    host=os.environ.get('EVENT_BUS_HOST', 'event-bus'),
+    port=int(os.environ.get('EVENT_BUS_PORT', 6379)),
+    password=os.environ.get('EVENT_BUS_PASSWORD', 'redis'),
+    db=0,
+    retry_on_timeout=True,
+    retry=retry_strategy,
+)
 
 
 def close_db_connection():
     db.close()
+    event_bus.close()
 
 
 atexit.register(close_db_connection)
@@ -37,21 +60,29 @@ class OrderValue(Struct):
     items: list[tuple[str, int]]
     user_id: str
     total_cost: int
+    checkout_status: str = ""       # "", "PENDING", "COMMITTED", "ABORTED"
+    checkout_step: str = ""         # "", "STOCK", "PAYMENT", "PREPARE", "COMMIT", "ABORT", "DONE"
+
+
+def save_order(redis_db, order_id: str, order_entry: OrderValue):
+    """Save an order to the database."""
+    redis_db.set(order_id, msgpack.encode(order_entry))
 
 
 def get_order_from_db(order_id: str) -> OrderValue | None:
     try:
-        # get serialized data
         entry: bytes = db.get(order_id)
     except redis.exceptions.RedisError:
         return abort(400, DB_ERROR_STR)
-    # deserialize data if it exists else return null
     entry: OrderValue | None = msgpack.decode(entry, type=OrderValue) if entry else None
     if entry is None:
-        # if order does not exist in the database; abort
         abort(400, f"Order: {order_id} not found!")
     return entry
 
+
+# ==========================================
+#   REST ENDPOINTS (external API — unchanged)
+# ==========================================
 
 @app.post('/create/<user_id>')
 def create_order(user_id: str):
@@ -66,7 +97,6 @@ def create_order(user_id: str):
 
 @app.post('/batch_init/<n>/<n_items>/<n_users>/<item_price>')
 def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
-
     n = int(n)
     n_items = int(n_items)
     n_users = int(n_users)
@@ -105,31 +135,20 @@ def find_order(order_id: str):
     )
 
 
-def send_post_request(url: str):
-    try:
-        response = requests.post(url)
-    except requests.exceptions.RequestException:
-        abort(400, REQ_ERROR_STR)
-    else:
-        return response
-
-
-def send_get_request(url: str):
-    try:
-        response = requests.get(url)
-    except requests.exceptions.RequestException:
-        abort(400, REQ_ERROR_STR)
-    else:
-        return response
-
-
 @app.post('/addItem/<order_id>/<item_id>/<quantity>')
 def add_item(order_id: str, item_id: str, quantity: int):
     order_entry: OrderValue = get_order_from_db(order_id)
-    item_reply = send_get_request(f"{GATEWAY_URL}/stock/find/{item_id}")
+
+    # Fetch item price from stock service via gateway
+    import requests
+    try:
+        item_reply = requests.get(f"{GATEWAY_URL}/stock/find/{item_id}")
+    except requests.exceptions.RequestException:
+        abort(400, REQ_ERROR_STR)
+
     if item_reply.status_code != 200:
-        # Request failed because item does not exist
         abort(400, f"Item: {item_id} does not exist!")
+
     item_json: dict = item_reply.json()
     order_entry.items.append((item_id, int(quantity)))
     order_entry.total_cost += int(quantity) * item_json["price"]
@@ -141,41 +160,52 @@ def add_item(order_id: str, item_id: str, quantity: int):
                     status=200)
 
 
-def rollback_stock(removed_items: list[tuple[str, int]]):
-    for item_id, quantity in removed_items:
-        send_post_request(f"{GATEWAY_URL}/stock/add/{item_id}/{quantity}")
-
-
 @app.post('/checkout/<order_id>')
 def checkout(order_id: str):
-    app.logger.debug(f"Checking out {order_id}")
+    app.logger.debug(f"Checking out {order_id} (mode: {TX_MODE})")
     order_entry: OrderValue = get_order_from_db(order_id)
-    # get the quantity per item
+
+    # Guard: prevent double checkout
+    if order_entry.checkout_status == "COMMITTED":
+        return Response("Order already checked out", status=400)
+    if order_entry.checkout_status == "PENDING":
+        return Response("Checkout already in progress", status=400)
+    # If previously ABORTED, allow retry by resetting status
+    if order_entry.checkout_status == "ABORTED":
+        order_entry.checkout_status = ""
+        order_entry.checkout_step = ""
+
+    # Build aggregated items
     items_quantities: dict[str, int] = defaultdict(int)
     for item_id, quantity in order_entry.items:
         items_quantities[item_id] += quantity
-    # The removed items will contain the items that we already have successfully subtracted stock from
-    # for rollback purposes.
-    removed_items: list[tuple[str, int]] = []
-    for item_id, quantity in items_quantities.items():
-        stock_reply = send_post_request(f"{GATEWAY_URL}/stock/subtract/{item_id}/{quantity}")
-        if stock_reply.status_code != 200:
-            # If one item does not have enough stock we need to rollback
-            rollback_stock(removed_items)
-            abort(400, f'Out of stock on item_id: {item_id}')
-        removed_items.append((item_id, quantity))
-    user_reply = send_post_request(f"{GATEWAY_URL}/payment/pay/{order_entry.user_id}/{order_entry.total_cost}")
-    if user_reply.status_code != 200:
-        # If the user does not have enough credit we need to rollback all the item stock subtractions
-        rollback_stock(removed_items)
-        abort(400, "User out of credit")
-    order_entry.paid = True
-    try:
-        db.set(order_id, msgpack.encode(order_entry))
-    except redis.exceptions.RedisError:
-        return abort(400, DB_ERROR_STR)
-    app.logger.debug("Checkout successful")
-    return Response("Checkout successful", status=200)
+
+    if not items_quantities:
+        return abort(400, "Order has no items")
+
+    # Dispatch to the appropriate transaction protocol
+    if TX_MODE == '2pc':
+        success, message = tpc.checkout(order_id, order_entry, items_quantities, db, event_bus)
+    else:
+        success, message = saga.checkout(order_id, order_entry, items_quantities, db, event_bus)
+
+    if success:
+        app.logger.debug("Checkout successful")
+        return Response(message, status=200)
+    else:
+        app.logger.debug(f"Checkout failed: {message}")
+        return abort(400, message)
+
+
+# ==========================================
+#   STARTUP RECOVERY
+# ==========================================
+
+# Run recovery on startup
+try:
+    recovery.run_recovery(db, event_bus, TX_MODE)
+except Exception as e:
+    app.logger.error(f"Recovery failed: {e}")
 
 
 if __name__ == '__main__':

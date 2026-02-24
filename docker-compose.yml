@@ -1,4 +1,3 @@
-version: "3"
 services:
 
   gateway:
@@ -16,39 +15,84 @@ services:
     build: ./order
     image: order:latest
     environment:
-      - GATEWAY_URL=http://gateway:80
+      - TX_MODE=${TX_MODE:-saga}
     command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
     env_file:
       - env/order_redis.env
+      - env/event_bus.env
+      - env/gateway.env
     depends_on:
       - order-db
+      - event-bus
+    restart: on-failure
 
   order-db:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
+    volumes:
+      - order-db-data:/data
 
   stock-service:
     build: ./stock
     image: stock:latest
+    environment:
+      - TX_MODE=${TX_MODE:-saga}
     command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
     env_file:
       - env/stock_redis.env
+      - env/event_bus.env
+      - env/gateway.env
     depends_on:
       - stock-db
+      - event-bus
+    restart: on-failure
 
   stock-db:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
+    volumes:
+      - stock-db-data:/data
 
   payment-service:
     build: ./payment
     image: user:latest
+    environment:
+      - TX_MODE=${TX_MODE:-saga}
     command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
     env_file:
       - env/payment_redis.env
+      - env/event_bus.env
+      - env/gateway.env
     depends_on:
       - payment-db
+      - event-bus
+    restart: on-failure
 
   payment-db:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
+    volumes:
+      - payment-db-data:/data
+
+  event-bus:
+    image: redis:7.2-bookworm
+    command: redis-server --requirepass redis --maxmemory 256mb --appendonly yes --appendfsync everysec
+    volumes:
+      - event-bus-data:/data
+    restart: on-failure
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    ports:
+      - "5540:5540"
+    depends_on:
+      - order-db
+      - stock-db
+      - payment-db
+      - event-bus
+
+volumes:
+  order-db-data:
+  stock-db-data:
+  payment-db-data:
+  event-bus-data:
