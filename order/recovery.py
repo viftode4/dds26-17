@@ -1,158 +1,180 @@
 """
-Crash Recovery for the Order Service.
+Crash Recovery for the Order Service (WAL-backed).
 
-Runs at startup to handle incomplete transactions:
-- PENDING orders: attempt compensation/abort based on checkout_step
-- Works for both SAGA and 2PC modes
+Recovery strategy:
+1. Read incomplete sagas from the WAL stream
+2. For each, determine the last known step
+3. Compensate as needed based on what was reserved
+4. Also falls back to pending_orders set for non-WAL sagas (2PC)
 """
 import json
 import logging
-import time
+from collections import defaultdict
 
 from msgspec import msgpack
 
+import wal
+
 logger = logging.getLogger("order-service")
 
+TIMEOUT = 10
 
-def run_recovery(db, event_bus, tx_mode: str):
-    """
-    Scan for incomplete transactions and attempt recovery.
 
-    Args:
-        db: Order-db Redis connection
-        event_bus: Event-bus Redis connection
-        tx_mode: 'saga' or '2pc'
-    """
+async def run_recovery(db, stock_db, payment_db, tx_mode: str):
+    """Scan for incomplete transactions and attempt recovery."""
     from app import OrderValue
 
     logger.info(f"Running startup recovery (mode: {tx_mode})...")
     recovered = 0
 
-    try:
-        cursor = 0
-        while True:
-            cursor, keys = db.scan(cursor, match="*", count=100)
-            for key in keys:
-                key_str = key.decode() if isinstance(key, bytes) else key
-                # Skip non-order keys (idempotency keys, etc.)
-                if key_str.startswith("op:") or key_str.startswith("2pc:") or key_str.startswith("tx:"):
-                    continue
-
-                try:
-                    entry = db.get(key)
-                    if entry is None:
-                        continue
-                    order = msgpack.decode(entry, type=OrderValue)
-                except Exception:
-                    continue
-
-                # Only recover orders that are stuck in PENDING
-                if order.checkout_status != "PENDING":
-                    continue
-
-                logger.warning(f"Found incomplete transaction: {key_str} "
-                             f"(step: {order.checkout_step})")
-
-                _recover_order(key_str, order, db, event_bus, tx_mode)
+    # WAL-based recovery for sagas
+    if tx_mode == "saga":
+        try:
+            incomplete = await wal.get_incomplete_sagas(db)
+            for entry in incomplete:
+                saga_id = entry.get('saga_id', '')
+                step = entry.get('step', '')
+                logger.warning(f"WAL recovery: saga {saga_id} at step '{step}'")
+                await _recover_from_wal(saga_id, entry, db, stock_db, payment_db)
                 recovered += 1
+        except Exception as e:
+            logger.error(f"WAL recovery error: {e}")
 
-            if cursor == 0:
-                break
+    # Fallback: pending_orders set (covers 2PC and pre-WAL sagas)
+    try:
+        pending_ids = await db.smembers("pending_orders")
+        for key in pending_ids:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            try:
+                raw = await db.get(key_str)
+                if raw is None:
+                    await db.srem("pending_orders", key_str)
+                    continue
+                order = msgpack.decode(raw, type=OrderValue)
+            except Exception:
+                continue
 
+            if order.checkout_status != "PENDING":
+                await db.srem("pending_orders", key_str)
+                continue
+
+            logger.warning(f"Pending-set recovery: {key_str} (step: {order.checkout_step})")
+            items_quantities = defaultdict(int)
+            for item_id, quantity in order.items:
+                items_quantities[item_id] += quantity
+
+            if tx_mode == "saga":
+                await _recover_saga_fallback(key_str, order, items_quantities, db, stock_db, payment_db)
+            else:
+                await _recover_2pc(key_str, order, items_quantities, db, stock_db, payment_db)
+            await db.srem("pending_orders", key_str)
+            recovered += 1
     except Exception as e:
-        logger.error(f"Recovery scan error: {e}")
+        logger.error(f"Pending-set recovery error: {e}")
 
     logger.info(f"Recovery complete: {recovered} transactions recovered")
 
 
-def _recover_order(order_id: str, order, db, event_bus, tx_mode: str):
-    """
-    Recover a single incomplete order.
+async def _recover_from_wal(saga_id, wal_entry, db, stock_db, payment_db):
+    """Recover a saga using WAL state — cancel any reservations made."""
+    from app import OrderValue, save_order
 
-    Strategy: When in doubt, abort. It's safer to abort and let the user retry
-    than to commit a potentially inconsistent transaction.
-    """
+    step = wal_entry.get('step', '')
+
+    # Determine what was reserved based on WAL step
+    items_raw = wal_entry.get('items', '[]')
+    try:
+        items = json.loads(items_raw) if items_raw != '[]' else []
+    except (json.JSONDecodeError, TypeError):
+        items = []
+
+    # If we were in the middle of reserving, or past it — cancel all reserved items
+    cancel_steps = {"reserving_item", "item_reserved", "stock_reserved",
+                    "reserving_payment", "payment_reserved", "confirming",
+                    "cancelling_stock", "cancelling_all"}
+
+    if step in cancel_steps:
+        for item in items:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                item_id, quantity = str(item[0]), int(item[1])
+            else:
+                continue
+            await stock_db.xadd("stock-commands", {
+                "cmd": "compensate", "order_id": saga_id,
+                "item_id": item_id, "quantity": str(quantity),
+            })
+            await stock_db.blpop(f"response:{saga_id}:stock", timeout=TIMEOUT)
+
+        # Cancel payment if we got that far
+        if step in {"reserving_payment", "payment_reserved", "confirming", "cancelling_all"}:
+            user_id = wal_entry.get('user_id', '')
+            amount = wal_entry.get('total_cost', '0')
+            if user_id:
+                await payment_db.xadd("payment-commands", {
+                    "cmd": "compensate", "order_id": saga_id,
+                    "user_id": user_id, "amount": str(amount),
+                })
+                await payment_db.blpop(f"response:{saga_id}:payment", timeout=TIMEOUT)
+
+    # Update order state
+    try:
+        raw = await db.get(saga_id)
+        if raw:
+            order = msgpack.decode(raw, type=OrderValue)
+            order.checkout_status = "ABORTED"
+            order.checkout_step = "RECOVERED"
+            await save_order(db, saga_id, order)
+    except Exception as e:
+        logger.error(f"Failed to update order {saga_id}: {e}")
+
+    # Mark WAL entry as recovered
+    await wal.log_step(db, saga_id, "recovered")
+    await db.srem("pending_orders", saga_id)
+    logger.info(f"WAL recovery complete for {saga_id}: ABORTED")
+
+
+async def _recover_saga_fallback(order_id, order, items_quantities, db, stock_db, payment_db):
+    """Fallback SAGA recovery (no WAL available)."""
     from app import save_order
-    from collections import defaultdict
 
-    # Build items_quantities from order
-    items_quantities = defaultdict(int)
-    for item_id, quantity in order.items:
-        items_quantities[item_id] += quantity
-
-    logger.info(f"Recovering order {order_id}: step={order.checkout_step}, mode={tx_mode}")
-
-    if tx_mode == "saga":
-        _recover_saga(order_id, order, items_quantities, db, event_bus)
-    else:
-        _recover_2pc(order_id, order, items_quantities, db, event_bus)
-
-
-def _recover_saga(order_id, order, items_quantities, db, event_bus):
-    """Recover a SAGA transaction by compensating all potentially completed steps."""
-    from app import save_order
-
-    TIMEOUT = 10
-
-    # Conservative approach: send compensate for all items that might have been reserved
     if order.checkout_step in ("STOCK", "PAYMENT", "STOCK_FAILED", "PAYMENT_FAILED"):
-        # Compensate stock
         for item_id, quantity in items_quantities.items():
-            event_bus.xadd("stock-stream", {
-                "cmd": "compensate",
-                "order_id": order_id,
-                "item_id": item_id,
-                "quantity": str(quantity),
+            await stock_db.xadd("stock-commands", {
+                "cmd": "compensate", "order_id": order_id,
+                "item_id": item_id, "quantity": str(quantity),
             })
-            response_key = f"response:{order_id}:stock"
-            event_bus.blpop(response_key, timeout=TIMEOUT)
-
-        # Compensate payment if we got past the stock phase
+            await stock_db.blpop(f"response:{order_id}:stock", timeout=TIMEOUT)
         if order.checkout_step in ("PAYMENT", "PAYMENT_FAILED"):
-            event_bus.xadd("payment-stream", {
-                "cmd": "compensate",
-                "order_id": order_id,
-                "user_id": order.user_id,
-                "amount": str(order.total_cost),
+            await payment_db.xadd("payment-commands", {
+                "cmd": "compensate", "order_id": order_id,
+                "user_id": order.user_id, "amount": str(order.total_cost),
             })
-            response_key = f"response:{order_id}:payment"
-            event_bus.blpop(response_key, timeout=TIMEOUT)
+            await payment_db.blpop(f"response:{order_id}:payment", timeout=TIMEOUT)
 
     order.checkout_status = "ABORTED"
     order.checkout_step = "RECOVERED"
-    save_order(db, order_id, order)
-    logger.info(f"SAGA recovery complete for {order_id}: ABORTED")
+    await save_order(db, order_id, order)
+    logger.info(f"SAGA fallback recovery for {order_id}: ABORTED")
 
 
-def _recover_2pc(order_id, order, items_quantities, db, event_bus):
-    """Recover a 2PC transaction by aborting all participants."""
+async def _recover_2pc(order_id, order, items_quantities, db, stock_db, payment_db):
+    """Recover 2PC by aborting all participants."""
     from app import save_order
 
-    TIMEOUT = 10
-
-    # For 2PC, always abort on recovery — locks have TTL as safety net
-    # Send abort to stock for all items
     for item_id, quantity in items_quantities.items():
-        event_bus.xadd("stock-stream", {
-            "cmd": "abort",
-            "order_id": order_id,
-            "item_id": item_id,
-            "quantity": str(quantity),
+        await stock_db.xadd("stock-commands", {
+            "cmd": "abort", "order_id": order_id,
+            "item_id": item_id, "quantity": str(quantity),
         })
-        response_key = f"response:{order_id}:stock"
-        event_bus.blpop(response_key, timeout=TIMEOUT)
+        await stock_db.blpop(f"response:{order_id}:stock", timeout=TIMEOUT)
 
-    # Send abort to payment
-    event_bus.xadd("payment-stream", {
-        "cmd": "abort",
-        "order_id": order_id,
-        "user_id": order.user_id,
-        "amount": str(order.total_cost),
+    await payment_db.xadd("payment-commands", {
+        "cmd": "abort", "order_id": order_id,
+        "user_id": order.user_id, "amount": str(order.total_cost),
     })
-    response_key = f"response:{order_id}:payment"
-    event_bus.blpop(response_key, timeout=TIMEOUT)
+    await payment_db.blpop(f"response:{order_id}:payment", timeout=TIMEOUT)
 
     order.checkout_status = "ABORTED"
     order.checkout_step = "RECOVERED"
-    save_order(db, order_id, order)
-    logger.info(f"2PC recovery complete for {order_id}: ABORTED")
+    await save_order(db, order_id, order)
+    logger.info(f"2PC recovery for {order_id}: ABORTED")

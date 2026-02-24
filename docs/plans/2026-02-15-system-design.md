@@ -172,11 +172,13 @@ Inspired by Amazon's inventory reservation pattern and the quota-cache concept f
 # Domain data (two-column model)
 item:{item_id}                    -> Redis Hash
                                      Fields: available_stock, reserved_stock, price
-                                     Invariant: available_stock + reserved_stock = total_stock
+                                     Invariant: available_stock >= 0, reserved_stock >= 0
+                                     Note: available + reserved + sold = initial_total
+                                           (sold stock is not tracked; /find returns available + reserved)
 
 # TCC reservation tracking
 reservation:{saga_id}:{item_id}   -> amount (string)           TTL: 60s
-saga:{saga_id}:stock:status       -> "reserved"|"confirmed"|"cancelled"  TTL: 24h
+saga:{saga_id}:stock:{item_id}:status  -> "reserved"|"confirmed"|"cancelled"  TTL: 24h
 
 # Event streams
 stock-commands                    -> Redis Stream (consumer group: "stock-workers")
@@ -196,7 +198,8 @@ dead-letter:stock-commands        -> Redis Stream (failed messages after MAX_RET
 # Domain data (two-column model)
 user:{user_id}                       -> Redis Hash
                                         Fields: available_credit, held_credit
-                                        Invariant: available_credit + held_credit = total_credit
+                                        Invariant: available_credit >= 0, held_credit >= 0
+                                        Note: available + held + spent = initial_total
 
 # TCC reservation tracking
 reservation:{saga_id}:{user_id}      -> amount (string)        TTL: 60s
@@ -256,17 +259,19 @@ Inspired by classical database WAL and Temporal's durable execution model. Every
 
 | State | WAL Entry | Next Action |
 |-------|-----------|-------------|
-| STARTED | `{saga_id, step: "start", status: "pending"}` | Send TCC Try to Stock (item 1) |
-| STOCK_RESERVING | `{saga_id, step: "stock_reserving", items_reserved: [...]}` | Send TCC Try to Stock (next item) |
-| STOCK_RESERVED | `{saga_id, step: "stock_reserved", status: "completed"}` | Send TCC Try to Payment |
+| STARTED | `{saga_id, step: "start", status: "pending"}` | Begin item reservation sequence |
+| RESERVING_ITEM | `{saga_id, step: "reserving_item", item_id: "X"}` | Send TCC Try for item X |
+| ITEM_RESERVED | `{saga_id, step: "item_reserved", item_id: "X"}` | Next item, or proceed to payment |
+| STOCK_RESERVED | `{saga_id, step: "stock_reserved", items: [...]}` | Send TCC Try to Payment |
 | PAYMENT_RESERVED | `{saga_id, step: "payment_reserved", status: "completed"}` | Send TCC Confirm to both |
 | CONFIRMING | `{saga_id, step: "confirming", status: "pending"}` | Wait for confirms |
 | COMPLETED | `{saga_id, step: "completed", status: "done"}` | Store result, notify HTTP handler |
 | CANCELLING_STOCK | `{saga_id, step: "cancelling_stock", items_to_cancel: [...]}` | Send TCC Cancel for reserved items |
 | CANCELLING_ALL | `{saga_id, step: "cancelling_all"}` | Send TCC Cancel to Stock + Payment |
-| FAILED | `{saga_id, step: "failed", reason: "..."}` | Store result, notify HTTP handler |
+| FAILED | `{saga_id, step: "failed", status: "done", reason: "..."}` | Store result, notify HTTP handler |
 | ABANDONED | `{saga_id, step: "abandoned"}` | Write to DLQ, rely on reservation TTLs |
-| FAILED | `{saga_id, step: "failed", status: "done", error: "..."}` | Cancel active reservations, notify |
+
+**Write-ahead property for multi-item reservations:** Each item reservation is logged *before* sending the Try command (`RESERVING_ITEM`), and confirmed *after* success (`ITEM_RESERVED`). On crash recovery, if the last entry is `RESERVING_ITEM` for item X, we know item X *may or may not* have been reserved — we send a Cancel for it (idempotent). If the last entry is `ITEM_RESERVED`, the item is confirmed reserved.
 
 ### 6.3 Crash Recovery Protocol
 
@@ -305,7 +310,7 @@ All scripts implement the **Transactional Outbox pattern**: state changes and ou
 ```lua
 -- KEYS[1] = item:{item_id} (Hash: available_stock, reserved_stock, price)
 -- KEYS[2] = reservation:{saga_id}:{item_id}
--- KEYS[3] = saga:{saga_id}:stock:status (idempotency key)
+-- KEYS[3] = saga:{saga_id}:stock:{item_id}:status (per-item idempotency key)
 -- KEYS[4] = stock-outbox (Stream)
 -- ARGV[1] = amount, ARGV[2] = saga_id, ARGV[3] = item_id, ARGV[4] = reservation_ttl
 
@@ -361,14 +366,14 @@ return 1
 
 -- Idempotency
 local status = redis.call('GET', KEYS[3])
-if status == 'confirmed' then return 1 end
+if status == 'confirmed' then return 0 end  -- 0 = already confirmed (idempotent)
 
 -- Check reservation still exists (may have expired via TTL)
 local amount = redis.call('GET', KEYS[2])
 if not amount then
     redis.call('XADD', KEYS[4], '*',
         'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
-    return 0
+    return -1  -- -1 = reservation expired (permanent failure)
 end
 
 -- Finalize: decrement reserved (stock is now permanently sold)
@@ -378,7 +383,7 @@ redis.call('SETEX', KEYS[3], 86400, 'confirmed')
 
 redis.call('XADD', KEYS[4], '*',
     'saga_id', ARGV[1], 'event', 'confirmed', 'item_id', ARGV[2])
-return 1
+return 1  -- 1 = success
 ```
 
 ### 7.3 Stock: TCC Cancel

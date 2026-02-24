@@ -7,92 +7,183 @@ services:
     ports:
       - "8000:80"
     depends_on:
-      - order-service
-      - stock-service
-      - payment-service
+      order-service:
+        condition: service_healthy
+      stock-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
 
+  # ==========================================
+  #   ORDER SERVICE
+  # ==========================================
   order-service:
     build: ./order
     image: order:latest
     environment:
       - TX_MODE=${TX_MODE:-saga}
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+      - GATEWAY_URL=http://gateway:80
+      - STOCK_REDIS_HOST=stock-db
+      - STOCK_REDIS_PORT=6379
+      - STOCK_REDIS_PASSWORD=redis
+      - PAYMENT_REDIS_HOST=payment-db
+      - PAYMENT_REDIS_PORT=6379
+      - PAYMENT_REDIS_PASSWORD=redis
+    command: hypercorn --bind 0.0.0.0:5000 --workers 1 app:app
     env_file:
       - env/order_redis.env
-      - env/event_bus.env
-      - env/gateway.env
     depends_on:
-      - order-db
-      - event-bus
+      order-db:
+        condition: service_healthy
+      stock-db:
+        condition: service_healthy
+      payment-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: on-failure
 
+  # ==========================================
+  #   ORDER REDIS (master + replica + sentinel)
+  # ==========================================
   order-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
     volumes:
       - order-db-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "redis", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  order-db-replica:
+    image: redis:7.2-bookworm
+    command: redis-server --requirepass redis --replicaof order-db 6379 --masterauth redis --appendonly yes
+    depends_on:
+      order-db:
+        condition: service_healthy
+
+  order-sentinel:
+    image: redis:7.2-bookworm
+    command: redis-sentinel /etc/sentinel.conf
+    volumes:
+      - ./sentinel/order-sentinel.conf:/etc/sentinel.conf:ro
+    depends_on:
+      order-db:
+        condition: service_healthy
+      order-db-replica:
+        condition: service_started
+
+  # ==========================================
+  #   STOCK SERVICE
+  # ==========================================
   stock-service:
     build: ./stock
     image: stock:latest
-    environment:
-      - TX_MODE=${TX_MODE:-saga}
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: hypercorn --bind 0.0.0.0:5000 --workers 1 app:app
     env_file:
       - env/stock_redis.env
-      - env/event_bus.env
-      - env/gateway.env
     depends_on:
-      - stock-db
-      - event-bus
+      stock-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: on-failure
 
+  # ==========================================
+  #   STOCK REDIS (master + replica + sentinel)
+  # ==========================================
   stock-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
     volumes:
       - stock-db-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "redis", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
+  stock-db-replica:
+    image: redis:7.2-bookworm
+    command: redis-server --requirepass redis --replicaof stock-db 6379 --masterauth redis --appendonly yes
+    depends_on:
+      stock-db:
+        condition: service_healthy
+
+  stock-sentinel:
+    image: redis:7.2-bookworm
+    command: redis-sentinel /etc/sentinel.conf
+    volumes:
+      - ./sentinel/stock-sentinel.conf:/etc/sentinel.conf:ro
+    depends_on:
+      stock-db:
+        condition: service_healthy
+      stock-db-replica:
+        condition: service_started
+
+  # ==========================================
+  #   PAYMENT SERVICE
+  # ==========================================
   payment-service:
     build: ./payment
     image: user:latest
-    environment:
-      - TX_MODE=${TX_MODE:-saga}
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: hypercorn --bind 0.0.0.0:5000 --workers 1 app:app
     env_file:
       - env/payment_redis.env
-      - env/event_bus.env
-      - env/gateway.env
     depends_on:
-      - payment-db
-      - event-bus
+      payment-db:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: on-failure
 
+  # ==========================================
+  #   PAYMENT REDIS (master + replica + sentinel)
+  # ==========================================
   payment-db:
     image: redis:7.2-bookworm
     command: redis-server --requirepass redis --maxmemory 512mb --appendonly yes --appendfsync everysec
     volumes:
       - payment-db-data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "redis", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  event-bus:
+  payment-db-replica:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 256mb --appendonly yes --appendfsync everysec
-    volumes:
-      - event-bus-data:/data
-    restart: on-failure
-
-  redis-insight:
-    image: redis/redisinsight:latest
-    ports:
-      - "5540:5540"
+    command: redis-server --requirepass redis --replicaof payment-db 6379 --masterauth redis --appendonly yes
     depends_on:
-      - order-db
-      - stock-db
-      - payment-db
-      - event-bus
+      payment-db:
+        condition: service_healthy
+
+  payment-sentinel:
+    image: redis:7.2-bookworm
+    command: redis-sentinel /etc/sentinel.conf
+    volumes:
+      - ./sentinel/payment-sentinel.conf:/etc/sentinel.conf:ro
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      payment-db-replica:
+        condition: service_started
 
 volumes:
   order-db-data:
   stock-db-data:
   payment-db-data:
-  event-bus-data:
