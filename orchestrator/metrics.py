@@ -24,6 +24,22 @@ class LatencyHistogram:
                 return
         self._overflow += 1
 
+    def get_percentile(self, p: float) -> float:
+        """Return the p-th percentile latency in milliseconds (0–100).
+
+        Returns a conservative 5000ms default before any data is collected.
+        """
+        total = self._total + self._overflow
+        if total == 0:
+            return 5000.0
+        target = total * (p / 100.0)
+        cumulative = 0
+        for bucket_ms, count in self._counts.items():
+            cumulative += count
+            if cumulative >= target:
+                return float(bucket_ms)
+        return float(self.BUCKETS_MS[-1])  # Overflow bucket
+
     def prometheus_lines(self, metric_name: str, labels: str = "") -> list[str]:
         """Emit Prometheus histogram-format lines (cumulative buckets)."""
         lines = []
@@ -78,6 +94,11 @@ class MetricsCollector:
                 self.latency_2pc.observe(duration)
             else:
                 self.latency_saga.observe(duration)
+
+    def get_percentile(self, p: float) -> float:
+        """Return p-th percentile latency in ms from the currently active protocol histogram."""
+        hist = self.latency_saga if self.current_protocol == "saga" else self.latency_2pc
+        return hist.get_percentile(p)
 
     def sliding_abort_rate(self) -> float:
         """Calculate abort rate over the sliding window."""

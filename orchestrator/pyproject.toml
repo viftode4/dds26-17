@@ -1,0 +1,17 @@
+[project]
+name = "wdm-orchestrator"
+version = "1.0.0"
+description = "Hybrid 2PC/Saga orchestrator for distributed microservices"
+requires-python = ">=3.11"
+dependencies = [
+    "redis[hiredis]>=5.0",
+    "msgspec>=0.18",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orchestrator*"]

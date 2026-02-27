@@ -13,6 +13,13 @@ from orchestrator.metrics import MetricsCollector
 
 logger = get_logger("orchestrator.core")
 
+import socket
+
+# Per-instance consumer group: each instance must see ALL outbox events (broadcast).
+# Hostname is stable across restarts within the same Docker container, so
+# XAUTOCLAIM on startup correctly reclaims this instance's stale PEL entries.
+OUTBOX_CONSUMER_GROUP = f"orchestrator-{socket.gethostname()}"
+
 
 class Orchestrator:
     """Hybrid 2PC/Saga orchestrator with adaptive protocol selection.
@@ -45,8 +52,10 @@ class Orchestrator:
             for service in service_dbs
         }
 
-        self.two_pc = TwoPCExecutor(service_dbs, self.outbox_reader, self.wal, self.circuit_breakers)
-        self.saga = SagaExecutor(service_dbs, self.outbox_reader, self.wal, self.circuit_breakers)
+        self.two_pc = TwoPCExecutor(service_dbs, self.outbox_reader, self.wal,
+                                    self.circuit_breakers, self.metrics)
+        self.saga = SagaExecutor(service_dbs, self.outbox_reader, self.wal,
+                                 self.circuit_breakers, self.metrics)
 
         self._outbox_tasks: list[asyncio.Task] = []
 
@@ -54,6 +63,14 @@ class Orchestrator:
         """Start background outbox reader tasks (runs on all instances)."""
         for service, stream in OUTBOX_STREAMS.items():
             db = self.service_dbs[service]
+            # Create consumer group (idempotent). Use id="$" so historical events
+            # with no matching waiters are not replayed on fresh startup.
+            try:
+                await db.xgroup_create(stream, OUTBOX_CONSUMER_GROUP, id="$", mkstream=True)
+                logger.info("Outbox consumer group created", stream=stream)
+            except aioredis.ResponseError as e:
+                if "BUSYGROUP" not in str(e):
+                    raise
             task = asyncio.create_task(
                 self._outbox_consumer(db, stream, service)
             )
@@ -144,19 +161,49 @@ class Orchestrator:
         await self.order_db.publish(notify_channel, "done")
 
     async def _outbox_consumer(self, db: aioredis.Redis, stream: str, service: str):
-        """Background task that reads outbox events and resolves per-saga futures."""
-        last_id = "$"  # Only new messages from now
+        """Background task reading outbox events via XREADGROUP for exactly-once delivery.
+
+        On startup, XAUTOCLAIM reclaims any stale PEL entries from crashed instances
+        so they are not permanently lost. New messages are read with XREADGROUP using
+        '>' (only undelivered entries). Each message is ACKed after resolving its Future.
+        """
+        consumer_name = f"orchestrator-{uuid.uuid4().hex[:8]}"
+
+        # Reclaim stale pending entries from any crashed previous instance (min idle 5s)
+        try:
+            claimed = await db.xautoclaim(
+                stream, OUTBOX_CONSUMER_GROUP, consumer_name,
+                min_idle_time=5000, start_id="0-0",
+            )
+            pending_entries = claimed[1] if claimed else []
+            for msg_id, fields in (pending_entries or []):
+                if fields:
+                    saga_id = fields.get("saga_id", "")
+                    if saga_id:
+                        self.outbox_reader.resolve(saga_id, service, fields)
+                await db.xack(stream, OUTBOX_CONSUMER_GROUP, msg_id)
+            if pending_entries:
+                logger.info("Reclaimed stale outbox entries", stream=stream,
+                            count=len(pending_entries))
+        except Exception as e:
+            logger.warning("XAUTOCLAIM failed (non-fatal)", stream=stream, error=str(e))
+
+        # Main loop: read new undelivered messages
         while True:
             try:
-                messages = await db.xread({stream: last_id}, count=50, block=2000)
+                messages = await db.xreadgroup(
+                    OUTBOX_CONSUMER_GROUP, consumer_name,
+                    {stream: ">"},
+                    count=50, block=2000,
+                )
                 if not messages:
                     continue
                 for _stream_name, entries in messages:
                     for msg_id, fields in entries:
-                        last_id = msg_id
                         saga_id = fields.get("saga_id", "")
                         if saga_id:
                             self.outbox_reader.resolve(saga_id, service, fields)
+                        await db.xack(stream, OUTBOX_CONSUMER_GROUP, msg_id)
             except asyncio.CancelledError:
                 raise
             except Exception as e:

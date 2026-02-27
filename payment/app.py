@@ -156,7 +156,8 @@ async def handle_command(fields: dict):
     amount = fields.get("amount", "0")
 
     if action == "try_reserve":
-        await _try_reserve(saga_id, user_id, int(amount))
+        ttl = int(fields.get("ttl", RESERVATION_TTL))
+        await _try_reserve(saga_id, user_id, int(amount), ttl)
     elif action == "confirm":
         await _confirm(saga_id, user_id)
     elif action == "cancel":
@@ -165,14 +166,14 @@ async def handle_command(fields: dict):
         log.warning("Unknown action", action=action, saga_id=saga_id)
 
 
-async def _try_reserve(saga_id: str, user_id: str, amount: int):
+async def _try_reserve(saga_id: str, user_id: str, amount: int, ttl: int = RESERVATION_TTL):
     keys = [
         f"user:{user_id}",
         f"reservation:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
     ]
-    args = [str(amount), saga_id, user_id, str(RESERVATION_TTL)]
+    args = [str(amount), saga_id, user_id, str(ttl)]
     await db.fcall("payment_try_reserve", len(keys), *keys, *args)
 
 

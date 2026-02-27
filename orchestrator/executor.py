@@ -11,6 +11,7 @@ from orchestrator.wal import WALEngine
 logger = get_logger("orchestrator.executor")
 
 STEP_TIMEOUT = 10.0
+CONFIRM_MAX_RETRIES = 3
 
 # Stream names per service
 COMMAND_STREAMS = {
@@ -120,11 +121,13 @@ class TwoPCExecutor:
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
                  outbox_reader: OutboxReader, wal: WALEngine,
-                 circuit_breakers: dict[str, CircuitBreaker] | None = None):
+                 circuit_breakers: dict[str, CircuitBreaker] | None = None,
+                 metrics=None):
         self.service_dbs = service_dbs
         self.outbox_reader = outbox_reader
         self.wal = wal
         self.circuit_breakers = circuit_breakers or {}
+        self.metrics = metrics
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
@@ -138,6 +141,11 @@ class TwoPCExecutor:
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
 
         await self.wal.log(saga_id, "PREPARING")
+
+        # Compute adaptive TTL before try_reserve phase
+        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
+        reservation_ttl = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
+        context["_reservation_ttl"] = reservation_ttl
 
         # Phase 1: Create all waiters, then send all prepare commands in parallel
         prepare_items: list[tuple[Step, asyncio.Future]] = [
@@ -181,11 +189,19 @@ class TwoPCExecutor:
             )
             for (step, _), result in zip(confirm_items, confirm_raw):
                 cb = self.circuit_breakers.get(step.service, CircuitBreaker())
-                if isinstance(result, Exception):
-                    logger.error("2PC commit timeout", saga_id=saga_id, step=step.name)
+                if isinstance(result, Exception) or (
+                    isinstance(result, dict) and result.get("event") == "confirm_failed"
+                ):
+                    # Forward recovery: retry confirm — reservation_expired may be transient
+                    result = await self._retry_confirm(step, saga_id, context)
+                if result is None or (
+                    isinstance(result, dict) and result.get("event") == "confirm_failed"
+                ):
+                    logger.error("2PC confirm failed after retries", saga_id=saga_id, step=step.name)
                     cb.record_failure()
-                else:
-                    cb.record_success()
+                    await self.wal.log(saga_id, "FAILED")
+                    return {"status": "failed", "error": "confirm_timeout_after_reserve"}
+                cb.record_success()
 
             await _waitaof(list(self.service_dbs.values()))
             await self.wal.log(saga_id, "COMPLETED")
@@ -214,6 +230,25 @@ class TwoPCExecutor:
                     break
             return {"status": "failed", "error": reason}
 
+    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
+                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
+        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
+
+        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
+        Returns the result dict on success, or None if all retries exhausted.
+        """
+        for attempt in range(retries):
+            fut = self.outbox_reader.create_waiter(saga_id, step.service)
+            await self._send_command(step, saga_id, "confirm", context)
+            try:
+                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                if result.get("event") != "confirm_failed":
+                    return result
+            except asyncio.TimeoutError:
+                pass
+            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
+        return None  # exhausted retries
+
     async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
         service = step.service
         db = self.service_dbs[service]
@@ -222,9 +257,11 @@ class TwoPCExecutor:
         if service == "stock":
             items = context.get("items", [])
             cmd["items"] = msgpack.encode(items).decode("latin-1")
+            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
         elif service == "payment":
             cmd["user_id"] = context.get("user_id", "")
             cmd["amount"] = str(context.get("total_cost", 0))
+            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)
 
 
@@ -240,11 +277,13 @@ class SagaExecutor:
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
                  outbox_reader: OutboxReader, wal: WALEngine,
-                 circuit_breakers: dict[str, CircuitBreaker] | None = None):
+                 circuit_breakers: dict[str, CircuitBreaker] | None = None,
+                 metrics=None):
         self.service_dbs = service_dbs
         self.outbox_reader = outbox_reader
         self.wal = wal
         self.circuit_breakers = circuit_breakers or {}
+        self.metrics = metrics
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
@@ -256,6 +295,11 @@ class SagaExecutor:
                 logger.warning("Circuit breaker open — fast fail", service=step.service, saga_id=saga_id)
                 await self.wal.log(saga_id, "FAILED")
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
+
+        # Compute adaptive TTL before try_reserve phase
+        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
+        reservation_ttl = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
+        context["_reservation_ttl"] = reservation_ttl
 
         # Try phase: send all try_reserve in parallel
         await self.wal.log(saga_id, "TRYING")
@@ -321,15 +365,42 @@ class SagaExecutor:
         )
         for (step, _), result in zip(confirm_items, confirm_raw):
             cb = self.circuit_breakers.get(step.service, CircuitBreaker())
-            if isinstance(result, Exception):
-                logger.error("Saga confirm timeout", saga_id=saga_id, step=step.name)
+            if isinstance(result, Exception) or (
+                isinstance(result, dict) and result.get("event") == "confirm_failed"
+            ):
+                # Forward recovery: retry confirm — reservation_expired may be transient
+                result = await self._retry_confirm(step, saga_id, context)
+            if result is None or (
+                isinstance(result, dict) and result.get("event") == "confirm_failed"
+            ):
+                logger.error("Saga confirm failed after retries", saga_id=saga_id, step=step.name)
                 cb.record_failure()
-            else:
-                cb.record_success()
+                await self.wal.log(saga_id, "FAILED")
+                return {"status": "failed", "error": "confirm_timeout_after_reserve"}
+            cb.record_success()
 
         await _waitaof(list(self.service_dbs.values()))
         await self.wal.log(saga_id, "COMPLETED")
         return {"status": "success"}
+
+    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
+                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
+        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
+
+        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
+        Returns the result dict on success, or None if all retries exhausted.
+        """
+        for attempt in range(retries):
+            fut = self.outbox_reader.create_waiter(saga_id, step.service)
+            await self._send_command(step, saga_id, "confirm", context)
+            try:
+                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                if result.get("event") != "confirm_failed":
+                    return result
+            except asyncio.TimeoutError:
+                pass
+            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
+        return None  # exhausted retries
 
     async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
         service = step.service
@@ -339,7 +410,9 @@ class SagaExecutor:
         if service == "stock":
             items = context.get("items", [])
             cmd["items"] = msgpack.encode(items).decode("latin-1")
+            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
         elif service == "payment":
             cmd["user_id"] = context.get("user_id", "")
             cmd["amount"] = str(context.get("total_cost", 0))
+            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)

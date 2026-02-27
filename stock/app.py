@@ -157,7 +157,8 @@ async def handle_command(fields: dict):
     if action == "try_reserve":
         items_raw = fields.get("items", "")
         items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
-        await _try_reserve(saga_id, items)
+        ttl = int(fields.get("ttl", RESERVATION_TTL))
+        await _try_reserve(saga_id, items, ttl)
     elif action == "confirm":
         items_raw = fields.get("items", "")
         items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
@@ -173,12 +174,12 @@ async def handle_command(fields: dict):
         log.warning("Unknown action", action=action, saga_id=saga_id)
 
 
-async def _try_reserve(saga_id: str, items: list[tuple[str, int]]):
+async def _try_reserve(saga_id: str, items: list[tuple[str, int]], ttl: int = RESERVATION_TTL):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
-    args = [saga_id, str(RESERVATION_TTL)]
+    args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
     await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
