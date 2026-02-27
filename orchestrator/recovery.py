@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Callable
 
 import redis.asyncio as aioredis
@@ -211,7 +212,6 @@ class RecoveryWorker:
 
     async def _abort_orphaned_sagas(self):
         """Find and abort sagas stuck for longer than ORPHAN_SAGA_TIMEOUT."""
-        import time
         incomplete = await self.wal.get_incomplete_sagas()
         now = time.time()
         for saga_id, state in incomplete.items():

@@ -95,9 +95,6 @@ checkout_tx = TransactionDefinition(
 
 async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
     """Verify data invariants across stock and payment services."""
-    from common.logging import get_logger
-    _log = get_logger("reconciliation")
-
     stock_db = service_dbs.get("stock")
     if stock_db:
         cursor = "0"
@@ -108,7 +105,7 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
                 avail = int(data.get("available_stock", 0))
                 reserved = int(data.get("reserved_stock", 0))
                 if avail < 0 or reserved < 0:
-                    _log.critical(
+                    log.critical(
                         "INVARIANT VIOLATION: stock",
                         key=key, available_stock=avail, reserved_stock=reserved,
                     )
@@ -125,7 +122,7 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
                 avail = int(data.get("available_credit", 0))
                 held = int(data.get("held_credit", 0))
                 if avail < 0 or held < 0:
-                    _log.critical(
+                    log.critical(
                         "INVARIANT VIOLATION: payment",
                         key=key, available_credit=avail, held_credit=held,
                     )

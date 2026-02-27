@@ -1,5 +1,6 @@
 import asyncio
 import json
+import socket
 import time
 import uuid
 
@@ -12,8 +13,6 @@ from orchestrator.wal import WALEngine
 from orchestrator.metrics import MetricsCollector
 
 logger = structlog.get_logger("orchestrator.core")
-
-import socket
 
 # Per-instance consumer group: each instance must see ALL outbox events (broadcast).
 # Hostname is stable across restarts within the same Docker container, so

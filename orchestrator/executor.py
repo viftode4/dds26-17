@@ -99,12 +99,12 @@ async def _waitaof(dbs: list[aioredis.Redis]):
     await asyncio.gather(*[_one(db) for db in dbs])
 
 
-class TwoPCExecutor:
-    """Two-Phase Commit executor.
+class _BaseExecutor:
+    """Shared infrastructure for TwoPCExecutor and SagaExecutor.
 
-    Phase 1: Send prepare to ALL participants in parallel, collect votes.
-    Phase 2a (all commit): Confirm all in parallel.
-    Phase 2b (any abort): Cancel all in parallel.
+    Holds the common service connections, outbox reader, WAL engine,
+    circuit breakers, and metrics — plus the generic _send_command and
+    _retry_confirm helpers used by both protocol executors.
     """
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
@@ -116,6 +116,48 @@ class TwoPCExecutor:
         self.wal = wal
         self.circuit_breakers = circuit_breakers or {}
         self.metrics = metrics
+
+    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
+        """Send a command to a service's command stream — fully generic.
+
+        Stream name derived by convention: ``{service}-commands``.
+        Domain-specific payload fields injected via ``step.payload_builder``.
+        """
+        service = step.service
+        db = self.service_dbs[service]
+        stream = f"{service}-commands"
+        cmd = {"saga_id": saga_id, "action": action}
+        if step.payload_builder:
+            cmd.update(step.payload_builder(saga_id, action, context))
+        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+
+    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
+                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
+        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
+
+        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
+        Returns the result dict on success, or None if all retries exhausted.
+        """
+        for attempt in range(retries):
+            fut = self.outbox_reader.create_waiter(saga_id, step.service)
+            await self._send_command(step, saga_id, "confirm", context)
+            try:
+                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                if result.get("event") != "confirm_failed":
+                    return result
+            except asyncio.TimeoutError:
+                pass
+            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
+        return None  # exhausted retries
+
+
+class TwoPCExecutor(_BaseExecutor):
+    """Two-Phase Commit executor.
+
+    Phase 1: Send prepare to ALL participants in parallel, collect votes.
+    Phase 2a (all commit): Confirm all in parallel.
+    Phase 2b (any abort): Cancel all in parallel.
+    """
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
@@ -218,41 +260,8 @@ class TwoPCExecutor:
                     break
             return {"status": "failed", "error": reason}
 
-    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
-                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
-        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
 
-        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
-        Returns the result dict on success, or None if all retries exhausted.
-        """
-        for attempt in range(retries):
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "confirm", context)
-            try:
-                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                if result.get("event") != "confirm_failed":
-                    return result
-            except asyncio.TimeoutError:
-                pass
-            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
-        return None  # exhausted retries
-
-    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
-        """Send a command to a service's command stream — fully generic.
-
-        Stream name derived by convention: ``{service}-commands``.
-        Domain-specific payload fields injected via ``step.payload_builder``.
-        """
-        service = step.service
-        db = self.service_dbs[service]
-        stream = f"{service}-commands"
-        cmd = {"saga_id": saga_id, "action": action}
-        if step.payload_builder:
-            cmd.update(step.payload_builder(saga_id, action, context))
-        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-
-
-class SagaExecutor:
+class SagaExecutor(_BaseExecutor):
     """Saga + TCC protocol executor.
 
     Parallel try: send try_reserve to all services simultaneously, collect votes.
@@ -261,16 +270,6 @@ class SagaExecutor:
 
     WAL states: TRYING → CONFIRMING/COMPENSATING → COMPLETED/FAILED
     """
-
-    def __init__(self, service_dbs: dict[str, aioredis.Redis],
-                 outbox_reader: OutboxReader, wal: WALEngine,
-                 circuit_breakers: dict[str, CircuitBreaker] | None = None,
-                 metrics=None):
-        self.service_dbs = service_dbs
-        self.outbox_reader = outbox_reader
-        self.wal = wal
-        self.circuit_breakers = circuit_breakers or {}
-        self.metrics = metrics
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
@@ -369,36 +368,3 @@ class SagaExecutor:
         await _waitaof(list(self.service_dbs.values()))
         await self.wal.log(saga_id, "COMPLETED")
         return {"status": "success"}
-
-    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
-                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
-        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
-
-        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
-        Returns the result dict on success, or None if all retries exhausted.
-        """
-        for attempt in range(retries):
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "confirm", context)
-            try:
-                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                if result.get("event") != "confirm_failed":
-                    return result
-            except asyncio.TimeoutError:
-                pass
-            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
-        return None  # exhausted retries
-
-    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
-        """Send a command to a service's command stream — fully generic.
-
-        Stream name derived by convention: ``{service}-commands``.
-        Domain-specific payload fields injected via ``step.payload_builder``.
-        """
-        service = step.service
-        db = self.service_dbs[service]
-        stream = f"{service}-commands"
-        cmd = {"saga_id": saga_id, "action": action}
-        if step.payload_builder:
-            cmd.update(step.payload_builder(saga_id, action, context))
-        await db.xadd(stream, cmd, maxlen=10000, approximate=True)

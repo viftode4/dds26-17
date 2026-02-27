@@ -1,11 +1,12 @@
 import asyncio
-import logging
 import os
+
+import structlog
 
 import redis.asyncio as aioredis
 from redis.asyncio.sentinel import Sentinel
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 def get_redis_config(prefix: str = "") -> dict:
@@ -119,14 +120,13 @@ async def wait_for_redis(db: aioredis.Redis, name: str = "Redis",
     for attempt in range(1, retries + 1):
         try:
             await db.ping()
-            logger.info(f"{name} connection ready (attempt {attempt})")
+            logger.info("Redis ready", name=name, attempt=attempt)
             return
         except Exception as e:
             if attempt == retries:
                 raise RuntimeError(
                     f"{name} not available after {retries} attempts: {e}"
                 ) from e
-            logger.warning(
-                f"{name} not ready (attempt {attempt}/{retries}): {e}"
-            )
+            logger.warning("Redis not ready", name=name, attempt=attempt,
+                           retries=retries, error=str(e))
             await asyncio.sleep(delay)
