@@ -303,14 +303,14 @@ async def add_credit(user_id: str, amount: int):
     amount = int(amount)
     key = f"user:{user_id}"
     try:
-        new_credit = await db.fcall("payment_add_direct", 1, key, amount)
+        await db.fcall("payment_add_direct", 1, key, amount)
     except aioredis.ResponseError as e:
         if "USER_NOT_FOUND" in str(e):
             abort(400, f"User: {user_id} not found!")
         abort(400, DB_ERROR_STR)
     except aioredis.RedisError:
         abort(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {new_credit}", status=200)
+    return jsonify({"done": True})
 
 
 @app.post('/pay/<user_id>/<amount>')

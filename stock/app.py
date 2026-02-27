@@ -190,12 +190,21 @@ async def handle_command(fields: dict):
 
     if action == "try_reserve":
         items_raw = fields.get("items", "")
+        if not items_raw:
+            log.warning("try_reserve with no items", saga_id=saga_id)
+            await db.xadd(STREAM_OUTBOX, {
+                "saga_id": saga_id, "event": "failed", "reason": "no_items",
+            }, maxlen=10000, approximate=True)
+            return
         items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
         ttl = int(fields.get("ttl", RESERVATION_TTL))
         await _try_reserve(saga_id, items, ttl)
     elif action == "confirm":
         items_raw = fields.get("items", "")
-        items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
+        if items_raw:
+            items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
+        else:
+            items = []
         await _confirm(saga_id, items)
     elif action == "cancel":
         items_raw = fields.get("items", "")
@@ -220,6 +229,12 @@ async def _try_reserve(saga_id: str, items: list[tuple[str, int]], ttl: int = RE
 
 
 async def _confirm(saga_id: str, items: list[tuple[str, int]]):
+    if not items:
+        # Nothing to confirm — publish confirmed event to unblock any waiters
+        await db.xadd(STREAM_OUTBOX, {
+            "saga_id": saga_id, "event": "confirmed", "reason": "no_items",
+        }, maxlen=10000, approximate=True)
+        return
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]

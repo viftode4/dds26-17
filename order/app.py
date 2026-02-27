@@ -351,6 +351,8 @@ async def send_get_request(url: str):
 @app.post('/addItem/<order_id>/<item_id>/<quantity>')
 async def add_item(order_id: str, item_id: str, quantity: int):
     quantity = int(quantity)
+    if quantity <= 0:
+        abort(400, "Quantity must be positive")
     item_reply = await send_get_request(f"/stock/find/{item_id}")
     if item_reply.status_code != 200:
         abort(400, f"Item: {item_id} does not exist!")
