@@ -24,30 +24,33 @@ TX_MODE = os.environ.get('TX_MODE', 'saga')
 
 app = Quart("order-service")
 
-# --- Redis connections ---
-# Own database
-db: aioredis.Redis = aioredis.Redis(
+# --- Redis connections with pools ---
+_order_pool = aioredis.ConnectionPool(
     host=os.environ['REDIS_HOST'],
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
+    max_connections=50,
 )
+db: aioredis.Redis = aioredis.Redis(connection_pool=_order_pool)
 
-# Stock service Redis (for commands + responses — eliminates shared event-bus)
-stock_db: aioredis.Redis = aioredis.Redis(
+_stock_pool = aioredis.ConnectionPool(
     host=os.environ['STOCK_REDIS_HOST'],
     port=int(os.environ.get('STOCK_REDIS_PORT', 6379)),
     password=os.environ.get('STOCK_REDIS_PASSWORD', 'redis'),
     db=0,
+    max_connections=50,
 )
+stock_db: aioredis.Redis = aioredis.Redis(connection_pool=_stock_pool)
 
-# Payment service Redis (for commands + responses)
-payment_db: aioredis.Redis = aioredis.Redis(
+_payment_pool = aioredis.ConnectionPool(
     host=os.environ['PAYMENT_REDIS_HOST'],
     port=int(os.environ.get('PAYMENT_REDIS_PORT', 6379)),
     password=os.environ.get('PAYMENT_REDIS_PASSWORD', 'redis'),
     db=0,
+    max_connections=50,
 )
+payment_db: aioredis.Redis = aioredis.Redis(connection_pool=_payment_pool)
 
 # Async HTTP client (created at startup)
 http_client: httpx.AsyncClient = None
@@ -117,10 +120,13 @@ async def create_order(user_id: str):
 
 @app.post('/batch_init/<n>/<n_items>/<n_users>/<item_price>')
 async def batch_init_users(n, n_items, n_users, item_price):
-    n = int(n)
-    n_items = int(n_items)
-    n_users = int(n_users)
-    item_price = int(item_price)
+    try:
+        n = int(n)
+        n_items = int(n_items)
+        n_users = int(n_users)
+        item_price = int(item_price)
+    except ValueError:
+        return Response("Invalid arguments", status=400)
 
     def generate_entry() -> OrderValue:
         user_id = random.randint(0, n_users - 1)
@@ -131,12 +137,15 @@ async def batch_init_users(n, n_items, n_users, item_price):
                           user_id=f"{user_id}",
                           total_cost=2*item_price)
 
-    kv_pairs: dict[str, bytes] = {f"{i}": msgpack.encode(generate_entry())
-                                  for i in range(n)}
-    try:
-        await db.mset(kv_pairs)
-    except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
+    for burst in range(0, n, 10000):
+        batch_size = min(10000, n - burst)
+        kv_pairs: dict[str, bytes] = {f"{burst + i}": msgpack.encode(generate_entry())
+                                      for i in range(batch_size)}
+        try:
+            await db.mset(kv_pairs)
+        except aioredis.RedisError:
+            return Response(DB_ERROR_STR, status=400)
+            
     return jsonify({"msg": "Batch init for orders successful"})
 
 
@@ -154,22 +163,38 @@ async def find_order(order_id: str):
 
 @app.post('/addItem/<order_id>/<item_id>/<quantity>')
 async def add_item(order_id: str, item_id: str, quantity):
-    order_entry: OrderValue = await get_order_from_db(order_id)
     try:
-        item_reply = await http_client.get(f"{GATEWAY_URL}/stock/find/{item_id}")
-    except httpx.RequestError:
-        abort(400, REQ_ERROR_STR)
-    if item_reply.status_code != 200:
-        abort(400, f"Item: {item_id} does not exist!")
-    item_json = item_reply.json()
-    order_entry.items.append((item_id, int(quantity)))
-    order_entry.total_cost += int(quantity) * item_json["price"]
-    try:
-        await db.set(order_id, msgpack.encode(order_entry))
-    except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}",
-                    status=200)
+        quantity = int(quantity)
+    except ValueError:
+        return Response("Invalid quantity", status=400)
+        
+    price_bytes = await stock_db.hget(item_id, 'price')
+    if not price_bytes:
+        return Response(f"Item: {item_id} does not exist!", status=400)
+    price = int(price_bytes)
+
+    async with db.pipeline(transaction=True) as pipe:
+        while True:
+            try:
+                await pipe.watch(order_id)
+                entry = await pipe.get(order_id)
+                if not entry:
+                    return Response(f"Order: {order_id} not found!", status=400)
+                
+                order_entry = msgpack.decode(entry, type=OrderValue)
+                order_entry.items.append((item_id, quantity))
+                order_entry.total_cost += quantity * price
+                
+                pipe.multi()
+                pipe.set(order_id, msgpack.encode(order_entry))
+                await pipe.execute()
+                break
+            except aioredis.WatchError:
+                continue
+            except aioredis.RedisError:
+                return Response(DB_ERROR_STR, status=400)
+                
+    return Response(f"Item: {item_id} added to: {order_id} price updated to: {order_entry.total_cost}", status=200)
 
 
 @app.post('/checkout/<order_id>')
@@ -214,20 +239,35 @@ async def checkout(order_id: str):
 #   LIFECYCLE
 # ==========================================
 
+_reconciliation_task = None
+
+
 @app.before_serving
 async def startup():
-    global http_client
+    global http_client, _reconciliation_task
     http_client = httpx.AsyncClient(timeout=30.0)
     try:
         await recovery.run_recovery(db, stock_db, payment_db, TX_MODE)
     except Exception as e:
         app.logger.error(f"Recovery failed: {e}")
+    # Start periodic reconciliation worker
+    import reconciliation
+    _reconciliation_task = asyncio.create_task(
+        reconciliation.reconciliation_loop(db, stock_db, payment_db, TX_MODE)
+    )
 
 
 @app.after_serving
 async def shutdown():
+    if _reconciliation_task:
+        _reconciliation_task.cancel()
+        try:
+            await _reconciliation_task
+        except asyncio.CancelledError:
+            pass
     if http_client:
         await http_client.aclose()
     await db.aclose()
     await stock_db.aclose()
     await payment_db.aclose()
+

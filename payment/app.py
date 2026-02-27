@@ -13,13 +13,15 @@ DB_ERROR_STR = "DB error"
 
 app = Quart("payment-service")
 
-# --- Redis connection (own database) ---
-db: aioredis.Redis = aioredis.Redis(
+# --- Redis connection with pool (own database) ---
+_pool = aioredis.ConnectionPool(
     host=os.environ['REDIS_HOST'],
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
+    max_connections=50,
 )
+db: aioredis.Redis = aioredis.Redis(connection_pool=_pool)
 
 # Lua script handle (set during startup)
 _pay_script = None
@@ -30,6 +32,20 @@ if not avail then return -1 end
 local amount = tonumber(ARGV[1])
 if avail < amount then return 0 end
 redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
+redis.call('HINCRBY', KEYS[1], 'held_credit', amount)
+return 1
+"""
+
+CONFIRM_LUA = """
+local amount = tonumber(ARGV[1])
+redis.call('HINCRBY', KEYS[1], 'held_credit', -amount)
+return 1
+"""
+
+COMPENSATE_LUA = """
+local amount = tonumber(ARGV[1])
+redis.call('HINCRBY', KEYS[1], 'held_credit', -amount)
+redis.call('HINCRBY', KEYS[1], 'available_credit', amount)
 return 1
 """
 
@@ -55,15 +71,21 @@ async def create_user():
 
 @app.post('/batch_init/<n>/<starting_money>')
 async def batch_init_users(n, starting_money):
-    n = int(n)
-    starting_money = int(starting_money)
-    pipe = db.pipeline()
-    for i in range(n):
-        pipe.hset(str(i), mapping={'available_credit': starting_money, 'held_credit': 0})
     try:
-        await pipe.execute()
-    except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
+        n = int(n)
+        starting_money = int(starting_money)
+    except ValueError:
+        return Response("Invalid arguments", status=400)
+        
+    for burst in range(0, n, 10000):
+        pipe = db.pipeline()
+        for i in range(burst, min(n, burst + 10000)):
+            pipe.hset(str(i), mapping={'available_credit': starting_money, 'held_credit': 0})
+        try:
+            await pipe.execute()
+        except aioredis.RedisError:
+            return Response(DB_ERROR_STR, status=400)
+            
     return jsonify({"msg": "Batch init for users successful"})
 
 
@@ -127,7 +149,7 @@ async def handle_saga_deduct(order_id, user_id, amount):
     result_code = await _pay_script(keys=[user_id], args=[amount])
     success = result_code == 1
     result = {"status": "ok" if success else "fail", "order_id": order_id, "user_id": user_id}
-    await db.set(idempotency_key, json.dumps(result), ex=300)
+    await db.set(idempotency_key, json.dumps(result))
     return result
 
 
@@ -142,16 +164,31 @@ async def handle_saga_compensate(order_id, user_id, amount):
     if deduct_result is not None:
         deduct_data = json.loads(deduct_result)
         if deduct_data.get("status") == "ok":
-            await db.hincrby(user_id, 'available_credit', amount)
+            await _compensate_script(keys=[user_id], args=[amount])
+            await db.delete(deduct_key)
     result = {"status": "ok", "order_id": order_id, "user_id": user_id}
-    await db.set(idempotency_key, json.dumps(result), ex=300)
+    await db.set(idempotency_key, json.dumps(result))
+    return result
+
+async def handle_saga_confirm(order_id, user_id, amount):
+    """Confirm credit consumption permanently (SAGA confirm)."""
+    idempotency_key = f"op:confirm:{order_id}"
+    cached = await db.get(idempotency_key)
+    if cached is not None:
+        return json.loads(cached)
+    deduct_key = f"op:deduct:{order_id}"
+    if await db.exists(deduct_key):
+        await _confirm_script(keys=[user_id], args=[amount])
+        await db.delete(deduct_key)
+    result = {"status": "ok", "order_id": order_id, "user_id": user_id}
+    await db.set(idempotency_key, json.dumps(result))
     return result
 
 
 async def handle_2pc_prepare(order_id, user_id, amount):
     """2PC prepare: lock user funds and tentatively deduct."""
     lock_key = f"2pc:lock:{order_id}"
-    acquired = await db.set(lock_key, json.dumps({"user_id": user_id, "amount": amount}), nx=True, ex=30)
+    acquired = await db.set(lock_key, json.dumps({"user_id": user_id, "amount": amount}), nx=True)
     if not acquired:
         existing = await db.get(lock_key)
         if existing is not None:
@@ -165,8 +202,13 @@ async def handle_2pc_prepare(order_id, user_id, amount):
 
 
 async def handle_2pc_commit(order_id):
-    """2PC commit: release lock (credit already deducted)."""
-    await db.delete(f"2pc:lock:{order_id}")
+    """2PC commit: release lock and confirm deduction."""
+    lock_key = f"2pc:lock:{order_id}"
+    lock_data = await db.get(lock_key)
+    if lock_data is not None:
+        info = json.loads(lock_data)
+        await _confirm_script(keys=[info["user_id"]], args=[info["amount"]])
+        await db.delete(lock_key)
     return {"status": "committed", "order_id": order_id}
 
 
@@ -176,14 +218,14 @@ async def handle_2pc_abort(order_id):
     lock_data = await db.get(lock_key)
     if lock_data is not None:
         info = json.loads(lock_data)
-        await db.hincrby(info["user_id"], 'available_credit', info["amount"])
+        await _compensate_script(keys=[info["user_id"]], args=[info["amount"]])
         await db.delete(lock_key)
     return {"status": "aborted", "order_id": order_id}
 
 
 async def handle_clear_keys(order_id):
     """Clear idempotency keys so an order can be retried."""
-    for key in [f"op:deduct:{order_id}", f"op:compensate:{order_id}"]:
+    for key in [f"op:deduct:{order_id}", f"op:compensate:{order_id}", f"op:confirm:{order_id}"]:
         await db.delete(key)
     return {"status": "ok", "order_id": order_id}
 
@@ -203,6 +245,8 @@ async def process_message(msg_id, data):
         result = await handle_saga_deduct(order_id, user_id, amount)
     elif cmd == 'compensate':
         result = await handle_saga_compensate(order_id, user_id, amount)
+    elif cmd == 'confirm':
+        result = await handle_saga_confirm(order_id, user_id, amount)
     elif cmd == 'prepare':
         result = await handle_2pc_prepare(order_id, user_id, amount)
     elif cmd == 'commit':
@@ -290,19 +334,12 @@ _consumer_task = None
 
 @app.before_serving
 async def startup():
-    global _pay_script, _consumer_task
+    global _pay_script, _confirm_script, _compensate_script, _consumer_task
     _pay_script = db.register_script(PAY_LUA)
+    _confirm_script = db.register_script(CONFIRM_LUA)
+    _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())
-    # Cleanup stale 2PC locks
-    cursor = 0
-    while True:
-        cursor, keys = await db.scan(cursor, match="2pc:lock:*", count=100)
-        for key in keys:
-            if await db.ttl(key) == -1:
-                app.logger.warning(f"Removing stale lock: {key}")
-                await db.delete(key)
-        if cursor == 0:
-            break
+    # Cleanup stale 2PC locks: REMOVED since locks shouldn't expire if they hold reversed credit.
 
 
 @app.after_serving

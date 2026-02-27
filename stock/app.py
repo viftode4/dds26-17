@@ -13,13 +13,15 @@ DB_ERROR_STR = "DB error"
 
 app = Quart("stock-service")
 
-# --- Redis connection (own database) ---
-db: aioredis.Redis = aioredis.Redis(
+# --- Redis connection with pool (own database) ---
+_pool = aioredis.ConnectionPool(
     host=os.environ['REDIS_HOST'],
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
+    max_connections=50,
 )
+db: aioredis.Redis = aioredis.Redis(connection_pool=_pool)
 
 # Lua script handle (set during startup)
 _subtract_script = None
@@ -30,6 +32,20 @@ if not avail then return -1 end
 local amount = tonumber(ARGV[1])
 if avail < amount then return 0 end
 redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
+redis.call('HINCRBY', KEYS[1], 'reserved_stock', amount)
+return 1
+"""
+
+CONFIRM_LUA = """
+local amount = tonumber(ARGV[1])
+redis.call('HINCRBY', KEYS[1], 'reserved_stock', -amount)
+return 1
+"""
+
+COMPENSATE_LUA = """
+local amount = tonumber(ARGV[1])
+redis.call('HINCRBY', KEYS[1], 'reserved_stock', -amount)
+redis.call('HINCRBY', KEYS[1], 'available_stock', amount)
 return 1
 """
 
@@ -60,20 +76,26 @@ async def create_item(price):
 
 @app.post('/batch_init/<n>/<starting_stock>/<item_price>')
 async def batch_init_users(n, starting_stock, item_price):
-    n = int(n)
-    starting_stock = int(starting_stock)
-    item_price = int(item_price)
-    pipe = db.pipeline()
-    for i in range(n):
-        pipe.hset(str(i), mapping={
-            'available_stock': starting_stock,
-            'reserved_stock': 0,
-            'price': item_price,
-        })
     try:
-        await pipe.execute()
-    except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
+        n = int(n)
+        starting_stock = int(starting_stock)
+        item_price = int(item_price)
+    except ValueError:
+        return Response("Invalid arguments", status=400)
+        
+    for burst in range(0, n, 10000):
+        pipe = db.pipeline()
+        for i in range(burst, min(n, burst + 10000)):
+            pipe.hset(str(i), mapping={
+                'available_stock': starting_stock,
+                'reserved_stock': 0,
+                'price': item_price,
+            })
+        try:
+            await pipe.execute()
+        except aioredis.RedisError:
+            return Response(DB_ERROR_STR, status=400)
+            
     return jsonify({"msg": "Batch init for stock successful"})
 
 
@@ -137,7 +159,7 @@ async def handle_saga_reserve(order_id, item_id, quantity):
     result_code = await _subtract_script(keys=[item_id], args=[quantity])
     success = result_code == 1
     result = {"status": "ok" if success else "fail", "order_id": order_id, "item_id": item_id}
-    await db.set(idempotency_key, json.dumps(result), ex=300)
+    await db.set(idempotency_key, json.dumps(result)) # No TTL, wait for confirm/clear_keys
     return result
 
 
@@ -152,16 +174,31 @@ async def handle_saga_compensate(order_id, item_id, quantity):
     if reserve_result is not None:
         reserve_data = json.loads(reserve_result)
         if reserve_data.get("status") == "ok":
-            await db.hincrby(item_id, 'available_stock', quantity)
+            await _compensate_script(keys=[item_id], args=[quantity])
+            await db.delete(reserve_key)
     result = {"status": "ok", "order_id": order_id, "item_id": item_id}
-    await db.set(idempotency_key, json.dumps(result), ex=300)
+    await db.set(idempotency_key, json.dumps(result))
+    return result
+
+async def handle_saga_confirm(order_id, item_id, quantity):
+    """Confirm stock consumption permanently (SAGA confirm)."""
+    idempotency_key = f"op:confirm:{order_id}:{item_id}"
+    cached = await db.get(idempotency_key)
+    if cached is not None:
+        return json.loads(cached)
+    reserve_key = f"op:reserve:{order_id}:{item_id}"
+    if await db.exists(reserve_key):
+        await _confirm_script(keys=[item_id], args=[quantity])
+        await db.delete(reserve_key)
+    result = {"status": "ok", "order_id": order_id, "item_id": item_id}
+    await db.set(idempotency_key, json.dumps(result))
     return result
 
 
 async def handle_2pc_prepare(order_id, item_id, quantity):
-    """2PC prepare: lock item and tentatively subtract stock."""
+    """2PC prepare: tentatively reserve stock."""
     lock_key = f"2pc:lock:{order_id}:{item_id}"
-    acquired = await db.set(lock_key, quantity, nx=True, ex=30)
+    acquired = await db.set(lock_key, quantity, nx=True)
     if not acquired:
         existing = await db.get(lock_key)
         if existing is not None:
@@ -174,9 +211,12 @@ async def handle_2pc_prepare(order_id, item_id, quantity):
     return {"status": "prepared", "order_id": order_id, "item_id": item_id}
 
 
-async def handle_2pc_commit(order_id, item_id):
-    """2PC commit: release lock (stock already deducted)."""
-    await db.delete(f"2pc:lock:{order_id}:{item_id}")
+async def handle_2pc_commit(order_id, item_id, quantity):
+    """2PC commit: release lock and confirm deduction."""
+    lock_key = f"2pc:lock:{order_id}:{item_id}"
+    if await db.exists(lock_key):
+        await _confirm_script(keys=[item_id], args=[quantity])
+        await db.delete(lock_key)
     return {"status": "committed", "order_id": order_id, "item_id": item_id}
 
 
@@ -184,14 +224,14 @@ async def handle_2pc_abort(order_id, item_id, quantity):
     """2PC abort: restore stock and release lock."""
     lock_key = f"2pc:lock:{order_id}:{item_id}"
     if await db.exists(lock_key):
-        await db.hincrby(item_id, 'available_stock', quantity)
+        await _compensate_script(keys=[item_id], args=[quantity])
         await db.delete(lock_key)
     return {"status": "aborted", "order_id": order_id, "item_id": item_id}
 
 
 async def handle_clear_keys(order_id, item_id):
     """Clear idempotency keys so an order can be retried."""
-    for key in [f"op:reserve:{order_id}:{item_id}", f"op:compensate:{order_id}:{item_id}"]:
+    for key in [f"op:reserve:{order_id}:{item_id}", f"op:compensate:{order_id}:{item_id}", f"op:confirm:{order_id}:{item_id}"]:
         await db.delete(key)
     return {"status": "ok", "order_id": order_id}
 
@@ -203,8 +243,9 @@ async def handle_clear_keys(order_id, item_id):
 HANDLERS = {
     'reserve': lambda d: handle_saga_reserve(d['order_id'], d['item_id'], d['quantity']),
     'compensate': lambda d: handle_saga_compensate(d['order_id'], d['item_id'], d['quantity']),
+    'confirm': lambda d: handle_saga_confirm(d['order_id'], d['item_id'], d['quantity']),
     'prepare': lambda d: handle_2pc_prepare(d['order_id'], d['item_id'], d['quantity']),
-    'commit': lambda d: handle_2pc_commit(d['order_id'], d['item_id']),
+    'commit': lambda d: handle_2pc_commit(d['order_id'], d['item_id'], d['quantity']),
     'abort': lambda d: handle_2pc_abort(d['order_id'], d['item_id'], d['quantity']),
     'clear_keys': lambda d: handle_clear_keys(d['order_id'], d['item_id']),
 }
@@ -302,19 +343,12 @@ _consumer_task = None
 
 @app.before_serving
 async def startup():
-    global _subtract_script, _consumer_task
+    global _subtract_script, _confirm_script, _compensate_script, _consumer_task
     _subtract_script = db.register_script(SUBTRACT_LUA)
+    _confirm_script = db.register_script(CONFIRM_LUA)
+    _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())
-    # Cleanup stale 2PC locks
-    cursor = 0
-    while True:
-        cursor, keys = await db.scan(cursor, match="2pc:lock:*", count=100)
-        for key in keys:
-            if await db.ttl(key) == -1:
-                app.logger.warning(f"Removing stale lock: {key}")
-                await db.delete(key)
-        if cursor == 0:
-            break
+    # Cleanup stale 2PC locks: REMOVED since locks shouldn't expire if they hold reserved stock.
 
 
 @app.after_serving

@@ -38,6 +38,7 @@ async def checkout(order_id, order_entry, items_quantities, db, stock_db, paymen
         if result is None:
             all_prepared = False
             failure_reason = "Timeout waiting for stock prepare"
+            prepared_stock_items.append((item_id, quantity)) # Add to rollback list even if timed out
             break
         response = json.loads(result[1])
         if response.get("status") != "prepared":
@@ -56,6 +57,7 @@ async def checkout(order_id, order_entry, items_quantities, db, stock_db, paymen
         result = await payment_db.blpop(f"response:{order_id}:payment", timeout=BLPOP_TIMEOUT)
         if result is None:
             all_prepared = False
+            payment_prepared = True # Add to rollback list even if timed out
             failure_reason = "Timeout waiting for payment prepare"
         else:
             response = json.loads(result[1])

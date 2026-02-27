@@ -5,6 +5,7 @@ Every state transition is logged to the WAL stream BEFORE the action
 is taken. This ensures crash recovery can deterministically resume
 or compensate in-flight sagas.
 """
+import asyncio
 import json
 import logging
 
@@ -13,7 +14,6 @@ import wal
 logger = logging.getLogger("order-service")
 
 BLPOP_TIMEOUT = 30
-COMPENSATION_RETRIES = 3
 COMPENSATION_TIMEOUT = 10
 
 
@@ -118,6 +118,21 @@ async def checkout(order_id, order_entry, items_quantities, db, stock_db, paymen
 
     # Step 4: Success — confirming
     await wal.log_step(db, order_id, "confirming")
+    
+    # Send confirm to stock and payment participants to permanently commit reservations
+    for item_id, quantity in reserved_items:
+        await stock_db.xadd("stock-commands", {
+            "cmd": "confirm", "order_id": order_id,
+            "item_id": item_id, "quantity": str(quantity),
+        })
+        await stock_db.blpop(f"response:{order_id}:stock", timeout=BLPOP_TIMEOUT)
+        
+    await payment_db.xadd("payment-commands", {
+        "cmd": "confirm", "order_id": order_id,
+        "user_id": order_entry.user_id, "amount": str(order_entry.total_cost),
+    })
+    await payment_db.blpop(f"response:{order_id}:payment", timeout=BLPOP_TIMEOUT)
+
     order_entry.paid = True
     order_entry.checkout_status = "COMMITTED"
     order_entry.checkout_step = "DONE"
@@ -127,9 +142,11 @@ async def checkout(order_id, order_entry, items_quantities, db, stock_db, paymen
 
 
 async def _compensate_stock(order_id, reserved_items, stock_db):
-    """Send compensating transactions for reserved stock with retry."""
+    """Send compensating transactions for reserved stock with infinite retry/backoff."""
     for item_id, quantity in reserved_items:
-        for attempt in range(COMPENSATION_RETRIES):
+        attempt = 0
+        while True:
+            attempt += 1
             await stock_db.xadd("stock-commands", {
                 "cmd": "compensate", "order_id": order_id,
                 "item_id": item_id, "quantity": str(quantity),
@@ -141,14 +158,15 @@ async def _compensate_stock(order_id, reserved_items, stock_db):
                     break
                 logger.warning(f"Stock compensate failed {order_id}/{item_id}: {response}")
             else:
-                logger.warning(f"Stock compensate timeout {order_id}/{item_id} (attempt {attempt+1})")
-        else:
-            logger.error(f"Stock compensate EXHAUSTED retries for {order_id}/{item_id}")
+                logger.warning(f"Stock compensate timeout {order_id}/{item_id} (attempt {attempt})")
+            await asyncio.sleep(min(2 ** attempt, 60))
 
 
 async def _compensate_payment(order_id, user_id, amount, payment_db):
-    """Send compensating transaction for payment with retry."""
-    for attempt in range(COMPENSATION_RETRIES):
+    """Send compensating transaction for payment with infinite retry/backoff."""
+    attempt = 0
+    while True:
+        attempt += 1
         await payment_db.xadd("payment-commands", {
             "cmd": "compensate", "order_id": order_id,
             "user_id": user_id, "amount": str(amount),
@@ -160,8 +178,8 @@ async def _compensate_payment(order_id, user_id, amount, payment_db):
                 return
             logger.warning(f"Payment compensate failed {order_id}: {response}")
         else:
-            logger.warning(f"Payment compensate timeout {order_id} (attempt {attempt+1})")
-    logger.error(f"Payment compensate EXHAUSTED retries for {order_id}")
+            logger.warning(f"Payment compensate timeout {order_id} (attempt {attempt})")
+        await asyncio.sleep(min(2 ** attempt, 60))
 
 
 async def _clear_idempotency_keys(order_id, items_quantities, order_entry, stock_db, payment_db):

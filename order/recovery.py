@@ -42,9 +42,11 @@ async def run_recovery(db, stock_db, payment_db, tx_mode: str):
 
     # Fallback: pending_orders set (covers 2PC and pre-WAL sagas)
     try:
-        pending_ids = await db.smembers("pending_orders")
-        for key in pending_ids:
-            key_str = key.decode() if isinstance(key, bytes) else key
+        cursor = 0
+        while True:
+            cursor, pending_ids = await db.sscan("pending_orders", cursor, count=100)
+            for key in pending_ids:
+                key_str = key.decode() if isinstance(key, bytes) else key
             try:
                 raw = await db.get(key_str)
                 if raw is None:
@@ -69,6 +71,9 @@ async def run_recovery(db, stock_db, payment_db, tx_mode: str):
                 await _recover_2pc(key_str, order, items_quantities, db, stock_db, payment_db)
             await db.srem("pending_orders", key_str)
             recovered += 1
+            
+        if cursor == 0:
+            break
     except Exception as e:
         logger.error(f"Pending-set recovery error: {e}")
 
