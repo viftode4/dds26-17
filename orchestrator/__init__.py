@@ -4,13 +4,13 @@
 # Package name for pip install: wdm-orchestrator
 #
 # Usage:
-#   from orchestrator import Orchestrator, TransactionDefinition, Step, checkout_tx
-#   orch = Orchestrator(order_db, service_dbs, [checkout_tx], protocol="auto")
+#   from orchestrator import Orchestrator, TransactionDefinition, Step
+#   orch = Orchestrator(order_db, service_dbs, [my_tx], protocol="auto")
 #   await orch.start()
-#   result = await orch.execute("checkout", context)
+#   result = await orch.execute("my_tx", context)
 
 from orchestrator.core import Orchestrator
-from orchestrator.definition import TransactionDefinition, Step, checkout_tx
+from orchestrator.definition import TransactionDefinition, Step
 from orchestrator.executor import TwoPCExecutor, SagaExecutor, OutboxReader, CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.recovery import RecoveryWorker
@@ -21,7 +21,6 @@ __all__ = [
     "Orchestrator",
     "TransactionDefinition",
     "Step",
-    "checkout_tx",
     "TwoPCExecutor",
     "SagaExecutor",
     "OutboxReader",

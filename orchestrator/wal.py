@@ -1,6 +1,6 @@
+import json
 import time
 
-from msgspec import msgpack
 import redis.asyncio as aioredis
 
 
@@ -25,7 +25,7 @@ class WALEngine:
             "timestamp": str(time.time()),
         }
         if data:
-            entry["data"] = msgpack.encode(data).decode("latin-1")
+            entry["data"] = json.dumps(data)
         await self.db.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
 
     async def get_incomplete_sagas(self) -> dict[str, dict]:
@@ -43,7 +43,7 @@ class WALEngine:
             data = None
             if "data" in fields and fields["data"]:
                 try:
-                    data = msgpack.decode(fields["data"].encode("latin-1"))
+                    data = json.loads(fields["data"])
                 except Exception:
                     data = {}
 

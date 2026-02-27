@@ -1,28 +1,16 @@
 import asyncio
 import time
 
-from msgspec import msgpack
 import redis.asyncio as aioredis
 
-from common.logging import get_logger
+import structlog
 from orchestrator.definition import TransactionDefinition, Step
 from orchestrator.wal import WALEngine
 
-logger = get_logger("orchestrator.executor")
+logger = structlog.get_logger("orchestrator.executor")
 
 STEP_TIMEOUT = 10.0
 CONFIRM_MAX_RETRIES = 3
-
-# Stream names per service
-COMMAND_STREAMS = {
-    "stock": "stock-commands",
-    "payment": "payment-commands",
-}
-
-OUTBOX_STREAMS = {
-    "stock": "stock-outbox",
-    "payment": "payment-outbox",
-}
 
 
 class CircuitBreaker:
@@ -250,18 +238,17 @@ class TwoPCExecutor:
         return None  # exhausted retries
 
     async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
+        """Send a command to a service's command stream — fully generic.
+
+        Stream name derived by convention: ``{service}-commands``.
+        Domain-specific payload fields injected via ``step.payload_builder``.
+        """
         service = step.service
         db = self.service_dbs[service]
-        stream = COMMAND_STREAMS[service]
+        stream = f"{service}-commands"
         cmd = {"saga_id": saga_id, "action": action}
-        if service == "stock":
-            items = context.get("items", [])
-            cmd["items"] = msgpack.encode(items).decode("latin-1")
-            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
-        elif service == "payment":
-            cmd["user_id"] = context.get("user_id", "")
-            cmd["amount"] = str(context.get("total_cost", 0))
-            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
+        if step.payload_builder:
+            cmd.update(step.payload_builder(saga_id, action, context))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)
 
 
@@ -403,16 +390,15 @@ class SagaExecutor:
         return None  # exhausted retries
 
     async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
+        """Send a command to a service's command stream — fully generic.
+
+        Stream name derived by convention: ``{service}-commands``.
+        Domain-specific payload fields injected via ``step.payload_builder``.
+        """
         service = step.service
         db = self.service_dbs[service]
-        stream = COMMAND_STREAMS[service]
+        stream = f"{service}-commands"
         cmd = {"saga_id": saga_id, "action": action}
-        if service == "stock":
-            items = context.get("items", [])
-            cmd["items"] = msgpack.encode(items).decode("latin-1")
-            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
-        elif service == "payment":
-            cmd["user_id"] = context.get("user_id", "")
-            cmd["amount"] = str(context.get("total_cost", 0))
-            cmd["ttl"] = str(context.get("_reservation_ttl", 60))
+        if step.payload_builder:
+            cmd.update(step.payload_builder(saga_id, action, context))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)

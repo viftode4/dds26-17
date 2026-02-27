@@ -1,17 +1,17 @@
 import asyncio
+import json
 import time
 import uuid
 
-from msgspec import msgpack
 import redis.asyncio as aioredis
 
-from common.logging import get_logger
+import structlog
 from orchestrator.definition import TransactionDefinition
-from orchestrator.executor import TwoPCExecutor, SagaExecutor, OutboxReader, CircuitBreaker, OUTBOX_STREAMS
+from orchestrator.executor import TwoPCExecutor, SagaExecutor, OutboxReader, CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.metrics import MetricsCollector
 
-logger = get_logger("orchestrator.core")
+logger = structlog.get_logger("orchestrator.core")
 
 import socket
 
@@ -60,8 +60,12 @@ class Orchestrator:
         self._outbox_tasks: list[asyncio.Task] = []
 
     async def start(self):
-        """Start background outbox reader tasks (runs on all instances)."""
-        for service, stream in OUTBOX_STREAMS.items():
+        """Start background outbox reader tasks (runs on all instances).
+
+        Stream names derived by convention: ``{service}-outbox``.
+        """
+        for service in self.service_dbs:
+            stream = f"{service}-outbox"
             db = self.service_dbs[service]
             # Create consumer group (idempotent). Use id="$" so historical events
             # with no matching waiters are not replayed on fresh startup.
@@ -153,7 +157,6 @@ class Orchestrator:
 
     async def _publish_result(self, saga_id: str, result: dict):
         """Publish saga result for cross-instance recovery retries (pub/sub fallback)."""
-        import json
         result_data = json.dumps(result)
         result_key = f"saga-result:{saga_id}"
         notify_channel = f"saga-notify:{saga_id}"

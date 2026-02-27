@@ -4,9 +4,9 @@ import socket
 
 import redis.asyncio as aioredis
 
-from common.logging import get_logger
+import structlog
 
-logger = get_logger("orchestrator.leader")
+logger = structlog.get_logger("orchestrator.leader")
 
 # Atomic Lua scripts — eliminate the GET+EXPIRE and GET+DEL race windows
 _RENEW_SCRIPT = """

@@ -15,10 +15,10 @@ from quart import Quart, jsonify, abort, Response
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
-from orchestrator.core import Orchestrator
-from orchestrator.definition import checkout_tx
-from orchestrator.leader import LeaderElection
-from orchestrator.recovery import RecoveryWorker
+from orchestrator import (
+    Orchestrator, TransactionDefinition, Step,
+    LeaderElection, RecoveryWorker,
+)
 
 
 DB_ERROR_STR = "DB error"
@@ -36,6 +36,101 @@ orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
 _leader_task: asyncio.Task | None = None
+
+
+# ---------------------------------------------------------------------------
+# Payload builders — domain-specific, kept OUT of the orchestrator package.
+# Signature: (saga_id: str, action: str, context: dict) -> dict
+# ---------------------------------------------------------------------------
+
+def stock_payload(saga_id: str, action: str, context: dict) -> dict:
+    """Build stream command fields for the stock service."""
+    items = context.get("items", [])
+    cmd: dict[str, str] = {}
+    if items:
+        cmd["items"] = msgpack.encode(items).decode("latin-1")
+    cmd["ttl"] = str(context.get("_reservation_ttl", 60))
+    return cmd
+
+
+def payment_payload(saga_id: str, action: str, context: dict) -> dict:
+    """Build stream command fields for the payment service."""
+    return {
+        "user_id": context.get("user_id", ""),
+        "amount": str(context.get("total_cost", 0)),
+        "ttl": str(context.get("_reservation_ttl", 60)),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Transaction definition — application-specific, uses payload builders above.
+# ---------------------------------------------------------------------------
+
+checkout_tx = TransactionDefinition(
+    name="checkout",
+    steps=[
+        Step(
+            name="reserve_stock",
+            service="stock",
+            action="try_reserve",
+            compensate="cancel",
+            confirm="confirm",
+            payload_builder=stock_payload,
+        ),
+        Step(
+            name="reserve_payment",
+            service="payment",
+            action="try_reserve",
+            compensate="cancel",
+            confirm="confirm",
+            payload_builder=payment_payload,
+        ),
+    ],
+)
+
+
+# ---------------------------------------------------------------------------
+# Reconciliation callback — domain-specific invariant checks.
+# ---------------------------------------------------------------------------
+
+async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
+    """Verify data invariants across stock and payment services."""
+    from common.logging import get_logger
+    _log = get_logger("reconciliation")
+
+    stock_db = service_dbs.get("stock")
+    if stock_db:
+        cursor = "0"
+        while True:
+            cursor, keys = await stock_db.scan(cursor=cursor, match="item:*", count=100)
+            for key in keys:
+                data = await stock_db.hgetall(key)
+                avail = int(data.get("available_stock", 0))
+                reserved = int(data.get("reserved_stock", 0))
+                if avail < 0 or reserved < 0:
+                    _log.critical(
+                        "INVARIANT VIOLATION: stock",
+                        key=key, available_stock=avail, reserved_stock=reserved,
+                    )
+            if cursor == "0" or cursor == 0:
+                break
+
+    payment_db = service_dbs.get("payment")
+    if payment_db:
+        cursor = "0"
+        while True:
+            cursor, keys = await payment_db.scan(cursor=cursor, match="user:*", count=100)
+            for key in keys:
+                data = await payment_db.hgetall(key)
+                avail = int(data.get("available_credit", 0))
+                held = int(data.get("held_credit", 0))
+                if avail < 0 or held < 0:
+                    _log.critical(
+                        "INVARIANT VIOLATION: payment",
+                        key=key, available_credit=avail, held_credit=held,
+                    )
+            if cursor == "0" or cursor == 0:
+                break
 
 
 # ---- JSON error handlers (replaces Quart's HTML error pages) ----
@@ -104,6 +199,8 @@ async def setup():
         wal=orchestrator.wal,
         service_dbs=service_dbs,
         outbox_reader=orchestrator.outbox_reader,
+        definitions=orchestrator.definitions,
+        reconcile_fn=reconcile_invariants,
     )
 
     # Leader governs background maintenance only: XAUTOCLAIM, reconciliation, orphan abort

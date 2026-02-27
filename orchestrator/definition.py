@@ -1,14 +1,24 @@
 from dataclasses import dataclass, field
+from typing import Callable
 
 
 @dataclass
 class Step:
-    """A single step in a distributed transaction."""
+    """A single step in a distributed transaction.
+
+    The optional ``payload_builder`` callback lets the *application* inject
+    domain-specific fields (encoded items, user IDs, amounts …) into stream
+    commands without the orchestrator knowing anything about the services.
+
+    Signature: ``(saga_id: str, action: str, context: dict) -> dict``
+    The returned dict is merged into the base command ``{saga_id, action}``.
+    """
     name: str
-    service: str           # "stock" or "payment"
+    service: str
     action: str            # "try_reserve" (saga) / "prepare" (2pc)
     compensate: str        # "cancel" (saga compensation)
     confirm: str           # "confirm" (saga/2pc commit)
+    payload_builder: Callable[[str, str, dict], dict] | None = None
 
     def build_command(self, saga_id: str, action_override: str | None = None,
                       **extra_fields) -> dict:
@@ -26,25 +36,3 @@ class TransactionDefinition:
     """Declarative definition of a distributed transaction."""
     name: str
     steps: list[Step] = field(default_factory=list)
-
-
-# Pre-defined checkout transaction
-checkout_tx = TransactionDefinition(
-    name="checkout",
-    steps=[
-        Step(
-            name="reserve_stock",
-            service="stock",
-            action="try_reserve",
-            compensate="cancel",
-            confirm="confirm",
-        ),
-        Step(
-            name="reserve_payment",
-            service="payment",
-            action="try_reserve",
-            compensate="cancel",
-            confirm="confirm",
-        ),
-    ],
-)
