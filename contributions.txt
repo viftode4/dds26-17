@@ -1,1 +1,2 @@
 Vlad: architecture, implementation (2PC + Saga orchestrator, Redis Streams, Lua atomics, Sentinel HA, leader election, WAL crash recovery, idempotency, circuit breakers, observability), documentation, benchmarking.
+[Teammate name]: [contributions here]
