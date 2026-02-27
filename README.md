@@ -50,7 +50,7 @@ To run multiple instances of the microservices (e.g., for load balancing), you c
 
 For example, to run 3 instances of the `order` service and 2 instances of the `stock` service:
 ```bash
-docker compose up -d --scale order-service=3 --scale stock-service=2 --scale payment-service=2
+docker compose up -d --scale order-service=4 --scale stock-service=3 --scale payment-service=3
 ```
 *Note: The Nginx API gateway will automatically load-balance requests across the multiple instances. If you scale services that are already running, you must restart the gateway so it registers the new container IPs:*
 ```bash

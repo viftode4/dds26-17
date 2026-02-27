@@ -114,12 +114,12 @@ async def _abort(order_id, order_entry, stock_items, payment_prepared, reason, d
         })
         await stock_db.blpop(f"response:{order_id}:stock", timeout=BLPOP_TIMEOUT)
 
-    if payment_prepared:
-        await payment_db.xadd("payment-commands", {
-            "cmd": "abort", "order_id": order_id,
-            "user_id": order_entry.user_id, "amount": str(order_entry.total_cost),
-        })
-        await payment_db.blpop(f"response:{order_id}:payment", timeout=BLPOP_TIMEOUT)
+    # always attempt to abort payment, since a timeout might mean it succeeded
+    await payment_db.xadd("payment-commands", {
+        "cmd": "abort", "order_id": order_id,
+        "user_id": order_entry.user_id, "amount": str(order_entry.total_cost),
+    })
+    await payment_db.blpop(f"response:{order_id}:payment", timeout=BLPOP_TIMEOUT)
 
     order_entry.checkout_status = "ABORTED"
     order_entry.checkout_step = "DONE"

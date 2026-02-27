@@ -198,16 +198,22 @@ async def handle_saga_confirm(order_id, user_id, amount):
 async def handle_2pc_prepare(order_id, user_id, amount):
     """2PC prepare: lock user funds and tentatively deduct."""
     lock_key = f"2pc:lock:{order_id}"
+    
+    # Needs to be idempotent. If lock already exists, we consider it a success for this order
+    existing = await db.get(lock_key)
+    if existing is not None:
+        return {"status": "prepared", "order_id": order_id}
+
+    # Atomically try to acquire the lock
     acquired = await db.set(lock_key, json.dumps({"user_id": user_id, "amount": amount}), nx=True)
     if not acquired:
-        existing = await db.get(lock_key)
-        if existing is not None:
-            return {"status": "prepared", "order_id": order_id}
-        return {"status": "fail", "order_id": order_id, "reason": "lock_conflict"}
+        return {"status": "prepared", "order_id": order_id}
+        
     result_code = await _pay_script(keys=[user_id], args=[amount])
     if result_code != 1:
         await db.delete(lock_key)
         return {"status": "fail", "order_id": order_id, "reason": "insufficient_credit"}
+        
     return {"status": "prepared", "order_id": order_id}
 
 
