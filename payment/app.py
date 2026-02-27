@@ -76,6 +76,7 @@ async def setup():
             raise
 
     _consumer_task = asyncio.create_task(consumer_loop())
+    asyncio.create_task(dlq_sweep_loop())
     log.info("Payment service started", consumer=CONSUMER_NAME)
 
 
@@ -115,20 +116,27 @@ async def sweep_dlq():
         log.error("DLQ sweep error", error=str(e))
 
 
+async def dlq_sweep_loop():
+    """Periodic DLQ sweep — runs independently so it never blocks the hot path."""
+    while True:
+        try:
+            await asyncio.sleep(10)
+            await sweep_dlq()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("DLQ sweep loop error", error=str(e))
+
+
 async def consumer_loop():
     """Read commands from payment-commands stream and dispatch to Lua functions."""
-    iteration = 0
     while True:
         try:
             messages = await db.xreadgroup(
                 CONSUMER_GROUP, CONSUMER_NAME,
                 {STREAM_COMMANDS: ">"},
-                count=50, block=2000,
+                count=10, block=100,
             )
-
-            iteration += 1
-            if iteration % 10 == 0:
-                await sweep_dlq()
 
             if not messages:
                 continue

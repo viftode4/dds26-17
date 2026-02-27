@@ -197,7 +197,7 @@ class Orchestrator:
                 messages = await db.xreadgroup(
                     OUTBOX_CONSUMER_GROUP, consumer_name,
                     {stream: ">"},
-                    count=50, block=2000,
+                    count=10, block=100,
                 )
                 if not messages:
                     continue
