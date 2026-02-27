@@ -128,8 +128,30 @@ async def dlq_sweep_loop():
             log.error("DLQ sweep loop error", error=str(e))
 
 
+MAX_INFLIGHT = 50  # concurrent FCALL tasks (bounded by connection pool)
+
+
+async def _process_and_ack(msg_id: str, fields: dict, sem: asyncio.Semaphore):
+    """Process one command and ACK — runs as a concurrent task."""
+    try:
+        await handle_command(fields)
+    except Exception as e:
+        log.error("Error processing message", msg_id=msg_id, error=str(e))
+    finally:
+        await db.xack(STREAM_COMMANDS, CONSUMER_GROUP, msg_id)
+        sem.release()
+
+
 async def consumer_loop():
-    """Read commands from payment-commands stream and dispatch to Lua functions."""
+    """Read commands from payment-commands stream and dispatch concurrently.
+
+    Each message is processed in its own asyncio task. A semaphore caps
+    in-flight tasks to avoid connection pool exhaustion. XACK is safe
+    out-of-order (PEL is a set). Lua scripts are idempotent for re-delivery.
+    """
+    sem = asyncio.Semaphore(MAX_INFLIGHT)
+    pending: set[asyncio.Task] = set()
+
     while True:
         try:
             messages = await db.xreadgroup(
@@ -143,13 +165,17 @@ async def consumer_loop():
 
             for _stream_name, entries in messages:
                 for msg_id, fields in entries:
-                    try:
-                        await handle_command(fields)
-                    except Exception as e:
-                        log.error("Error processing message", msg_id=msg_id, error=str(e))
-                    await db.xack(STREAM_COMMANDS, CONSUMER_GROUP, msg_id)
+                    await sem.acquire()
+                    task = asyncio.create_task(
+                        _process_and_ack(msg_id, fields, sem)
+                    )
+                    pending.add(task)
+                    task.add_done_callback(pending.discard)
 
         except asyncio.CancelledError:
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
             raise
         except Exception as e:
             log.error("Consumer loop error", error=str(e))

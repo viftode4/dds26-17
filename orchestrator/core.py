@@ -197,16 +197,20 @@ class Orchestrator:
                 messages = await db.xreadgroup(
                     OUTBOX_CONSUMER_GROUP, consumer_name,
                     {stream: ">"},
-                    count=10, block=100,
+                    count=50, block=100,
                 )
                 if not messages:
                     continue
+                ack_ids = []
                 for _stream_name, entries in messages:
                     for msg_id, fields in entries:
                         saga_id = fields.get("saga_id", "")
                         if saga_id:
                             self.outbox_reader.resolve(saga_id, service, fields)
-                        await db.xack(stream, OUTBOX_CONSUMER_GROUP, msg_id)
+                        ack_ids.append(msg_id)
+                # Batch ACK — single round-trip for the whole batch
+                if ack_ids:
+                    await db.xack(stream, OUTBOX_CONSUMER_GROUP, *ack_ids)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
