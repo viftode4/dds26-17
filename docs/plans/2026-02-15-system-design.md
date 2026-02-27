@@ -112,7 +112,7 @@ The leader now governs **maintenance only**: XAUTOCLAIM, reconciliation, orphan 
 
 | Layer | Choice | Rationale |
 |-------|--------|-----------|
-| Language | Python 3.12 | Async-native with asyncio |
+| Language | Python 3.11+ | Async-native with asyncio; union types (`X | None`), `match` statements |
 | Web framework | Quart + Hypercorn | Async Flask-compatible; ASGI |
 | Redis client | redis.asyncio + hiredis | Non-blocking, RESP3, Sentinel-aware |
 | Serialization | msgpack (stream payloads, application-level) + JSON (pub/sub, WAL, idempotency) | msgpack for wire efficiency on item lists; JSON where decode_responses=True is needed. Serialization lives in application payload_builders, not in the orchestrator |
@@ -557,7 +557,7 @@ The per-protocol latency histogram **proves** the adaptive switching delivers va
 | Outbox stream `count` | 50 | Outbox events are lightweight resolves — larger batches reduce round-trips |
 | Stream `block` | 100ms | Blocking wait for new messages (reduced from 2s — was the dominant source of p99 tail latency) |
 | `MAX_INFLIGHT` | 50 | Semaphore-bounded concurrent tasks per consumer (caps connection pool usage) |
-| Hypercorn `-w 2` | 2 workers | Per service container |
+| Hypercorn workers | 1 (order), 2 (stock/payment) | Order has heavier orchestrator state; stock/payment are stateless consumers |
 | Nginx `keepalive` | 32–64 | Upstream keepalive connections |
 | Nginx `worker_connections` | 4096 | Gateway concurrency |
 
