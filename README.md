@@ -275,10 +275,11 @@ Benchmarked with 200 concurrent users on Docker Desktop (20 CPU limit):
 
 | Metric | Value |
 |--------|-------|
-| Throughput | 172 req/s |
-| p50 latency | 46 ms |
-| p90 latency | 170 ms |
-| p99 latency | 420 ms |
+| Throughput | 163 req/s |
+| p50 latency | 33 ms |
+| p90 latency | 90 ms |
+| p99 latency | 160 ms |
+| Max latency | 240 ms |
 | Consistency | 0 inconsistencies |
 | Success rate | 99.99% |
 
