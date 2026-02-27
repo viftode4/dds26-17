@@ -1,4 +1,3 @@
-version: "3"
 services:
 
   gateway:
@@ -8,47 +7,328 @@ services:
     ports:
       - "8000:80"
     depends_on:
-      - order-service
-      - stock-service
-      - payment-service
+      order-service-1:
+        condition: service_healthy
+      order-service-2:
+        condition: service_healthy
+      stock-service:
+        condition: service_healthy
+      stock-service-2:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      payment-service-2:
+        condition: service_healthy
 
-  order-service:
+  order-service-1:
     build: ./order
     image: order:latest
     environment:
       - GATEWAY_URL=http://gateway:80
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+      - INSTANCE_ID=order-1
+    command: hypercorn -b 0.0.0.0:5000 -w 1 app:app
     env_file:
       - env/order_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
     depends_on:
-      - order-db
+      order-db:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
+  order-service-2:
+    build: ./order
+    image: order:latest
+    environment:
+      - GATEWAY_URL=http://gateway:80
+      - INSTANCE_ID=order-2
+    command: hypercorn -b 0.0.0.0:5000 -w 1 app:app
+    env_file:
+      - env/order_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
+    depends_on:
+      order-db:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  # ---- Redis Masters ----
   order-db:
     image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+
+  stock-db:
+    image: redis:7.2-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+
+  payment-db:
+    image: redis:7.2-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+
+  # ---- Redis Replicas ----
+  order-db-replica:
+    image: redis:7.2-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+        --replicaof order-db 6379
+        --masterauth redis
+    depends_on:
+      order-db:
+        condition: service_started
+
+  stock-db-replica:
+    image: redis:7.2-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+        --replicaof stock-db 6379
+        --masterauth redis
+    depends_on:
+      stock-db:
+        condition: service_started
+
+  payment-db-replica:
+    image: redis:7.2-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 512mb
+        --appendonly yes
+        --appendfsync everysec
+        --replicaof payment-db 6379
+        --masterauth redis
+    depends_on:
+      payment-db:
+        condition: service_started
+
+  # ---- Sentinel Nodes ----
+  # Entrypoint resolves hostnames to IPs at startup so Sentinel
+  # tracks masters by IP — failover works even when master DNS disappears.
+  sentinel-1:
+    image: redis:7.2-bookworm
+    command: sh /etc/redis/sentinel-entrypoint.sh
+    volumes:
+      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
+    depends_on:
+      order-db:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+
+  sentinel-2:
+    image: redis:7.2-bookworm
+    command: sh /etc/redis/sentinel-entrypoint.sh
+    volumes:
+      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
+    depends_on:
+      order-db:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+
+  sentinel-3:
+    image: redis:7.2-bookworm
+    command: sh /etc/redis/sentinel-entrypoint.sh
+    volumes:
+      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
+    depends_on:
+      order-db:
+        condition: service_started
+      order-db-replica:
+        condition: service_started
+      stock-db:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
 
   stock-service:
     build: ./stock
     image: stock:latest
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
     env_file:
       - env/stock_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
     depends_on:
-      - stock-db
+      stock-db:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
-  stock-db:
-    image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+  stock-service-2:
+    build: ./stock
+    image: stock:latest
+    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    env_file:
+      - env/stock_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
+    depends_on:
+      stock-db:
+        condition: service_started
+      stock-db-replica:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
   payment-service:
     build: ./payment
-    image: user:latest
-    command: gunicorn -b 0.0.0.0:5000 -w 2 --timeout 30 --log-level=info app:app
+    image: payment:latest
+    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
     env_file:
       - env/payment_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
     depends_on:
-      - payment-db
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
 
-  payment-db:
-    image: redis:7.2-bookworm
-    command: redis-server --requirepass redis --maxmemory 512mb
+  payment-service-2:
+    build: ./payment
+    image: payment:latest
+    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    env_file:
+      - env/payment_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
+    depends_on:
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
