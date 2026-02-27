@@ -10,6 +10,7 @@ from msgspec import msgpack
 from quart import Quart, jsonify, abort, Response
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
+from common.consumer import consumer_loop, dlq_sweep_loop
 from common.logging import setup_logging, get_logger
 
 
@@ -19,7 +20,6 @@ STREAM_OUTBOX = "stock-outbox"
 CONSUMER_GROUP = "stock-workers"
 CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
 RESERVATION_TTL = 60  # 1 minute
-MAX_RETRIES = 5
 DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
 app = Quart("stock-service")
@@ -76,8 +76,10 @@ async def setup():
         if "BUSYGROUP" not in str(e):
             raise
 
-    _consumer_task = asyncio.create_task(consumer_loop())
-    asyncio.create_task(dlq_sweep_loop())
+    _consumer_task = asyncio.create_task(
+        consumer_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, CONSUMER_NAME, handle_command)
+    )
+    asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
     log.info("Stock service started", consumer=CONSUMER_NAME)
 
 
@@ -93,94 +95,6 @@ async def teardown():
         await db_read.aclose()
     if db:
         await db.aclose()
-
-
-async def sweep_dlq():
-    """Move messages that exceeded MAX_RETRIES to the dead-letter queue."""
-    try:
-        pending = await db.xpending_range(
-            STREAM_COMMANDS, CONSUMER_GROUP, "-", "+", count=100,
-        )
-        for entry in pending:
-            if entry.get("times_delivered", 0) > MAX_RETRIES:
-                msg_id = entry["message_id"]
-                msgs = await db.xrange(STREAM_COMMANDS, msg_id, msg_id)
-                if msgs:
-                    _, fields = msgs[0]
-                    fields["original_stream"] = STREAM_COMMANDS
-                    fields["original_id"] = msg_id
-                    fields["reason"] = "max_retries_exceeded"
-                    await db.xadd(DLQ_STREAM, fields, maxlen=5000, approximate=True)
-                await db.xack(STREAM_COMMANDS, CONSUMER_GROUP, msg_id)
-                log.warning("Moved to DLQ", msg_id=msg_id)
-    except Exception as e:
-        log.error("DLQ sweep error", error=str(e))
-
-
-async def dlq_sweep_loop():
-    """Periodic DLQ sweep — runs independently so it never blocks the hot path."""
-    while True:
-        try:
-            await asyncio.sleep(10)
-            await sweep_dlq()
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            log.error("DLQ sweep loop error", error=str(e))
-
-
-MAX_INFLIGHT = 50  # concurrent FCALL tasks (bounded by connection pool)
-
-
-async def _process_and_ack(msg_id: str, fields: dict, sem: asyncio.Semaphore):
-    """Process one command and ACK — runs as a concurrent task."""
-    try:
-        await handle_command(fields)
-    except Exception as e:
-        log.error("Error processing message", msg_id=msg_id, error=str(e))
-    finally:
-        await db.xack(STREAM_COMMANDS, CONSUMER_GROUP, msg_id)
-        sem.release()
-
-
-async def consumer_loop():
-    """Read commands from stock-commands stream and dispatch concurrently.
-
-    Each message is processed in its own asyncio task. A semaphore caps
-    in-flight tasks to avoid connection pool exhaustion. XACK is safe
-    out-of-order (PEL is a set). Lua scripts are idempotent for re-delivery.
-    """
-    sem = asyncio.Semaphore(MAX_INFLIGHT)
-    pending: set[asyncio.Task] = set()
-
-    while True:
-        try:
-            messages = await db.xreadgroup(
-                CONSUMER_GROUP, CONSUMER_NAME,
-                {STREAM_COMMANDS: ">"},
-                count=10, block=100,
-            )
-
-            if not messages:
-                continue
-
-            for _stream_name, entries in messages:
-                for msg_id, fields in entries:
-                    await sem.acquire()
-                    task = asyncio.create_task(
-                        _process_and_ack(msg_id, fields, sem)
-                    )
-                    pending.add(task)
-                    task.add_done_callback(pending.discard)
-
-        except asyncio.CancelledError:
-            for t in pending:
-                t.cancel()
-            await asyncio.gather(*pending, return_exceptions=True)
-            raise
-        except Exception as e:
-            log.error("Consumer loop error", error=str(e))
-            await asyncio.sleep(1)
 
 
 async def handle_command(fields: dict):

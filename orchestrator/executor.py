@@ -103,8 +103,8 @@ class _BaseExecutor:
     """Shared infrastructure for TwoPCExecutor and SagaExecutor.
 
     Holds the common service connections, outbox reader, WAL engine,
-    circuit breakers, and metrics — plus the generic _send_command and
-    _retry_confirm helpers used by both protocol executors.
+    circuit breakers, and metrics — plus the generic helpers used by both
+    protocol executors: _send_command, _retry_confirm, _broadcast, _inject_ttl.
     """
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
@@ -150,6 +150,34 @@ class _BaseExecutor:
             await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
         return None  # exhausted retries
 
+    async def _broadcast(
+        self, action: str, saga_id: str, steps: list[Step], context: dict
+    ) -> list[tuple[Step, dict | BaseException]]:
+        """Send ``action`` to all steps in parallel and collect outbox responses.
+
+        Returns ``(step, result)`` pairs where *result* is the event dict on
+        success, or a ``BaseException`` (e.g. ``TimeoutError``) if the step
+        didn't respond within ``STEP_TIMEOUT``.
+        """
+        pairs = [
+            (step, self.outbox_reader.create_waiter(saga_id, step.service))
+            for step in steps
+        ]
+        await asyncio.gather(*[
+            self._send_command(step, saga_id, action, context)
+            for step, _ in pairs
+        ])
+        raw = await asyncio.gather(
+            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in pairs],
+            return_exceptions=True,
+        )
+        return [(step, result) for (step, _), result in zip(pairs, raw)]
+
+    def _inject_ttl(self, context: dict) -> None:
+        """Compute adaptive reservation TTL from p99 latency and store in context."""
+        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
+        context["_reservation_ttl"] = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
+
 
 class TwoPCExecutor(_BaseExecutor):
     """Two-Phase Commit executor.
@@ -171,29 +199,11 @@ class TwoPCExecutor(_BaseExecutor):
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
 
         await self.wal.log(saga_id, "PREPARING")
+        self._inject_ttl(context)
 
-        # Compute adaptive TTL before try_reserve phase
-        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
-        reservation_ttl = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
-        context["_reservation_ttl"] = reservation_ttl
-
-        # Phase 1: Create all waiters, then send all prepare commands in parallel
-        prepare_items: list[tuple[Step, asyncio.Future]] = [
-            (step, self.outbox_reader.create_waiter(saga_id, step.service))
-            for step in tx_def.steps
-        ]
-        await asyncio.gather(*[
-            self._send_command(step, saga_id, "try_reserve", context)
-            for step, _ in prepare_items
-        ])
-
-        # Collect all votes in parallel
-        raw = await asyncio.gather(
-            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in prepare_items],
-            return_exceptions=True,
-        )
+        # Phase 1: prepare all participants in parallel, collect votes
         votes: list[tuple[Step, dict]] = []
-        for (step, _), result in zip(prepare_items, raw):
+        for step, result in await self._broadcast("try_reserve", saga_id, tx_def.steps, context):
             if isinstance(result, Exception):
                 self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
                 votes.append((step, {"event": "failed", "reason": "timeout"}))
@@ -203,21 +213,9 @@ class TwoPCExecutor(_BaseExecutor):
         all_reserved = all(v[1].get("event") == "reserved" for v in votes)
 
         if all_reserved:
-            # Phase 2: COMMIT — send all confirms in parallel, wait in parallel
+            # Phase 2: COMMIT — confirm all in parallel
             await self.wal.log(saga_id, "COMMITTING")
-            confirm_items: list[tuple[Step, asyncio.Future]] = [
-                (step, self.outbox_reader.create_waiter(saga_id, step.service))
-                for step in tx_def.steps
-            ]
-            await asyncio.gather(*[
-                self._send_command(step, saga_id, "confirm", context)
-                for step, _ in confirm_items
-            ])
-            confirm_raw = await asyncio.gather(
-                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in confirm_items],
-                return_exceptions=True,
-            )
-            for (step, _), result in zip(confirm_items, confirm_raw):
+            for step, result in await self._broadcast("confirm", saga_id, tx_def.steps, context):
                 cb = self.circuit_breakers.get(step.service, CircuitBreaker())
                 if isinstance(result, Exception) or (
                     isinstance(result, dict) and result.get("event") == "confirm_failed"
@@ -239,19 +237,7 @@ class TwoPCExecutor(_BaseExecutor):
         else:
             # Phase 2: ABORT — cancel all in parallel
             await self.wal.log(saga_id, "ABORTING")
-            abort_items: list[tuple[Step, asyncio.Future]] = [
-                (step, self.outbox_reader.create_waiter(saga_id, step.service))
-                for step in tx_def.steps
-            ]
-            await asyncio.gather(*[
-                self._send_command(step, saga_id, "cancel", context)
-                for step, _ in abort_items
-            ])
-            await asyncio.gather(
-                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in abort_items],
-                return_exceptions=True,
-            )
-
+            await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
             for _, vote in votes:
@@ -282,28 +268,12 @@ class SagaExecutor(_BaseExecutor):
                 await self.wal.log(saga_id, "FAILED")
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
 
-        # Compute adaptive TTL before try_reserve phase
-        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
-        reservation_ttl = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
-        context["_reservation_ttl"] = reservation_ttl
+        self._inject_ttl(context)
 
-        # Try phase: send all try_reserve in parallel
+        # Try phase: send all try_reserve in parallel, collect votes
         await self.wal.log(saga_id, "TRYING")
-        try_items: list[tuple[Step, asyncio.Future]] = [
-            (step, self.outbox_reader.create_waiter(saga_id, step.service))
-            for step in tx_def.steps
-        ]
-        await asyncio.gather(*[
-            self._send_command(step, saga_id, "try_reserve", context)
-            for step, _ in try_items
-        ])
-
-        raw = await asyncio.gather(
-            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in try_items],
-            return_exceptions=True,
-        )
         votes: list[tuple[Step, dict]] = []
-        for (step, _), result in zip(try_items, raw):
+        for step, result in await self._broadcast("try_reserve", saga_id, tx_def.steps, context):
             if isinstance(result, Exception):
                 self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
                 votes.append((step, {"event": "failed", "reason": "timeout"}))
@@ -315,18 +285,7 @@ class SagaExecutor(_BaseExecutor):
         if not all_reserved:
             # Compensate ALL participants — Lua cancel is idempotent for un-reserved items
             await self.wal.log(saga_id, "COMPENSATING")
-            cancel_items: list[tuple[Step, asyncio.Future]] = [
-                (step, self.outbox_reader.create_waiter(saga_id, step.service))
-                for step in tx_def.steps
-            ]
-            await asyncio.gather(*[
-                self._send_command(step, saga_id, "cancel", context)
-                for step, _ in cancel_items
-            ])
-            await asyncio.gather(
-                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in cancel_items],
-                return_exceptions=True,
-            )
+            await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
             for _, vote in votes:
@@ -337,19 +296,7 @@ class SagaExecutor(_BaseExecutor):
 
         # All reserved — confirm all in parallel
         await self.wal.log(saga_id, "CONFIRMING")
-        confirm_items: list[tuple[Step, asyncio.Future]] = [
-            (step, self.outbox_reader.create_waiter(saga_id, step.service))
-            for step in tx_def.steps
-        ]
-        await asyncio.gather(*[
-            self._send_command(step, saga_id, "confirm", context)
-            for step, _ in confirm_items
-        ])
-        confirm_raw = await asyncio.gather(
-            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in confirm_items],
-            return_exceptions=True,
-        )
-        for (step, _), result in zip(confirm_items, confirm_raw):
+        for step, result in await self._broadcast("confirm", saga_id, tx_def.steps, context):
             cb = self.circuit_breakers.get(step.service, CircuitBreaker())
             if isinstance(result, Exception) or (
                 isinstance(result, dict) and result.get("event") == "confirm_failed"

@@ -89,51 +89,38 @@ class RecoveryWorker:
             logger.warning("Unknown WAL state for saga", saga_id=saga_id, last_step=last_step)
             await self.wal.log(saga_id, "FAILED")
 
-    async def _abort_all(self, saga_id: str, data: dict):
-        """Send cancel to all services using transaction definition's payload builders."""
-        tx_name = data.get("tx_name", "")
-        tx_def = self.definitions.get(tx_name)
+    async def _send_to_all(self, action: str, saga_id: str, data: dict, final_state: str):
+        """Send ``action`` to all services via their command streams, then log ``final_state``.
 
+        Uses payload builders from the transaction definition when available;
+        falls back to a bare ``{saga_id, action}`` command for unknown transactions.
+        """
+        tx_def = self.definitions.get(data.get("tx_name", ""))
         if tx_def:
             for step in tx_def.steps:
                 db = self.service_dbs.get(step.service)
                 if not db:
                     continue
                 stream = f"{step.service}-commands"
-                cmd = {"saga_id": saga_id, "action": "cancel"}
+                cmd = {"saga_id": saga_id, "action": action}
                 if step.payload_builder:
-                    cmd.update(step.payload_builder(saga_id, "cancel", data))
+                    cmd.update(step.payload_builder(saga_id, action, data))
                 await db.xadd(stream, cmd, maxlen=10000, approximate=True)
         else:
-            # Fallback: send bare cancel to all known services
+            # Fallback: send bare action to all known services
             for service, db in self.service_dbs.items():
                 stream = f"{service}-commands"
-                await db.xadd(stream, {"saga_id": saga_id, "action": "cancel"},
+                await db.xadd(stream, {"saga_id": saga_id, "action": action},
                               maxlen=10000, approximate=True)
-        await self.wal.log(saga_id, "FAILED")
+        await self.wal.log(saga_id, final_state)
+
+    async def _abort_all(self, saga_id: str, data: dict):
+        """Send cancel to all services and log FAILED."""
+        await self._send_to_all("cancel", saga_id, data, "FAILED")
 
     async def _confirm_all(self, saga_id: str, data: dict):
-        """Send confirm to all services using transaction definition's payload builders."""
-        tx_name = data.get("tx_name", "")
-        tx_def = self.definitions.get(tx_name)
-
-        if tx_def:
-            for step in tx_def.steps:
-                db = self.service_dbs.get(step.service)
-                if not db:
-                    continue
-                stream = f"{step.service}-commands"
-                cmd = {"saga_id": saga_id, "action": "confirm"}
-                if step.payload_builder:
-                    cmd.update(step.payload_builder(saga_id, "confirm", data))
-                await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-        else:
-            # Fallback: send bare confirm to all known services
-            for service, db in self.service_dbs.items():
-                stream = f"{service}-commands"
-                await db.xadd(stream, {"saga_id": saga_id, "action": "confirm"},
-                              maxlen=10000, approximate=True)
-        await self.wal.log(saga_id, "COMPLETED")
+        """Send confirm to all services and log COMPLETED."""
+        await self._send_to_all("confirm", saga_id, data, "COMPLETED")
 
     async def start_claim_worker(self):
         """Start periodic XAUTOCLAIM worker for stuck messages."""
