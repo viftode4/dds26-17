@@ -72,16 +72,10 @@ class RecoveryWorker:
             # 2PC: sent prepares but didn't collect all votes — abort all
             await self._abort_all(saga_id, data)
 
-        elif last_step == "reserve_stock_TRYING":
-            # Saga: was trying stock reservation — cancel stock (may or may not have reserved)
-            await self._cancel_stock(saga_id, data)
-            await self.wal.log(saga_id, "FAILED")
-
-        elif last_step == "reserve_payment_TRYING":
-            # Saga: was trying payment after stock succeeded — cancel both
-            await self._cancel_stock(saga_id, data)
-            await self._cancel_payment(saga_id, data)
-            await self.wal.log(saga_id, "FAILED")
+        elif last_step == "TRYING":
+            # Saga: sent try_reserve to all services in parallel — outcome unknown, abort all
+            # Lua cancel is idempotent: safe even if reservation was never made
+            await self._abort_all(saga_id, data)
 
         elif last_step in ("COMMITTING", "CONFIRMING"):
             # Was in commit phase — retry confirms (all Lua ops are idempotent)

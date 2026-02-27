@@ -95,17 +95,19 @@ class OutboxReader:
 
 
 async def _waitaof(dbs: list[aioredis.Redis]):
-    """Issue WAITAOF on each db to ensure writes are durable in local AOF.
+    """Issue WAITAOF on each db in parallel — best-effort AOF durability check.
 
-    Called after the commit phase resolves — guarantees that confirmed
-    state is synced to disk before marking the saga COMPLETED in WAL.
-    200ms budget is well within STEP_TIMEOUT (10s).
+    10ms budget: fast enough to not dominate latency, still catches the common
+    case where the AOF buffer was just flushed. Falls back to appendfsync everysec
+    guarantee if the budget expires. Non-fatal on any error.
     """
-    for db in dbs:
+    async def _one(db):
         try:
-            await db.execute_command("WAITAOF", 1, 0, 200)
+            await db.execute_command("WAITAOF", 1, 0, 10)
         except Exception:
-            pass  # Non-fatal — AOF everysec is still the floor guarantee
+            pass
+
+    await asyncio.gather(*[_one(db) for db in dbs])
 
 
 class TwoPCExecutor:
@@ -137,61 +139,72 @@ class TwoPCExecutor:
 
         await self.wal.log(saga_id, "PREPARING")
 
-        # Phase 1: Send prepare to all participants in parallel
-        prepare_futures = []
-        for step in tx_def.steps:
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "try_reserve", context)
-            prepare_futures.append((step, fut))
+        # Phase 1: Create all waiters, then send all prepare commands in parallel
+        prepare_items: list[tuple[Step, asyncio.Future]] = [
+            (step, self.outbox_reader.create_waiter(saga_id, step.service))
+            for step in tx_def.steps
+        ]
+        await asyncio.gather(*[
+            self._send_command(step, saga_id, "try_reserve", context)
+            for step, _ in prepare_items
+        ])
 
-        votes = []
-        try:
-            for step, fut in prepare_futures:
-                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                votes.append((step, result))
-        except asyncio.TimeoutError:
-            logger.warning("2PC prepare timeout", saga_id=saga_id)
-            if step:
+        # Collect all votes in parallel
+        raw = await asyncio.gather(
+            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in prepare_items],
+            return_exceptions=True,
+        )
+        votes: list[tuple[Step, dict]] = []
+        for (step, _), result in zip(prepare_items, raw):
+            if isinstance(result, Exception):
                 self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
-            votes.append((step, {"event": "failed", "reason": "timeout"}))
+                votes.append((step, {"event": "failed", "reason": "timeout"}))
+            else:
+                votes.append((step, result))
 
         all_reserved = all(v[1].get("event") == "reserved" for v in votes)
 
         if all_reserved:
-            # Phase 2: COMMIT
+            # Phase 2: COMMIT — send all confirms in parallel, wait in parallel
             await self.wal.log(saga_id, "COMMITTING")
-            confirm_futures = []
-            for step in tx_def.steps:
-                fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                await self._send_command(step, saga_id, "confirm", context)
-                confirm_futures.append((step, fut))
-
-            for step, fut in confirm_futures:
-                try:
-                    await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                    self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
-                except asyncio.TimeoutError:
+            confirm_items: list[tuple[Step, asyncio.Future]] = [
+                (step, self.outbox_reader.create_waiter(saga_id, step.service))
+                for step in tx_def.steps
+            ]
+            await asyncio.gather(*[
+                self._send_command(step, saga_id, "confirm", context)
+                for step, _ in confirm_items
+            ])
+            confirm_raw = await asyncio.gather(
+                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in confirm_items],
+                return_exceptions=True,
+            )
+            for (step, _), result in zip(confirm_items, confirm_raw):
+                cb = self.circuit_breakers.get(step.service, CircuitBreaker())
+                if isinstance(result, Exception):
                     logger.error("2PC commit timeout", saga_id=saga_id, step=step.name)
-                    self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
+                    cb.record_failure()
+                else:
+                    cb.record_success()
 
-            # Ensure confirmed writes are durable before marking complete
             await _waitaof(list(self.service_dbs.values()))
             await self.wal.log(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
-            # Phase 2: ABORT
+            # Phase 2: ABORT — cancel all in parallel
             await self.wal.log(saga_id, "ABORTING")
-            abort_futures = []
-            for step in tx_def.steps:
-                fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                await self._send_command(step, saga_id, "cancel", context)
-                abort_futures.append(fut)
-
-            for fut in abort_futures:
-                try:
-                    await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                except asyncio.TimeoutError:
-                    pass
+            abort_items: list[tuple[Step, asyncio.Future]] = [
+                (step, self.outbox_reader.create_waiter(saga_id, step.service))
+                for step in tx_def.steps
+            ]
+            await asyncio.gather(*[
+                self._send_command(step, saga_id, "cancel", context)
+                for step, _ in abort_items
+            ])
+            await asyncio.gather(
+                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in abort_items],
+                return_exceptions=True,
+            )
 
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
@@ -218,8 +231,11 @@ class TwoPCExecutor:
 class SagaExecutor:
     """Saga + TCC protocol executor.
 
-    Sequential: try stock → try payment → confirm both in parallel.
-    On any failure: compensate completed steps in reverse order.
+    Parallel try: send try_reserve to all services simultaneously, collect votes.
+    On all-reserved: confirm all in parallel.
+    On any failure: compensate all in parallel (Lua cancel is idempotent).
+
+    WAL states: TRYING → CONFIRMING/COMPENSATING → COMPLETED/FAILED
     """
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
@@ -232,69 +248,85 @@ class SagaExecutor:
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
-        """Execute the full Saga+TCC protocol."""
-        completed_steps: list[Step] = []
-
+        """Execute the full Saga+TCC protocol with parallel try phase."""
+        # Check all circuit breakers upfront
         for step in tx_def.steps:
-            # Check circuit breaker before trying this step
             cb = self.circuit_breakers.get(step.service)
             if cb and cb.is_open():
                 logger.warning("Circuit breaker open — fast fail", service=step.service, saga_id=saga_id)
-                # Compensate already-completed steps
-                await self.wal.log(saga_id, "COMPENSATING")
-                for prev_step in reversed(completed_steps):
-                    comp_fut = self.outbox_reader.create_waiter(saga_id, prev_step.service)
-                    await self._send_command(prev_step, saga_id, "cancel", context)
-                    try:
-                        await asyncio.wait_for(comp_fut, timeout=STEP_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        pass
                 await self.wal.log(saga_id, "FAILED")
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
 
-            await self.wal.log(saga_id, f"{step.name}_TRYING")
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "try_reserve", context)
+        # Try phase: send all try_reserve in parallel
+        await self.wal.log(saga_id, "TRYING")
+        try_items: list[tuple[Step, asyncio.Future]] = [
+            (step, self.outbox_reader.create_waiter(saga_id, step.service))
+            for step in tx_def.steps
+        ]
+        await asyncio.gather(*[
+            self._send_command(step, saga_id, "try_reserve", context)
+            for step, _ in try_items
+        ])
 
-            try:
-                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-            except asyncio.TimeoutError:
-                logger.warning("Saga try timeout", step=step.name, saga_id=saga_id)
+        raw = await asyncio.gather(
+            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in try_items],
+            return_exceptions=True,
+        )
+        votes: list[tuple[Step, dict]] = []
+        for (step, _), result in zip(try_items, raw):
+            if isinstance(result, Exception):
                 self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
-                result = {"event": "failed", "reason": "timeout"}
+                votes.append((step, {"event": "failed", "reason": "timeout"}))
+            else:
+                votes.append((step, result))
 
-            if result.get("event") != "reserved":
-                await self.wal.log(saga_id, "COMPENSATING")
-                for prev_step in reversed(completed_steps):
-                    comp_fut = self.outbox_reader.create_waiter(saga_id, prev_step.service)
-                    await self._send_command(prev_step, saga_id, "cancel", context)
-                    try:
-                        await asyncio.wait_for(comp_fut, timeout=STEP_TIMEOUT)
-                    except asyncio.TimeoutError:
-                        logger.error("Compensation timeout", step=prev_step.name, saga_id=saga_id)
-                await self.wal.log(saga_id, "FAILED")
-                return {"status": "failed", "error": result.get("reason", "insufficient_resources")}
+        all_reserved = all(v[1].get("event") == "reserved" for v in votes)
 
-            self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
-            completed_steps.append(step)
+        if not all_reserved:
+            # Compensate ALL participants — Lua cancel is idempotent for un-reserved items
+            await self.wal.log(saga_id, "COMPENSATING")
+            cancel_items: list[tuple[Step, asyncio.Future]] = [
+                (step, self.outbox_reader.create_waiter(saga_id, step.service))
+                for step in tx_def.steps
+            ]
+            await asyncio.gather(*[
+                self._send_command(step, saga_id, "cancel", context)
+                for step, _ in cancel_items
+            ])
+            await asyncio.gather(
+                *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in cancel_items],
+                return_exceptions=True,
+            )
+            await self.wal.log(saga_id, "FAILED")
+            reason = "insufficient_resources"
+            for _, vote in votes:
+                if vote.get("event") == "failed":
+                    reason = vote.get("reason", reason)
+                    break
+            return {"status": "failed", "error": reason}
 
-        # All steps reserved — confirm all in parallel
+        # All reserved — confirm all in parallel
         await self.wal.log(saga_id, "CONFIRMING")
-        confirm_futures = []
-        for step in tx_def.steps:
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "confirm", context)
-            confirm_futures.append((step, fut))
+        confirm_items: list[tuple[Step, asyncio.Future]] = [
+            (step, self.outbox_reader.create_waiter(saga_id, step.service))
+            for step in tx_def.steps
+        ]
+        await asyncio.gather(*[
+            self._send_command(step, saga_id, "confirm", context)
+            for step, _ in confirm_items
+        ])
+        confirm_raw = await asyncio.gather(
+            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in confirm_items],
+            return_exceptions=True,
+        )
+        for (step, _), result in zip(confirm_items, confirm_raw):
+            cb = self.circuit_breakers.get(step.service, CircuitBreaker())
+            if isinstance(result, Exception):
+                logger.error("Saga confirm timeout", saga_id=saga_id, step=step.name)
+                cb.record_failure()
+            else:
+                cb.record_success()
 
-        for step, fut in confirm_futures:
-            try:
-                await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
-            except asyncio.TimeoutError:
-                logger.error("Saga confirm timeout", saga_id=saga_id)
-                self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
-
-        # Ensure confirmed writes are durable before marking complete
         await _waitaof(list(self.service_dbs.values()))
         await self.wal.log(saga_id, "COMPLETED")
         return {"status": "success"}
