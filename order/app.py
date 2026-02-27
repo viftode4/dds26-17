@@ -30,7 +30,7 @@ _order_pool = aioredis.ConnectionPool(
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
-    max_connections=50,
+    max_connections=2000,
 )
 db: aioredis.Redis = aioredis.Redis(connection_pool=_order_pool)
 
@@ -39,7 +39,7 @@ _stock_pool = aioredis.ConnectionPool(
     port=int(os.environ.get('STOCK_REDIS_PORT', 6379)),
     password=os.environ.get('STOCK_REDIS_PASSWORD', 'redis'),
     db=0,
-    max_connections=50,
+    max_connections=2000,
 )
 stock_db: aioredis.Redis = aioredis.Redis(connection_pool=_stock_pool)
 
@@ -48,7 +48,7 @@ _payment_pool = aioredis.ConnectionPool(
     port=int(os.environ.get('PAYMENT_REDIS_PORT', 6379)),
     password=os.environ.get('PAYMENT_REDIS_PASSWORD', 'redis'),
     db=0,
-    max_connections=50,
+    max_connections=2000,
 )
 payment_db: aioredis.Redis = aioredis.Redis(connection_pool=_payment_pool)
 

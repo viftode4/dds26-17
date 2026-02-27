@@ -19,7 +19,7 @@ _pool = aioredis.ConnectionPool(
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
-    max_connections=50,
+    max_connections=2000,
 )
 db: aioredis.Redis = aioredis.Redis(connection_pool=_pool)
 
@@ -33,6 +33,15 @@ local amount = tonumber(ARGV[1])
 if avail < amount then return 0 end
 redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
 redis.call('HINCRBY', KEYS[1], 'held_credit', amount)
+return 1
+"""
+
+DIRECT_PAY_LUA = """
+local avail = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))
+if not avail then return -1 end
+local amount = tonumber(ARGV[1])
+if avail < amount then return 0 end
+redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
 return 1
 """
 
@@ -64,7 +73,8 @@ async def create_user():
     key = str(uuid.uuid4())
     try:
         await db.hset(key, mapping={'available_credit': 0, 'held_credit': 0})
-    except aioredis.RedisError:
+    except aioredis.RedisError as e:
+        app.logger.error(f"DB Error creating user: {e}")
         abort(400, DB_ERROR_STR)
     return jsonify({'user_id': key})
 
@@ -128,7 +138,7 @@ async def ready():
 @app.post('/pay/<user_id>/<amount>')
 async def remove_credit(user_id, amount):
     amount = int(amount)
-    result = await _pay_script(keys=[user_id], args=[amount])
+    result = await _direct_pay_script(keys=[user_id], args=[amount])
     if result == -1:
         abort(400, f"User: {user_id} not found!")
     elif result == 0:
@@ -334,8 +344,9 @@ _consumer_task = None
 
 @app.before_serving
 async def startup():
-    global _pay_script, _confirm_script, _compensate_script, _consumer_task
+    global _pay_script, _direct_pay_script, _confirm_script, _compensate_script, _consumer_task
     _pay_script = db.register_script(PAY_LUA)
+    _direct_pay_script = db.register_script(DIRECT_PAY_LUA)
     _confirm_script = db.register_script(CONFIRM_LUA)
     _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())

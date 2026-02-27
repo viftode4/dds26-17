@@ -19,7 +19,7 @@ _pool = aioredis.ConnectionPool(
     port=int(os.environ['REDIS_PORT']),
     password=os.environ['REDIS_PASSWORD'],
     db=int(os.environ['REDIS_DB']),
-    max_connections=50,
+    max_connections=2000,
 )
 db: aioredis.Redis = aioredis.Redis(connection_pool=_pool)
 
@@ -33,6 +33,15 @@ local amount = tonumber(ARGV[1])
 if avail < amount then return 0 end
 redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
 redis.call('HINCRBY', KEYS[1], 'reserved_stock', amount)
+return 1
+"""
+
+DIRECT_SUBTRACT_LUA = """
+local avail = tonumber(redis.call('HGET', KEYS[1], 'available_stock'))
+if not avail then return -1 end
+local amount = tonumber(ARGV[1])
+if avail < amount then return 0 end
+redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
 return 1
 """
 
@@ -138,7 +147,7 @@ async def ready():
 @app.post('/subtract/<item_id>/<amount>')
 async def remove_stock(item_id, amount):
     amount = int(amount)
-    result = await _subtract_script(keys=[item_id], args=[amount])
+    result = await _direct_subtract_script(keys=[item_id], args=[amount])
     if result == -1:
         abort(400, f"Item: {item_id} not found!")
     elif result == 0:
@@ -343,8 +352,9 @@ _consumer_task = None
 
 @app.before_serving
 async def startup():
-    global _subtract_script, _confirm_script, _compensate_script, _consumer_task
+    global _subtract_script, _direct_subtract_script, _confirm_script, _compensate_script, _consumer_task
     _subtract_script = db.register_script(SUBTRACT_LUA)
+    _direct_subtract_script = db.register_script(DIRECT_SUBTRACT_LUA)
     _confirm_script = db.register_script(CONFIRM_LUA)
     _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())

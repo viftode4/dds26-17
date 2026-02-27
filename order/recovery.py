@@ -47,33 +47,32 @@ async def run_recovery(db, stock_db, payment_db, tx_mode: str):
             cursor, pending_ids = await db.sscan("pending_orders", cursor, count=100)
             for key in pending_ids:
                 key_str = key.decode() if isinstance(key, bytes) else key
-            try:
-                raw = await db.get(key_str)
-                if raw is None:
+                try:
+                    raw = await db.get(key_str)
+                    if raw is None:
+                        await db.srem("pending_orders", key_str)
+                        continue
+                    order = msgpack.decode(raw, type=OrderValue)
+                except Exception:
+                    continue
+
+                if order.checkout_status != "PENDING":
                     await db.srem("pending_orders", key_str)
                     continue
-                order = msgpack.decode(raw, type=OrderValue)
-            except Exception:
-                continue
 
-            if order.checkout_status != "PENDING":
+                logger.warning(f"Pending-set recovery: {key_str} (step: {order.checkout_step})")
+                items_quantities = defaultdict(int)
+                for item_id, quantity in order.items:
+                    items_quantities[item_id] += quantity
+
+                if tx_mode == "saga":
+                    await _recover_saga_fallback(key_str, order, items_quantities, db, stock_db, payment_db)
+                else:
+                    await _recover_2pc(key_str, order, items_quantities, db, stock_db, payment_db)
                 await db.srem("pending_orders", key_str)
-                continue
-
-            logger.warning(f"Pending-set recovery: {key_str} (step: {order.checkout_step})")
-            items_quantities = defaultdict(int)
-            for item_id, quantity in order.items:
-                items_quantities[item_id] += quantity
-
-            if tx_mode == "saga":
-                await _recover_saga_fallback(key_str, order, items_quantities, db, stock_db, payment_db)
-            else:
-                await _recover_2pc(key_str, order, items_quantities, db, stock_db, payment_db)
-            await db.srem("pending_orders", key_str)
-            recovered += 1
-            
-        if cursor == 0:
-            break
+                recovered += 1
+            if cursor == 0:
+                break
     except Exception as e:
         logger.error(f"Pending-set recovery error: {e}")
 

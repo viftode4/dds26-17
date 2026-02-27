@@ -61,15 +61,15 @@ async def _reconcile(db, stock_db, payment_db, tx_mode):
                     logger.warning(f"Reconcile: removed orphan pending entry {key_str}")
                     continue
 
-            order = msgpack.decode(raw, type=OrderValue)
-            if order.checkout_status != "PENDING":
-                # Completed but not removed from pending set
-                await db.srem("pending_orders", key_str)
-                issues += 1
-                logger.warning(f"Reconcile: cleaned completed order from pending set: {key_str}")
-        except Exception as e:
-            logger.error(f"Reconcile: error checking {key_str}: {e}")
-            
+                order = msgpack.decode(raw, type=OrderValue)
+                if order.checkout_status != "PENDING":
+                    # Completed but not removed from pending set
+                    await db.srem("pending_orders", key_str)
+                    issues += 1
+                    logger.warning(f"Reconcile: cleaned completed order from pending set: {key_str}")
+            except Exception as e:
+                logger.error(f"Reconcile: error checking {key_str}: {e}")
+        
         if cursor == 0:
             break
 
