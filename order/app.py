@@ -4,13 +4,16 @@ import os
 import random
 import uuid
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import redis.asyncio as aioredis
-
-from msgspec import msgpack
-from quart import Quart, jsonify, abort, Response
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse, Response
+from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
 from common.logging import setup_logging, get_logger
@@ -26,11 +29,10 @@ REQ_ERROR_STR = "Requests error"
 
 GATEWAY_URL = os.environ['GATEWAY_URL']
 
-app = Quart("order-service")
 log = get_logger("order")
 
 db: aioredis.Redis | None = None
-db_read: aioredis.Redis | None = None  # Replica connection for read-only endpoints
+db_read: aioredis.Redis | None = None
 http_client: httpx.AsyncClient | None = None
 orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
@@ -48,7 +50,7 @@ def stock_payload(saga_id: str, action: str, context: dict) -> dict:
     items = context.get("items", [])
     cmd: dict[str, str] = {}
     if items:
-        cmd["items"] = msgpack.encode(items).decode("latin-1")
+        cmd["items"] = json.dumps(items)
     cmd["ttl"] = str(context.get("_reservation_ttl", 60))
     return cmd
 
@@ -130,27 +132,35 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
                 break
 
 
-# ---- JSON error handlers (replaces Quart's HTML error pages) ----
+# ---------------------------------------------------------------------------
+# Lifespan + leadership
+# ---------------------------------------------------------------------------
 
-@app.errorhandler(400)
-async def bad_request(e):
-    return jsonify({"error": str(e.description)}), 400
+async def _leadership_loop():
+    """Background task: compete for leader role to run maintenance workers."""
+    while True:
+        try:
+            acquired = await leader_election.acquire()
+            if acquired:
+                log.info("This instance is now the LEADER (background maintenance)")
+                await recovery_worker.recover_incomplete_sagas()
+                await recovery_worker.start_claim_worker()
+                await recovery_worker.start_reconciliation()
+                while leader_election.is_leader:
+                    await asyncio.sleep(1)
+                log.warning("Lost leadership, stopping maintenance workers")
+                await recovery_worker.stop()
+            else:
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("Leadership loop error", error=str(e))
+            await asyncio.sleep(2)
 
-@app.errorhandler(404)
-async def not_found(e):
-    return jsonify({"error": str(e.description)}), 404
 
-@app.errorhandler(500)
-async def internal_error(e):
-    return jsonify({"error": str(e.description)}), 500
-
-@app.errorhandler(503)
-async def service_unavailable(e):
-    return jsonify({"error": str(e.description)}), 503
-
-
-@app.before_serving
-async def setup():
+@asynccontextmanager
+async def lifespan(app):
     global db, db_read, http_client, orchestrator, leader_election, recovery_worker, _leader_task
 
     setup_logging("order-service")
@@ -159,7 +169,7 @@ async def setup():
     db = create_redis_connection(prefix="", decode_responses=True)
     await wait_for_redis(db, "order-db")
 
-    # Replica connection for read-only lookups (falls back to master if unavailable)
+    # Replica connection for read-only lookups
     db_read = create_replica_connection(prefix="", decode_responses=True)
 
     http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=10.0)
@@ -187,8 +197,6 @@ async def setup():
         definitions=[checkout_tx],
         protocol="auto",
     )
-
-    # Start outbox readers on ALL instances — both run sagas directly
     await orchestrator.start()
 
     leader_election = LeaderElection(db)
@@ -200,36 +208,11 @@ async def setup():
         reconcile_fn=reconcile_invariants,
     )
 
-    # Leader governs background maintenance only: XAUTOCLAIM, reconciliation, orphan abort
     _leader_task = asyncio.create_task(_leadership_loop())
     log.info("Order service started (active-active mode)")
 
+    yield
 
-async def _leadership_loop():
-    """Background task: compete for leader role to run maintenance workers."""
-    while True:
-        try:
-            acquired = await leader_election.acquire()
-            if acquired:
-                log.info("This instance is now the LEADER (background maintenance)")
-                await recovery_worker.recover_incomplete_sagas()
-                await recovery_worker.start_claim_worker()
-                await recovery_worker.start_reconciliation()
-                while leader_election.is_leader:
-                    await asyncio.sleep(1)
-                log.warning("Lost leadership, stopping maintenance workers")
-                await recovery_worker.stop()
-            else:
-                await asyncio.sleep(2)
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            log.error("Leadership loop error", error=str(e))
-            await asyncio.sleep(2)
-
-
-@app.after_serving
-async def teardown():
     if _leader_task:
         _leader_task.cancel()
         try:
@@ -252,41 +235,12 @@ async def teardown():
         await db.aclose()
 
 
-async def get_order_from_db(order_id: str, use_replica: bool = False) -> dict:
-    key = f"order:{order_id}"
-    conn = db_read if use_replica else db
-    try:
-        entry = await conn.hgetall(key)
-    except Exception:
-        # Fallback to master on replica error
-        try:
-            entry = await db.hgetall(key)
-        except aioredis.RedisError:
-            abort(400, DB_ERROR_STR)
-    if not entry:
-        abort(400, f"Order: {order_id} not found!")
-    return entry
+# ---------------------------------------------------------------------------
+# Route handlers
+# ---------------------------------------------------------------------------
 
-
-async def get_order_items(order_id: str, use_replica: bool = False) -> list[tuple[str, int]]:
-    key = f"order:{order_id}:items"
-    conn = db_read if use_replica else db
-    try:
-        raw_items = await conn.lrange(key, 0, -1)
-    except Exception:
-        try:
-            raw_items = await db.lrange(key, 0, -1)
-        except aioredis.RedisError:
-            abort(400, DB_ERROR_STR)
-    items = []
-    for raw in raw_items:
-        item_id, quantity = raw.split(":", 1)
-        items.append((item_id, int(quantity)))
-    return items
-
-
-@app.post('/create/<user_id>')
-async def create_order(user_id: str):
+async def create_order(request: Request):
+    user_id = request.path_params["user_id"]
     key = str(uuid.uuid4())
     try:
         await db.hset(f"order:{key}", mapping={
@@ -295,16 +249,15 @@ async def create_order(user_id: str):
             "total_cost": 0,
         })
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({'order_id': key})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"order_id": key})
 
 
-@app.post('/batch_init/<n>/<n_items>/<n_users>/<item_price>')
-async def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
-    n = int(n)
-    n_items = int(n_items)
-    n_users = int(n_users)
-    item_price = int(item_price)
+async def batch_init_users(request: Request):
+    n = int(request.path_params["n"])
+    n_items = int(request.path_params["n_items"])
+    n_users = int(request.path_params["n_users"])
+    item_price = int(request.path_params["item_price"])
     try:
         async with db.pipeline(transaction=False) as pipe:
             for i in range(n):
@@ -319,16 +272,34 @@ async def batch_init_users(n: int, n_items: int, n_users: int, item_price: int):
                 pipe.rpush(f"order:{i}:items", f"{item1_id}:1", f"{item2_id}:1")
             await pipe.execute()
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({"msg": "Batch init for orders successful"})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"msg": "Batch init for orders successful"})
 
 
-@app.get('/find/<order_id>')
-async def find_order(order_id: str):
-    # Read-only: use replica for reduced master load
-    entry = await get_order_from_db(order_id, use_replica=True)
-    items = await get_order_items(order_id, use_replica=True)
-    return jsonify({
+async def find_order(request: Request):
+    order_id = request.path_params["order_id"]
+    # Pipeline: hgetall + lrange in 1 RTT
+    conn = db_read or db
+    try:
+        async with conn.pipeline(transaction=False) as pipe:
+            pipe.hgetall(f"order:{order_id}")
+            pipe.lrange(f"order:{order_id}:items", 0, -1)
+            entry, raw_items = await pipe.execute()
+    except Exception:
+        try:
+            async with db.pipeline(transaction=False) as pipe:
+                pipe.hgetall(f"order:{order_id}")
+                pipe.lrange(f"order:{order_id}:items", 0, -1)
+                entry, raw_items = await pipe.execute()
+        except aioredis.RedisError:
+            raise HTTPException(400, detail=DB_ERROR_STR)
+    if not entry:
+        raise HTTPException(400, detail=f"Order: {order_id} not found!")
+    items = []
+    for raw in raw_items:
+        item_id, quantity = raw.split(":", 1)
+        items.append((item_id, int(quantity)))
+    return JSONResponse({
         "order_id": order_id,
         "paid": entry["paid"] == "true",
         "items": items,
@@ -337,22 +308,18 @@ async def find_order(order_id: str):
     })
 
 
-async def send_get_request(url: str):
-    try:
-        response = await http_client.get(url)
-    except httpx.RequestError:
-        abort(400, REQ_ERROR_STR)
-    return response
-
-
-@app.post('/addItem/<order_id>/<item_id>/<quantity>')
-async def add_item(order_id: str, item_id: str, quantity: int):
-    quantity = int(quantity)
+async def add_item(request: Request):
+    order_id = request.path_params["order_id"]
+    item_id = request.path_params["item_id"]
+    quantity = int(request.path_params["quantity"])
     if quantity <= 0:
-        abort(400, "Quantity must be positive")
-    item_reply = await send_get_request(f"/stock/find/{item_id}")
+        raise HTTPException(400, detail="Quantity must be positive")
+    try:
+        item_reply = await http_client.get(f"/stock/find/{item_id}")
+    except httpx.RequestError:
+        raise HTTPException(400, detail=REQ_ERROR_STR)
     if item_reply.status_code != 200:
-        abort(400, f"Item: {item_id} does not exist!")
+        raise HTTPException(400, detail=f"Item: {item_id} does not exist!")
     item_json: dict = item_reply.json()
     cost_increase = quantity * item_json["price"]
 
@@ -363,19 +330,36 @@ async def add_item(order_id: str, item_id: str, quantity: int):
                        f"{item_id}:{quantity}", cost_increase)
     except aioredis.ResponseError as e:
         if "ORDER_NOT_FOUND" in str(e):
-            abort(400, f"Order: {order_id} not found!")
-        abort(400, DB_ERROR_STR)
+            raise HTTPException(400, detail=f"Order: {order_id} not found!")
+        raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
+        raise HTTPException(400, detail=DB_ERROR_STR)
 
-    return Response(
+    return PlainTextResponse(
         f"Item: {item_id} added to: {order_id} price updated to: {cost_increase}",
-        status=200,
     )
 
 
-@app.post('/checkout/<order_id>')
-async def checkout(order_id: str):
+async def _load_order(order_id: str) -> tuple[dict, list[tuple[str, int]]]:
+    """Load order + items in a single pipeline (1 RTT)."""
+    try:
+        async with db.pipeline(transaction=False) as pipe:
+            pipe.hgetall(f"order:{order_id}")
+            pipe.lrange(f"order:{order_id}:items", 0, -1)
+            entry, raw_items = await pipe.execute()
+    except aioredis.RedisError:
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    if not entry:
+        raise HTTPException(400, detail=f"Order: {order_id} not found!")
+    items = []
+    for raw in raw_items:
+        item_id, quantity = raw.split(":", 1)
+        items.append((item_id, int(quantity)))
+    return entry, items
+
+
+async def checkout(request: Request):
+    order_id = request.path_params["order_id"]
     log.debug("Checking out order", order_id=order_id)
 
     # 1. Load order data + claim idempotency key in parallel (saves 1 RTT)
@@ -384,7 +368,7 @@ async def checkout(order_id: str):
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
     (entry, items), acquired = await asyncio.gather(
-        asyncio.gather(get_order_from_db(order_id), get_order_items(order_id)),
+        _load_order(order_id),
         db.set(idempotency_key, claim_value, nx=True, ex=3600),
     )
     total_cost = int(entry["total_cost"])
@@ -394,7 +378,7 @@ async def checkout(order_id: str):
     if entry["paid"] == "true":
         if acquired:
             asyncio.create_task(db.delete(idempotency_key))
-        abort(400, "Order already paid")
+        raise HTTPException(400, detail="Order already paid")
 
     # 3. Aggregate items
     items_quantities: dict[str, int] = defaultdict(int)
@@ -405,7 +389,8 @@ async def checkout(order_id: str):
     if not aggregated_items:
         if acquired:
             asyncio.create_task(db.delete(idempotency_key))
-        abort(400, "Order has no items")
+        raise HTTPException(400, detail="Order has no items")
+
     if not acquired:
         # Another request already processing — get its saga_id and wait for result
         existing = await db.get(idempotency_key)
@@ -414,17 +399,17 @@ async def checkout(order_id: str):
             if isinstance(existing_data, dict):
                 status = existing_data.get("status")
                 if status == "success":
-                    return Response("Checkout successful", status=200)
+                    return PlainTextResponse("Checkout successful")
                 if status == "failed":
-                    abort(400, f"Checkout failed: {existing_data.get('error', 'unknown')}")
+                    raise HTTPException(400, detail=f"Checkout failed: {existing_data.get('error', 'unknown')}")
                 # Still processing on another instance — wait via pub/sub fallback
                 existing_saga_id = existing_data.get("saga_id", "")
                 if existing_saga_id:
                     result = await wait_for_result(db, existing_saga_id, timeout=30.0)
                     if result.get("status") == "success":
-                        return Response("Checkout successful", status=200)
-                    abort(400, f"Checkout failed: {result.get('error', 'unknown')}")
-        abort(400, "Checkout already in progress")
+                        return PlainTextResponse("Checkout successful")
+                    raise HTTPException(400, detail=f"Checkout failed: {result.get('error', 'unknown')}")
+        raise HTTPException(400, detail="Checkout already in progress")
 
     # 5. Execute saga directly — active-active, no leader dependency, no stream hop
     context = {
@@ -447,26 +432,24 @@ async def checkout(order_id: str):
         asyncio.create_task(_commit_bookkeeping())
         log.info("Checkout successful", order_id=order_id, saga_id=saga_id,
                  protocol=result.get("protocol"))
-        return Response("Checkout successful", status=200)
+        return PlainTextResponse("Checkout successful")
     else:
         # Delete idempotency key — allow client to retry after fixing conditions
         asyncio.create_task(db.delete(idempotency_key))
         error = result.get("error", "unknown")
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
-        abort(400, f"Checkout failed: {error}")
+        raise HTTPException(400, detail=f"Checkout failed: {error}")
 
 
-@app.get('/health')
-async def health():
+async def health(request: Request):
     try:
         await db.ping()
     except Exception:
-        abort(503, "Redis unavailable")
-    return jsonify({"status": "healthy"})
+        raise HTTPException(503, detail="Redis unavailable")
+    return JSONResponse({"status": "healthy"})
 
 
-@app.get('/metrics')
-async def metrics():
+async def metrics(request: Request):
     """Prometheus-compatible metrics with per-protocol latency histograms."""
     m = orchestrator.metrics
     abort_rate = m.sliding_abort_rate()
@@ -500,8 +483,29 @@ async def metrics():
         "checkout_duration_seconds", 'protocol="saga"'
     ))
 
-    return Response("\n".join(lines) + "\n", status=200, content_type="text/plain")
+    return Response("\n".join(lines) + "\n", status_code=200, media_type="text/plain")
 
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000, debug=True)
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
+async def http_exception_handler(request, exc):
+    return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+
+routes = [
+    Route("/create/{user_id}", create_order, methods=["POST"]),
+    Route("/batch_init/{n}/{n_items}/{n_users}/{item_price}", batch_init_users, methods=["POST"]),
+    Route("/find/{order_id}", find_order, methods=["GET"]),
+    Route("/addItem/{order_id}/{item_id}/{quantity}", add_item, methods=["POST"]),
+    Route("/checkout/{order_id}", checkout, methods=["POST"]),
+    Route("/health", health, methods=["GET"]),
+    Route("/metrics", metrics, methods=["GET"]),
+]
+
+app = Starlette(
+    routes=routes,
+    lifespan=lifespan,
+    exception_handlers={HTTPException: http_exception_handler},
+)

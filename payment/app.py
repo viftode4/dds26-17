@@ -2,11 +2,15 @@ import asyncio
 import os
 import socket
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis.asyncio as aioredis
-
-from quart import Quart, jsonify, abort, Response
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
 from common.consumer import consumer_loop, dlq_sweep_loop
@@ -21,35 +25,15 @@ CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
 RESERVATION_TTL = 60  # 1 minute
 DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
-app = Quart("payment-service")
 log = get_logger("payment")
 
 db: aioredis.Redis | None = None
-db_read: aioredis.Redis | None = None  # Replica for read-only endpoints
+db_read: aioredis.Redis | None = None
 _consumer_task: asyncio.Task | None = None
 
 
-# ---- JSON error handlers ----
-
-@app.errorhandler(400)
-async def bad_request(e):
-    return jsonify({"error": str(e.description)}), 400
-
-@app.errorhandler(404)
-async def not_found(e):
-    return jsonify({"error": str(e.description)}), 404
-
-@app.errorhandler(500)
-async def internal_error(e):
-    return jsonify({"error": str(e.description)}), 500
-
-@app.errorhandler(503)
-async def service_unavailable(e):
-    return jsonify({"error": str(e.description)}), 503
-
-
-@app.before_serving
-async def setup():
+@asynccontextmanager
+async def lifespan(app):
     global db, db_read, _consumer_task
     setup_logging("payment-service")
 
@@ -81,9 +65,8 @@ async def setup():
     asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
     log.info("Payment service started", consumer=CONSUMER_NAME)
 
+    yield
 
-@app.after_serving
-async def teardown():
     if _consumer_task:
         _consumer_task.cancel()
         try:
@@ -158,23 +141,7 @@ async def _cancel(saga_id: str, user_id: str):
 # HTTP API endpoints
 # ============================================================================
 
-async def get_user_from_db(user_id: str, use_replica: bool = False) -> dict:
-    key = f"user:{user_id}"
-    conn = db_read if use_replica else db
-    try:
-        entry = await conn.hgetall(key)
-    except Exception:
-        try:
-            entry = await db.hgetall(key)
-        except aioredis.RedisError:
-            abort(400, DB_ERROR_STR)
-    if not entry:
-        abort(400, f"User: {user_id} not found!")
-    return entry
-
-
-@app.post('/create_user')
-async def create_user():
+async def create_user(request: Request):
     key = str(uuid.uuid4())
     try:
         await db.hset(f"user:{key}", mapping={
@@ -182,14 +149,13 @@ async def create_user():
             "held_credit": 0,
         })
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({'user_id': key})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"user_id": key})
 
 
-@app.post('/batch_init/<n>/<starting_money>')
-async def batch_init_users(n: int, starting_money: int):
-    n = int(n)
-    starting_money = int(starting_money)
+async def batch_init_users(request: Request):
+    n = int(request.path_params["n"])
+    starting_money = int(request.path_params["starting_money"])
     try:
         async with db.pipeline(transaction=False) as pipe:
             for i in range(n):
@@ -199,63 +165,90 @@ async def batch_init_users(n: int, starting_money: int):
                 })
             await pipe.execute()
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({"msg": "Batch init for users successful"})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"msg": "Batch init for users successful"})
 
 
-@app.get('/find_user/<user_id>')
-async def find_user(user_id: str):
-    # Read-only: use replica for reduced master load
-    entry = await get_user_from_db(user_id, use_replica=True)
+async def find_user(request: Request):
+    user_id = request.path_params["user_id"]
+    conn = db_read or db
+    try:
+        entry = await conn.hgetall(f"user:{user_id}")
+    except Exception:
+        try:
+            entry = await db.hgetall(f"user:{user_id}")
+        except aioredis.RedisError:
+            raise HTTPException(400, detail=DB_ERROR_STR)
+    if not entry:
+        raise HTTPException(400, detail=f"User: {user_id} not found!")
     available = int(entry["available_credit"])
     held = int(entry["held_credit"])
-    return jsonify({
+    return JSONResponse({
         "user_id": user_id,
         "credit": available + held,
     })
 
 
-@app.post('/add_funds/<user_id>/<amount>')
-async def add_credit(user_id: str, amount: int):
-    amount = int(amount)
+async def add_credit(request: Request):
+    user_id = request.path_params["user_id"]
+    amount = int(request.path_params["amount"])
     key = f"user:{user_id}"
     try:
         await db.fcall("payment_add_direct", 1, key, amount)
     except aioredis.ResponseError as e:
         if "USER_NOT_FOUND" in str(e):
-            abort(400, f"User: {user_id} not found!")
-        abort(400, DB_ERROR_STR)
+            raise HTTPException(400, detail=f"User: {user_id} not found!")
+        raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({"done": True})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"done": True})
 
 
-@app.post('/pay/<user_id>/<amount>')
-async def remove_credit(user_id: str, amount: int):
-    amount = int(amount)
+async def remove_credit(request: Request):
+    user_id = request.path_params["user_id"]
+    amount = int(request.path_params["amount"])
     key = f"user:{user_id}"
     try:
         new_credit = await db.fcall("payment_subtract_direct", 1, key, amount)
     except aioredis.ResponseError as e:
         err_msg = str(e)
         if "USER_NOT_FOUND" in err_msg:
-            abort(400, f"User: {user_id} not found!")
+            raise HTTPException(400, detail=f"User: {user_id} not found!")
         if "INSUFFICIENT_CREDIT" in err_msg:
-            abort(400, f"User: {user_id} credit cannot get reduced below zero!")
-        abort(400, DB_ERROR_STR)
+            raise HTTPException(400, detail=f"User: {user_id} credit cannot get reduced below zero!")
+        raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return Response(f"User: {user_id} credit updated to: {new_credit}", status=200)
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return PlainTextResponse(f"User: {user_id} credit updated to: {new_credit}")
 
 
-@app.get('/health')
-async def health():
+async def health(request: Request):
     try:
         await db.ping()
     except Exception:
-        abort(503, "Redis unavailable")
-    return jsonify({"status": "healthy"})
+        raise HTTPException(503, detail="Redis unavailable")
+    return JSONResponse({"status": "healthy"})
 
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000, debug=True)
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
+async def http_exception_handler(request, exc):
+    return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+
+routes = [
+    Route("/create_user", create_user, methods=["POST"]),
+    Route("/batch_init/{n}/{starting_money}", batch_init_users, methods=["POST"]),
+    Route("/find_user/{user_id}", find_user, methods=["GET"]),
+    Route("/add_funds/{user_id}/{amount}", add_credit, methods=["POST"]),
+    Route("/pay/{user_id}/{amount}", remove_credit, methods=["POST"]),
+    Route("/health", health, methods=["GET"]),
+]
+
+app = Starlette(
+    routes=routes,
+    lifespan=lifespan,
+    exception_handlers={HTTPException: http_exception_handler},
+)

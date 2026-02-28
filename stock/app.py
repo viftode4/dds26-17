@@ -1,13 +1,17 @@
 import asyncio
+import json
 import os
 import socket
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import redis.asyncio as aioredis
-
-from msgspec import msgpack
-from quart import Quart, jsonify, abort, Response
+from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
+from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
 from common.consumer import consumer_loop, dlq_sweep_loop
@@ -22,35 +26,15 @@ CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
 RESERVATION_TTL = 60  # 1 minute
 DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
-app = Quart("stock-service")
 log = get_logger("stock")
 
 db: aioredis.Redis | None = None
-db_read: aioredis.Redis | None = None  # Replica for read-only endpoints
+db_read: aioredis.Redis | None = None
 _consumer_task: asyncio.Task | None = None
 
 
-# ---- JSON error handlers ----
-
-@app.errorhandler(400)
-async def bad_request(e):
-    return jsonify({"error": str(e.description)}), 400
-
-@app.errorhandler(404)
-async def not_found(e):
-    return jsonify({"error": str(e.description)}), 404
-
-@app.errorhandler(500)
-async def internal_error(e):
-    return jsonify({"error": str(e.description)}), 500
-
-@app.errorhandler(503)
-async def service_unavailable(e):
-    return jsonify({"error": str(e.description)}), 503
-
-
-@app.before_serving
-async def setup():
+@asynccontextmanager
+async def lifespan(app):
     global db, db_read, _consumer_task
     setup_logging("stock-service")
 
@@ -82,9 +66,8 @@ async def setup():
     asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
     log.info("Stock service started", consumer=CONSUMER_NAME)
 
+    yield
 
-@app.after_serving
-async def teardown():
     if _consumer_task:
         _consumer_task.cancel()
         try:
@@ -110,22 +93,16 @@ async def handle_command(fields: dict):
                 "saga_id": saga_id, "event": "failed", "reason": "no_items",
             }, maxlen=10000, approximate=True)
             return
-        items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
+        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)]
         ttl = int(fields.get("ttl", RESERVATION_TTL))
         await _try_reserve(saga_id, items, ttl)
     elif action == "confirm":
         items_raw = fields.get("items", "")
-        if items_raw:
-            items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
-        else:
-            items = []
+        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)] if items_raw else []
         await _confirm(saga_id, items)
     elif action == "cancel":
         items_raw = fields.get("items", "")
-        if items_raw:
-            items = msgpack.decode(items_raw.encode("latin-1"), type=list[tuple[str, int]])
-        else:
-            items = []
+        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)] if items_raw else []
         await _cancel(saga_id, items)
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
@@ -145,7 +122,6 @@ async def _try_reserve(saga_id: str, items: list[tuple[str, int]], ttl: int = RE
 
 async def _confirm(saga_id: str, items: list[tuple[str, int]]):
     if not items:
-        # Nothing to confirm — publish confirmed event to unblock any waiters
         await db.xadd(STREAM_OUTBOX, {
             "saga_id": saga_id, "event": "confirmed", "reason": "no_items",
         }, maxlen=10000, approximate=True)
@@ -160,7 +136,6 @@ async def _confirm(saga_id: str, items: list[tuple[str, int]]):
 
 async def _cancel(saga_id: str, items: list[tuple[str, int]]):
     if not items:
-        # Nothing to cancel — still publish cancelled event to unblock any waiters
         await db.xadd(STREAM_OUTBOX, {
             "saga_id": saga_id, "event": "cancelled", "reason": "no_items",
         }, maxlen=10000, approximate=True)
@@ -177,40 +152,24 @@ async def _cancel(saga_id: str, items: list[tuple[str, int]]):
 # HTTP API endpoints
 # ============================================================================
 
-async def get_item_from_db(item_id: str, use_replica: bool = False) -> dict:
-    key = f"item:{item_id}"
-    conn = db_read if use_replica else db
-    try:
-        entry = await conn.hgetall(key)
-    except Exception:
-        try:
-            entry = await db.hgetall(key)
-        except aioredis.RedisError:
-            abort(400, DB_ERROR_STR)
-    if not entry:
-        abort(400, f"Item: {item_id} not found!")
-    return entry
-
-
-@app.post('/item/create/<price>')
-async def create_item(price: int):
+async def create_item(request: Request):
+    price = int(request.path_params["price"])
     key = str(uuid.uuid4())
     try:
         await db.hset(f"item:{key}", mapping={
             "available_stock": 0,
             "reserved_stock": 0,
-            "price": int(price),
+            "price": price,
         })
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({'item_id': key})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"item_id": key})
 
 
-@app.post('/batch_init/<n>/<starting_stock>/<item_price>')
-async def batch_init_users(n: int, starting_stock: int, item_price: int):
-    n = int(n)
-    starting_stock = int(starting_stock)
-    item_price = int(item_price)
+async def batch_init_users(request: Request):
+    n = int(request.path_params["n"])
+    starting_stock = int(request.path_params["starting_stock"])
+    item_price = int(request.path_params["item_price"])
     try:
         async with db.pipeline(transaction=False) as pipe:
             for i in range(n):
@@ -221,63 +180,90 @@ async def batch_init_users(n: int, starting_stock: int, item_price: int):
                 })
             await pipe.execute()
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return jsonify({"msg": "Batch init for stock successful"})
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return JSONResponse({"msg": "Batch init for stock successful"})
 
 
-@app.get('/find/<item_id>')
-async def find_item(item_id: str):
-    # Read-only: use replica for reduced master load
-    entry = await get_item_from_db(item_id, use_replica=True)
+async def find_item(request: Request):
+    item_id = request.path_params["item_id"]
+    conn = db_read or db
+    try:
+        entry = await conn.hgetall(f"item:{item_id}")
+    except Exception:
+        try:
+            entry = await db.hgetall(f"item:{item_id}")
+        except aioredis.RedisError:
+            raise HTTPException(400, detail=DB_ERROR_STR)
+    if not entry:
+        raise HTTPException(400, detail=f"Item: {item_id} not found!")
     available = int(entry["available_stock"])
     reserved = int(entry["reserved_stock"])
-    return jsonify({
+    return JSONResponse({
         "stock": available + reserved,
         "price": int(entry["price"]),
     })
 
 
-@app.post('/add/<item_id>/<amount>')
-async def add_stock(item_id: str, amount: int):
-    amount = int(amount)
+async def add_stock(request: Request):
+    item_id = request.path_params["item_id"]
+    amount = int(request.path_params["amount"])
     key = f"item:{item_id}"
     try:
         new_stock = await db.fcall("stock_add_direct", 1, key, amount)
     except aioredis.ResponseError as e:
         if "ITEM_NOT_FOUND" in str(e):
-            abort(400, f"Item: {item_id} not found!")
-        abort(400, DB_ERROR_STR)
+            raise HTTPException(400, detail=f"Item: {item_id} not found!")
+        raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {new_stock}", status=200)
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
 
-@app.post('/subtract/<item_id>/<amount>')
-async def remove_stock(item_id: str, amount: int):
-    amount = int(amount)
+async def remove_stock(request: Request):
+    item_id = request.path_params["item_id"]
+    amount = int(request.path_params["amount"])
     key = f"item:{item_id}"
     try:
         new_stock = await db.fcall("stock_subtract_direct", 1, key, amount)
     except aioredis.ResponseError as e:
         err_msg = str(e)
         if "ITEM_NOT_FOUND" in err_msg:
-            abort(400, f"Item: {item_id} not found!")
+            raise HTTPException(400, detail=f"Item: {item_id} not found!")
         if "INSUFFICIENT_STOCK" in err_msg:
-            abort(400, f"Item: {item_id} stock cannot get reduced below zero!")
-        abort(400, DB_ERROR_STR)
+            raise HTTPException(400, detail=f"Item: {item_id} stock cannot get reduced below zero!")
+        raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
-        abort(400, DB_ERROR_STR)
-    return Response(f"Item: {item_id} stock updated to: {new_stock}", status=200)
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
 
-@app.get('/health')
-async def health():
+async def health(request: Request):
     try:
         await db.ping()
     except Exception:
-        abort(503, "Redis unavailable")
-    return jsonify({"status": "healthy"})
+        raise HTTPException(503, detail="Redis unavailable")
+    return JSONResponse({"status": "healthy"})
 
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=8000, debug=True)
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
+async def http_exception_handler(request, exc):
+    return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
+
+
+routes = [
+    Route("/item/create/{price}", create_item, methods=["POST"]),
+    Route("/batch_init/{n}/{starting_stock}/{item_price}", batch_init_users, methods=["POST"]),
+    Route("/find/{item_id}", find_item, methods=["GET"]),
+    Route("/add/{item_id}/{amount}", add_stock, methods=["POST"]),
+    Route("/subtract/{item_id}/{amount}", remove_stock, methods=["POST"]),
+    Route("/health", health, methods=["GET"]),
+]
+
+app = Starlette(
+    routes=routes,
+    lifespan=lifespan,
+    exception_handlers={HTTPException: http_exception_handler},
+)
