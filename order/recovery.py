@@ -56,7 +56,7 @@ async def run_recovery(db, stock_db, payment_db, tx_mode: str):
                 except Exception:
                     continue
 
-                if order.checkout_status != "PENDING":
+                if order.checkout_status not in ("PENDING",):
                     await db.srem("pending_orders", key_str)
                     continue
 
@@ -162,23 +162,53 @@ async def _recover_saga_fallback(order_id, order, items_quantities, db, stock_db
 
 
 async def _recover_2pc(order_id, order, items_quantities, db, stock_db, payment_db):
-    """Recover 2PC by aborting all participants."""
+    """
+    Recover 2PC by enforcing the coordinator's last durable decision.
+
+    If the coordinator crashed AFTER writing checkout_step=COMMIT, we must
+    re-send commits to all participants (commit is idempotent).
+    Otherwise we abort all participants in order to be safe.
+    """
     from app import save_order
 
-    for item_id, quantity in items_quantities.items():
-        await stock_db.xadd("stock-commands", {
-            "cmd": "abort", "order_id": order_id,
-            "item_id": item_id, "quantity": str(quantity),
+    if order.checkout_step == "COMMIT":
+        # Coordinator had already decided COMMIT — enforce it everywhere.
+        logger.warning(f"2PC recovery: enforcing COMMIT for {order_id}")
+        for item_id, quantity in items_quantities.items():
+            await stock_db.xadd("stock-commands", {
+                "cmd": "commit", "order_id": order_id,
+                "item_id": item_id, "quantity": str(quantity),
+            })
+            await stock_db.blpop(f"response:{order_id}:stock", timeout=TIMEOUT)
+
+        await payment_db.xadd("payment-commands", {
+            "cmd": "commit", "order_id": order_id,
+            "user_id": order.user_id, "amount": str(order.total_cost),
         })
-        await stock_db.blpop(f"response:{order_id}:stock", timeout=TIMEOUT)
+        await payment_db.blpop(f"response:{order_id}:payment", timeout=TIMEOUT)
 
-    await payment_db.xadd("payment-commands", {
-        "cmd": "abort", "order_id": order_id,
-        "user_id": order.user_id, "amount": str(order.total_cost),
-    })
-    await payment_db.blpop(f"response:{order_id}:payment", timeout=TIMEOUT)
+        order.checkout_status = "COMMITTED"
+        order.checkout_step = "DONE"
+        order.paid = True
+        await save_order(db, order_id, order)
+        logger.info(f"2PC recovery for {order_id}: COMMITTED")
+    else:
+        # Coordinator had not yet decided, or had decided ABORT — enforce abort.
+        logger.warning(f"2PC recovery: enforcing ABORT for {order_id} (step={order.checkout_step})")
+        for item_id, quantity in items_quantities.items():
+            await stock_db.xadd("stock-commands", {
+                "cmd": "abort", "order_id": order_id,
+                "item_id": item_id, "quantity": str(quantity),
+            })
+            await stock_db.blpop(f"response:{order_id}:stock", timeout=TIMEOUT)
 
-    order.checkout_status = "ABORTED"
-    order.checkout_step = "RECOVERED"
-    await save_order(db, order_id, order)
-    logger.info(f"2PC recovery for {order_id}: ABORTED")
+        await payment_db.xadd("payment-commands", {
+            "cmd": "abort", "order_id": order_id,
+            "user_id": order.user_id, "amount": str(order.total_cost),
+        })
+        await payment_db.blpop(f"response:{order_id}:payment", timeout=TIMEOUT)
+
+        order.checkout_status = "ABORTED"
+        order.checkout_step = "RECOVERED"
+        await save_order(db, order_id, order)
+        logger.info(f"2PC recovery for {order_id}: ABORTED")

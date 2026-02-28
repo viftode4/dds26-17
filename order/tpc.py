@@ -11,6 +11,43 @@ logger = logging.getLogger("order-service")
 BLPOP_TIMEOUT = 30
 
 
+async def _clear_locks(order_id, order_entry, items_quantities, stock_db, payment_db):
+    """
+    Send clear_keys to stock and payment to wipe any stale 2PC lock state.
+    Called when retrying a previously ABORTED order so the new prepare starts clean.
+    We deliberately do NOT wait for responses — fire-and-forget with a short timeout.
+    """
+    for item_id, quantity in items_quantities.items():
+        await stock_db.xadd("stock-commands", {
+            "cmd": "clear_2pc", "order_id": order_id,
+            "item_id": item_id, "quantity": str(quantity),
+        })
+
+    await payment_db.xadd("payment-commands", {
+        "cmd": "clear_2pc", "order_id": order_id,
+        "user_id": order_entry.user_id, "amount": str(order_entry.total_cost),
+    })
+
+    # Drain the response queues that the services will push to
+    import asyncio
+    for item_id in items_quantities:
+        try:
+            await asyncio.wait_for(
+                stock_db.blpop(f"response:{order_id}:stock", timeout=5),
+                timeout=6,
+            )
+        except Exception:
+            pass
+
+    try:
+        await asyncio.wait_for(
+            payment_db.blpop(f"response:{order_id}:payment", timeout=5),
+            timeout=6,
+        )
+    except Exception:
+        pass
+
+
 async def checkout(order_id, order_entry, items_quantities, db, stock_db, payment_db):
     """
     Execute a 2PC checkout (async).
@@ -86,7 +123,7 @@ async def _commit(order_id, order_entry, stock_items, db, stock_db, payment_db):
     for item_id, quantity in stock_items:
         await stock_db.xadd("stock-commands", {
             "cmd": "commit", "order_id": order_id,
-            "item_id": item_id, "quantity": "0",
+            "item_id": item_id, "quantity": str(quantity),
         })
         await stock_db.blpop(f"response:{order_id}:stock", timeout=BLPOP_TIMEOUT)
 

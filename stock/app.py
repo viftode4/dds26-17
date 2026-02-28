@@ -205,36 +205,86 @@ async def handle_saga_confirm(order_id, item_id, quantity):
 
 
 async def handle_2pc_prepare(order_id, item_id, quantity):
-    """2PC prepare: tentatively reserve stock."""
+    """
+    2PC prepare: tentatively reserve stock.
+
+    Lock key stores a JSON dict: {"quantity": N, "status": "prepared"|"committed"|"aborted"}
+    This allows commit/abort/prepare to all be idempotent even when messages are replayed.
+    """
     lock_key = f"2pc:lock:{order_id}:{item_id}"
-    acquired = await db.set(lock_key, quantity, nx=True)
+
+    # Atomically create the lock only if it doesn't exist yet
+    acquired = await db.set(
+        lock_key,
+        json.dumps({"quantity": quantity, "status": "prepared"}),
+        nx=True,
+    )
     if not acquired:
-        existing = await db.get(lock_key)
-        if existing is not None:
+        # Lock already exists — read existing state for idempotency
+        existing_raw = await db.get(lock_key)
+        if existing_raw is None:
+            # Extremely rare race: deleted between SET NX and GET — treat as fail
+            return {"status": "fail", "order_id": order_id, "item_id": item_id, "reason": "lock_race"}
+        existing = json.loads(existing_raw)
+        status = existing.get("status")
+        if status == "prepared":
+            # Duplicate prepare; stock already reserved
             return {"status": "prepared", "order_id": order_id, "item_id": item_id}
-        return {"status": "fail", "order_id": order_id, "item_id": item_id, "reason": "lock_conflict"}
+        if status in ("committed", "aborted"):
+            # This order already finalised — do NOT reserve stock again
+            return {"status": "fail", "order_id": order_id, "item_id": item_id, "reason": f"already_{status}"}
+        # Unknown status — safe default
+        return {"status": "fail", "order_id": order_id, "item_id": item_id, "reason": "unknown_lock_state"}
+
+    # We own a fresh lock — try to reserve stock atomically
     result_code = await _subtract_script(keys=[item_id], args=[quantity])
     if result_code != 1:
-        await db.delete(lock_key)
+        # Not enough stock — mark lock as aborted so replays know not to retry
+        await db.set(lock_key, json.dumps({"quantity": quantity, "status": "aborted"}))
         return {"status": "fail", "order_id": order_id, "item_id": item_id, "reason": "insufficient_stock"}
+
     return {"status": "prepared", "order_id": order_id, "item_id": item_id}
 
 
 async def handle_2pc_commit(order_id, item_id, quantity):
-    """2PC commit: release lock and confirm deduction."""
+    """
+    2PC commit: permanently deduct reserved stock.
+
+    Idempotent: if lock is already 'committed' we skip the confirm script.
+    """
     lock_key = f"2pc:lock:{order_id}:{item_id}"
-    if await db.exists(lock_key):
-        await _confirm_script(keys=[item_id], args=[quantity])
-        await db.delete(lock_key)
+    lock_raw = await db.get(lock_key)
+    if lock_raw is not None:
+        info = json.loads(lock_raw)
+        if info.get("status") == "prepared":
+            await _confirm_script(keys=[item_id], args=[info["quantity"]])
+            # Mark as committed — do NOT delete; needed for replay idempotency
+            info["status"] = "committed"
+            await db.set(lock_key, json.dumps(info))
+        # If already committed or aborted, nothing more to do
     return {"status": "committed", "order_id": order_id, "item_id": item_id}
 
 
 async def handle_2pc_abort(order_id, item_id, quantity):
-    """2PC abort: restore stock and release lock."""
+    """
+    2PC abort: restore reserved stock.
+
+    Idempotent: If lock is already 'aborted' (or doesn't exist), skip compensate.
+    Also handles early-abort (abort arrives before prepare).
+    """
     lock_key = f"2pc:lock:{order_id}:{item_id}"
-    if await db.exists(lock_key):
-        await _compensate_script(keys=[item_id], args=[quantity])
-        await db.delete(lock_key)
+    lock_raw = await db.get(lock_key)
+    if lock_raw is not None:
+        info = json.loads(lock_raw)
+        if info.get("status") == "prepared":
+            await _compensate_script(keys=[item_id], args=[info["quantity"]])
+            info["status"] = "aborted"
+            await db.set(lock_key, json.dumps(info))
+        # If already aborted or committed, nothing more to do
+    else:
+        # Abort arrived before prepare — pre-set the lock to aborted so that
+        # if a prepare message is replayed, it will correctly fail.
+        await db.set(lock_key, json.dumps({"quantity": quantity, "status": "aborted"}))
     return {"status": "aborted", "order_id": order_id, "item_id": item_id}
 
 
@@ -358,7 +408,6 @@ async def startup():
     _confirm_script = db.register_script(CONFIRM_LUA)
     _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())
-    # Cleanup stale 2PC locks: REMOVED since locks shouldn't expire if they hold reserved stock.
 
 
 @app.after_serving

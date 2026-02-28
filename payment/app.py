@@ -196,46 +196,80 @@ async def handle_saga_confirm(order_id, user_id, amount):
 
 
 async def handle_2pc_prepare(order_id, user_id, amount):
-    """2PC prepare: lock user funds and tentatively deduct."""
-    lock_key = f"2pc:lock:{order_id}"
-    
-    # Needs to be idempotent. If lock already exists, we consider it a success for this order
-    existing = await db.get(lock_key)
-    if existing is not None:
-        return {"status": "prepared", "order_id": order_id}
+    """
+    2PC prepare: tentatively hold user funds.
 
-    # Atomically try to acquire the lock
-    acquired = await db.set(lock_key, json.dumps({"user_id": user_id, "amount": amount}), nx=True)
+    Lock key stores JSON: {"user_id": ..., "amount": ..., "status": "prepared"|"committed"|"aborted"}
+    This makes commit/abort/prepare all idempotent even under message replay.
+    """
+    lock_key = f"2pc:lock:{order_id}"
+
+    # Atomically create the lock only if it doesn't exist yet
+    acquired = await db.set(
+        lock_key,
+        json.dumps({"user_id": user_id, "amount": amount, "status": "prepared"}),
+        nx=True,
+    )
     if not acquired:
-        return {"status": "prepared", "order_id": order_id}
-        
+        existing_raw = await db.get(lock_key)
+        if existing_raw is None:
+            return {"status": "fail", "order_id": order_id, "reason": "lock_race"}
+        existing = json.loads(existing_raw)
+        status = existing.get("status")
+        if status == "prepared":
+            return {"status": "prepared", "order_id": order_id}
+        if status in ("committed", "aborted"):
+            return {"status": "fail", "order_id": order_id, "reason": f"already_{status}"}
+        return {"status": "fail", "order_id": order_id, "reason": "unknown_lock_state"}
+
+    # We own a fresh lock — try to hold funds atomically
     result_code = await _pay_script(keys=[user_id], args=[amount])
     if result_code != 1:
-        await db.delete(lock_key)
+        # Not enough credit — mark lock as aborted so replays know not to retry
+        await db.set(lock_key, json.dumps({"user_id": user_id, "amount": amount, "status": "aborted"}))
         return {"status": "fail", "order_id": order_id, "reason": "insufficient_credit"}
-        
+
     return {"status": "prepared", "order_id": order_id}
 
 
 async def handle_2pc_commit(order_id):
-    """2PC commit: release lock and confirm deduction."""
+    """
+    2PC commit: permanently consume held credit.
+
+    Idempotent: if lock is already 'committed' we skip the confirm script.
+    """
     lock_key = f"2pc:lock:{order_id}"
-    lock_data = await db.get(lock_key)
-    if lock_data is not None:
-        info = json.loads(lock_data)
-        await _confirm_script(keys=[info["user_id"]], args=[info["amount"]])
-        await db.delete(lock_key)
+    lock_raw = await db.get(lock_key)
+    if lock_raw is not None:
+        info = json.loads(lock_raw)
+        if info.get("status") == "prepared":
+            await _confirm_script(keys=[info["user_id"]], args=[info["amount"]])
+            # Mark as committed — do NOT delete; needed for replay idempotency
+            info["status"] = "committed"
+            await db.set(lock_key, json.dumps(info))
+        # If already committed or aborted, nothing more to do
     return {"status": "committed", "order_id": order_id}
 
 
 async def handle_2pc_abort(order_id):
-    """2PC abort: restore credit and release lock."""
+    """
+    2PC abort: restore held credit.
+
+    Idempotent: if lock is already 'aborted' (or doesn't exist), skip compensate.
+    Also handles early-abort (abort arrives before prepare).
+    """
     lock_key = f"2pc:lock:{order_id}"
-    lock_data = await db.get(lock_key)
-    if lock_data is not None:
-        info = json.loads(lock_data)
-        await _compensate_script(keys=[info["user_id"]], args=[info["amount"]])
-        await db.delete(lock_key)
+    lock_raw = await db.get(lock_key)
+    if lock_raw is not None:
+        info = json.loads(lock_raw)
+        if info.get("status") == "prepared":
+            await _compensate_script(keys=[info["user_id"]], args=[info["amount"]])
+            info["status"] = "aborted"
+            await db.set(lock_key, json.dumps(info))
+        # If already aborted or committed, nothing more to do
+    else:
+        # Abort arrived before prepare — pre-set lock to aborted
+        await db.set(lock_key, json.dumps({"status": "aborted"}))
     return {"status": "aborted", "order_id": order_id}
 
 
@@ -356,7 +390,6 @@ async def startup():
     _confirm_script = db.register_script(CONFIRM_LUA)
     _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())
-    # Cleanup stale 2PC locks: REMOVED since locks shouldn't expire if they hold reversed credit.
 
 
 @app.after_serving

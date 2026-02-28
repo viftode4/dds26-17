@@ -207,6 +207,15 @@ async def checkout(order_id: str):
     if order_entry.checkout_status == "PENDING":
         return Response("Checkout already in progress", status=400)
     if order_entry.checkout_status == "ABORTED":
+        # For 2PC retries, wipe stale lock state from participants so the
+        # new prepare phase starts fresh.
+        if TX_MODE == '2pc':
+            items_quantities_tmp: dict[str, int] = defaultdict(int)
+            for item_id, quantity in order_entry.items:
+                items_quantities_tmp[item_id] += quantity
+            for item_id in items_quantities_tmp:
+                await stock_db.delete(f"2pc:lock:{order_id}:{item_id}")
+            await payment_db.delete(f"2pc:lock:{order_id}")
         order_entry.checkout_status = ""
         order_entry.checkout_step = ""
 
