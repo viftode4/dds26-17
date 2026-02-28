@@ -378,14 +378,22 @@ async def add_item(order_id: str, item_id: str, quantity: int):
 async def checkout(order_id: str):
     log.debug("Checking out order", order_id=order_id)
 
-    # 1. Load order data from master (needs fresh paid status)
-    entry = await get_order_from_db(order_id)
-    items = await get_order_items(order_id)
+    # 1. Load order data + claim idempotency key in parallel (saves 1 RTT)
+    idempotency_key = f"idempotency:checkout:{order_id}"
+    saga_id = str(uuid.uuid4())
+    claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
+
+    (entry, items), acquired = await asyncio.gather(
+        asyncio.gather(get_order_from_db(order_id), get_order_items(order_id)),
+        db.set(idempotency_key, claim_value, nx=True, ex=3600),
+    )
     total_cost = int(entry["total_cost"])
     user_id = entry["user_id"]
 
-    # 2. Pre-check: already paid?
+    # 2. Pre-check: already paid? (release idempotency claim if we grabbed it)
     if entry["paid"] == "true":
+        if acquired:
+            asyncio.create_task(db.delete(idempotency_key))
         abort(400, "Order already paid")
 
     # 3. Aggregate items
@@ -395,14 +403,9 @@ async def checkout(order_id: str):
     aggregated_items = list(items_quantities.items())
 
     if not aggregated_items:
+        if acquired:
+            asyncio.create_task(db.delete(idempotency_key))
         abort(400, "Order has no items")
-
-    # 4. Idempotency check — exactly-once checkout guarantee
-    idempotency_key = f"idempotency:checkout:{order_id}"
-    saga_id = str(uuid.uuid4())
-    claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
-
-    acquired = await db.set(idempotency_key, claim_value, nx=True, ex=3600)
     if not acquired:
         # Another request already processing — get its saga_id and wait for result
         existing = await db.get(idempotency_key)
@@ -432,17 +435,22 @@ async def checkout(order_id: str):
     }
     result = await orchestrator.execute("checkout", context, saga_id_override=saga_id)
 
-    # 6. Cache result and update order
+    # 6. Cache result and update order — fire-and-forget (saga already committed,
+    #    writes are best-effort bookkeeping; recovery handles the edge case)
     if result.get("status") == "success":
-        final_value = json.dumps({"status": "success", "saga_id": saga_id})
-        await db.set(idempotency_key, final_value, ex=86400)
-        await db.hset(f"order:{order_id}", "paid", "true")
+        async def _commit_bookkeeping():
+            final_value = json.dumps({"status": "success", "saga_id": saga_id})
+            async with db.pipeline(transaction=False) as pipe:
+                pipe.set(idempotency_key, final_value, ex=86400)
+                pipe.hset(f"order:{order_id}", "paid", "true")
+                await pipe.execute()
+        asyncio.create_task(_commit_bookkeeping())
         log.info("Checkout successful", order_id=order_id, saga_id=saga_id,
                  protocol=result.get("protocol"))
         return Response("Checkout successful", status=200)
     else:
         # Delete idempotency key — allow client to retry after fixing conditions
-        await db.delete(idempotency_key)
+        asyncio.create_task(db.delete(idempotency_key))
         error = result.get("error", "unknown")
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         abort(400, f"Checkout failed: {error}")

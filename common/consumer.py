@@ -57,7 +57,7 @@ async def consumer_loop(
             messages = await db.xreadgroup(
                 consumer_group, consumer_name,
                 {stream: ">"},
-                count=10, block=100,
+                count=50, block=0,
             )
 
             if not messages:

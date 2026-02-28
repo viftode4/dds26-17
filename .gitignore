@@ -45,5 +45,10 @@ htmlcov/
 # Template (cloned reference, not part of project)
 _template/
 
+# TLA+
+tla/tla2tools.jar
+tla/states/
+tla/*_TTrace_*
+
 # Serena
 .serena/

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import socket
 import time
 import uuid
@@ -14,10 +15,11 @@ from orchestrator.metrics import MetricsCollector
 
 logger = structlog.get_logger("orchestrator.core")
 
-# Per-instance consumer group: each instance must see ALL outbox events (broadcast).
-# Hostname is stable across restarts within the same Docker container, so
-# XAUTOCLAIM on startup correctly reclaims this instance's stale PEL entries.
-OUTBOX_CONSUMER_GROUP = f"orchestrator-{socket.gethostname()}"
+# Per-worker consumer group: each worker process must see ALL outbox events
+# (broadcast). PID ensures that with `-w 2` each Hypercorn fork gets its own
+# group — otherwise XREADGROUP splits messages between workers and Futures in
+# the wrong process never resolve.
+OUTBOX_CONSUMER_GROUP = f"orchestrator-{socket.gethostname()}-{os.getpid()}"
 
 
 class Orchestrator:
@@ -106,12 +108,14 @@ class Orchestrator:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
 
-        # WAL: log transaction start — includes items so recovery can send correct commands
-        await self.wal.log(saga_id, "STARTED", {
+        # WAL: log transaction start — fire-and-forget because no side effects
+        # have occurred yet. If we crash before any reservations, there is nothing
+        # to recover. Recovery will simply not find this saga in the WAL.
+        asyncio.create_task(self.wal.log(saga_id, "STARTED", {
             "protocol": protocol,
             "tx_name": tx_name,
             **context,  # includes items — required for recovery cancel/confirm
-        })
+        }))
 
         # Execute and measure latency
         start = time.monotonic()
@@ -130,9 +134,9 @@ class Orchestrator:
         result["saga_id"] = saga_id
         result["protocol"] = protocol
 
-        # Publish result via pub/sub — needed for cross-instance recovery retries
-        # (when another instance needs to wait for this saga's result)
-        await self._publish_result(saga_id, result)
+        # Publish result via pub/sub — fire-and-forget, needed only for
+        # cross-instance recovery retries (rare fallback path)
+        asyncio.create_task(self._publish_result(saga_id, result))
 
         return result
 
@@ -159,8 +163,10 @@ class Orchestrator:
         result_data = json.dumps(result)
         result_key = f"saga-result:{saga_id}"
         notify_channel = f"saga-notify:{saga_id}"
-        await self.order_db.set(result_key, result_data, ex=60)
-        await self.order_db.publish(notify_channel, "done")
+        async with self.order_db.pipeline(transaction=False) as pipe:
+            pipe.set(result_key, result_data, ex=60)
+            pipe.publish(notify_channel, "done")
+            await pipe.execute()
 
     async def _outbox_consumer(self, db: aioredis.Redis, stream: str, service: str):
         """Background task reading outbox events via XREADGROUP for exactly-once delivery.
@@ -196,7 +202,7 @@ class Orchestrator:
                 messages = await db.xreadgroup(
                     OUTBOX_CONSUMER_GROUP, consumer_name,
                     {stream: ">"},
-                    count=50, block=100,
+                    count=50, block=0,
                 )
                 if not messages:
                     continue

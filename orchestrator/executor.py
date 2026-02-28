@@ -173,6 +173,21 @@ class _BaseExecutor:
         )
         return [(step, result) for (step, _), result in zip(pairs, raw)]
 
+    async def _fire_and_forget(
+        self, action: str, saga_id: str, steps: list[Step], context: dict
+    ) -> None:
+        """Send ``action`` to all steps in parallel — do NOT wait for responses.
+
+        Used for the presumed-commit optimisation: once every participant has
+        reserved successfully, the confirms are guaranteed to succeed (Lua is
+        idempotent, TTL >> confirm latency). The WAL stays in CONFIRMING so
+        the recovery worker will complete any that don't land.
+        """
+        await asyncio.gather(*[
+            self._send_command(step, saga_id, action, context)
+            for step in steps
+        ])
+
     def _inject_ttl(self, context: dict) -> None:
         """Compute adaptive reservation TTL from p99 latency and store in context."""
         p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
@@ -198,7 +213,7 @@ class TwoPCExecutor(_BaseExecutor):
                 await self.wal.log(saga_id, "FAILED")
                 return {"status": "failed", "error": f"service_{step.service}_unavailable"}
 
-        await self.wal.log(saga_id, "PREPARING")
+        asyncio.create_task(self.wal.log(saga_id, "PREPARING"))
         self._inject_ttl(context)
 
         # Phase 1: prepare all participants in parallel, collect votes
@@ -213,30 +228,19 @@ class TwoPCExecutor(_BaseExecutor):
         all_reserved = all(v[1].get("event") == "reserved" for v in votes)
 
         if all_reserved:
-            # Phase 2: COMMIT — confirm all in parallel
+            # Phase 2: COMMIT — presumed commit optimisation.
+            # All participants reserved → confirms are guaranteed to succeed
+            # (Lua idempotent, TTL >> confirm latency). Fire confirms without
+            # waiting for responses. WAL stays COMMITTING so recovery worker
+            # will complete any stragglers.
             await self.wal.log(saga_id, "COMMITTING")
-            for step, result in await self._broadcast("confirm", saga_id, tx_def.steps, context):
-                cb = self.circuit_breakers.get(step.service, CircuitBreaker())
-                if isinstance(result, Exception) or (
-                    isinstance(result, dict) and result.get("event") == "confirm_failed"
-                ):
-                    # Forward recovery: retry confirm — reservation_expired may be transient
-                    result = await self._retry_confirm(step, saga_id, context)
-                if result is None or (
-                    isinstance(result, dict) and result.get("event") == "confirm_failed"
-                ):
-                    logger.error("2PC confirm failed after retries", saga_id=saga_id, step=step.name)
-                    cb.record_failure()
-                    await self.wal.log(saga_id, "FAILED")
-                    return {"status": "failed", "error": "confirm_timeout_after_reserve"}
-                cb.record_success()
-
-            await _waitaof(list(self.service_dbs.values()))
-            await self.wal.log(saga_id, "COMPLETED")
+            await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
+            for step in tx_def.steps:
+                self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
             return {"status": "success"}
         else:
             # Phase 2: ABORT — cancel all in parallel
-            await self.wal.log(saga_id, "ABORTING")
+            asyncio.create_task(self.wal.log(saga_id, "ABORTING"))
             await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
@@ -271,7 +275,7 @@ class SagaExecutor(_BaseExecutor):
         self._inject_ttl(context)
 
         # Try phase: send all try_reserve in parallel, collect votes
-        await self.wal.log(saga_id, "TRYING")
+        asyncio.create_task(self.wal.log(saga_id, "TRYING"))
         votes: list[tuple[Step, dict]] = []
         for step, result in await self._broadcast("try_reserve", saga_id, tx_def.steps, context):
             if isinstance(result, Exception):
@@ -284,7 +288,7 @@ class SagaExecutor(_BaseExecutor):
 
         if not all_reserved:
             # Compensate ALL participants — Lua cancel is idempotent for un-reserved items
-            await self.wal.log(saga_id, "COMPENSATING")
+            asyncio.create_task(self.wal.log(saga_id, "COMPENSATING"))
             await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
@@ -294,24 +298,11 @@ class SagaExecutor(_BaseExecutor):
                     break
             return {"status": "failed", "error": reason}
 
-        # All reserved — confirm all in parallel
+        # All reserved — presumed commit: fire confirms, don't wait for responses.
+        # Lua confirm is idempotent, TTL >> confirm latency. WAL stays
+        # CONFIRMING so recovery worker completes any stragglers.
         await self.wal.log(saga_id, "CONFIRMING")
-        for step, result in await self._broadcast("confirm", saga_id, tx_def.steps, context):
-            cb = self.circuit_breakers.get(step.service, CircuitBreaker())
-            if isinstance(result, Exception) or (
-                isinstance(result, dict) and result.get("event") == "confirm_failed"
-            ):
-                # Forward recovery: retry confirm — reservation_expired may be transient
-                result = await self._retry_confirm(step, saga_id, context)
-            if result is None or (
-                isinstance(result, dict) and result.get("event") == "confirm_failed"
-            ):
-                logger.error("Saga confirm failed after retries", saga_id=saga_id, step=step.name)
-                cb.record_failure()
-                await self.wal.log(saga_id, "FAILED")
-                return {"status": "failed", "error": "confirm_timeout_after_reserve"}
-            cb.record_success()
-
-        await _waitaof(list(self.service_dbs.values()))
-        await self.wal.log(saga_id, "COMPLETED")
+        await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
+        for step in tx_def.steps:
+            self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
         return {"status": "success"}

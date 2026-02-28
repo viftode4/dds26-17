@@ -7,7 +7,7 @@ import redis.asyncio as aioredis
 import structlog
 from orchestrator.definition import TransactionDefinition
 from orchestrator.wal import WALEngine
-from orchestrator.executor import OutboxReader
+from orchestrator.executor import OutboxReader, STEP_TIMEOUT
 
 logger = structlog.get_logger("orchestrator.recovery")
 
@@ -119,8 +119,63 @@ class RecoveryWorker:
         await self._send_to_all("cancel", saga_id, data, "FAILED")
 
     async def _confirm_all(self, saga_id: str, data: dict):
-        """Send confirm to all services and log COMPLETED."""
-        await self._send_to_all("confirm", saga_id, data, "COMPLETED")
+        """Send confirm to all services with response-aware retry logic.
+
+        Waits for each service to respond with 'confirmed'. Retries
+        'confirm_failed' responses up to MAX_RETRIES. If any service still
+        fails after retries, sends cancel to all and logs FAILED.
+        """
+        tx_def = self.definitions.get(data.get("tx_name", ""))
+        if not tx_def:
+            # No definition — fall back to fire-and-forget (best effort)
+            await self._send_to_all("confirm", saga_id, data, "COMPLETED")
+            return
+
+        for attempt in range(MAX_RETRIES + 1):
+            # Send confirm to all steps and create outbox waiters
+            waiters = {}
+            for step in tx_def.steps:
+                db = self.service_dbs.get(step.service)
+                if not db:
+                    continue
+                stream = f"{step.service}-commands"
+                cmd = {"saga_id": saga_id, "action": "confirm"}
+                if step.payload_builder:
+                    cmd.update(step.payload_builder(saga_id, "confirm", data))
+                await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                waiters[step.service] = self.outbox_reader.create_waiter(saga_id, step.service)
+
+            # Collect responses
+            all_confirmed = True
+            failed_services = []
+            for service, fut in waiters.items():
+                try:
+                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                    if isinstance(result, dict) and result.get("event") == "confirm_failed":
+                        all_confirmed = False
+                        failed_services.append(service)
+                    elif isinstance(result, dict) and result.get("event") == "confirmed":
+                        pass  # good
+                    else:
+                        all_confirmed = False
+                        failed_services.append(service)
+                except asyncio.TimeoutError:
+                    all_confirmed = False
+                    failed_services.append(service)
+
+            if all_confirmed:
+                await self.wal.log(saga_id, "COMPLETED")
+                return
+
+            if attempt < MAX_RETRIES:
+                logger.warning("Recovery confirm retry",
+                               saga_id=saga_id, attempt=attempt + 1,
+                               failed_services=failed_services)
+                await asyncio.sleep(0.5 * (2 ** attempt))
+            else:
+                logger.error("Recovery confirm failed after retries, cancelling",
+                             saga_id=saga_id, failed_services=failed_services)
+                await self._abort_all(saga_id, data)
 
     async def start_claim_worker(self):
         """Start periodic XAUTOCLAIM worker for stuck messages."""

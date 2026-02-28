@@ -120,6 +120,7 @@ async def _try_reserve(saga_id: str, user_id: str, amount: int, ttl: int = RESER
         f"reservation:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
+        f"reservation_amount:{saga_id}:{user_id}",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
     await db.fcall("payment_try_reserve", len(keys), *keys, *args)
@@ -131,6 +132,7 @@ async def _confirm(saga_id: str, user_id: str):
         f"reservation:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
+        f"reservation_amount:{saga_id}:{user_id}",
     ]
     await db.fcall("payment_confirm", len(keys), *keys, saga_id)
 
@@ -147,6 +149,7 @@ async def _cancel(saga_id: str, user_id: str):
         f"reservation:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
+        f"reservation_amount:{saga_id}:{user_id}",
     ]
     await db.fcall("payment_cancel", len(keys), *keys, saga_id)
 

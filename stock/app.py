@@ -135,6 +135,7 @@ async def _try_reserve(saga_id: str, items: list[tuple[str, int]], ttl: int = RE
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
@@ -152,6 +153,7 @@ async def _confirm(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
     await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n))
 
@@ -166,6 +168,7 @@ async def _cancel(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
     await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n))
 

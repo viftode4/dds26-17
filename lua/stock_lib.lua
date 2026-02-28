@@ -12,19 +12,20 @@
 -- Used by both 2PC (prepare) and Saga (try_reserve)
 --
 -- Layout (for N items):
---   KEYS[1..N]     = item:{item_id} hashes
---   KEYS[N+1..2N]  = reservation:{saga_id}:{item_id} keys
---   KEYS[2N+1]     = stock-outbox stream
---   KEYS[2N+2]     = saga:{saga_id}:stock:status
---   ARGV[1]        = saga_id
---   ARGV[2]        = reservation_ttl
---   ARGV[3..3+2N]  = pairs of (item_id, amount)
+--   KEYS[1..N]       = item:{item_id} hashes
+--   KEYS[N+1..2N]    = reservation:{saga_id}:{item_id} keys (with TTL)
+--   KEYS[2N+1..3N]   = reservation_amount:{saga_id}:{item_id} keys (24h fallback)
+--   KEYS[3N+1]       = stock-outbox stream
+--   KEYS[3N+2]       = saga:{saga_id}:stock:status
+--   ARGV[1]          = saga_id
+--   ARGV[2]          = reservation_ttl
+--   ARGV[3..3+2N]    = pairs of (item_id, amount)
 local function try_reserve_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local ttl = tonumber(ARGV[2])
     local n_items = (#ARGV - 2) / 2
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local outbox_key = KEYS[3 * n_items + 1]
+    local status_key = KEYS[3 * n_items + 2]
 
     -- Idempotency check
     local status = redis.call('GET', status_key)
@@ -57,6 +58,7 @@ local function try_reserve_batch(KEYS, ARGV)
     for i = 1, n_items do
         local item_key = KEYS[i]
         local reservation_key = KEYS[n_items + i]
+        local fallback_key = KEYS[2 * n_items + i]
         local item_id = ARGV[1 + i * 2]
         local amount = tonumber(ARGV[2 + i * 2])
 
@@ -64,6 +66,8 @@ local function try_reserve_batch(KEYS, ARGV)
         redis.call('HINCRBY', item_key, 'reserved_stock', amount)
         redis.call('SET', reservation_key, tostring(amount))
         redis.call('EXPIRE', reservation_key, ttl)
+        -- Fallback amount key survives short reservation TTL (24h)
+        redis.call('SETEX', fallback_key, 86400, tostring(amount))
     end
 
     -- Idempotency marker + outbox event (atomic with state change)
@@ -78,16 +82,21 @@ end
 local function confirm_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = (tonumber(ARGV[2]))
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local outbox_key = KEYS[3 * n_items + 1]
+    local status_key = KEYS[3 * n_items + 2]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
-    if status == 'confirmed' then return 1 end
+    if status == 'confirmed' then
+        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'confirmed')
+        return 1
+    end
 
     for i = 1, n_items do
         local item_key = KEYS[i]
         local reservation_key = KEYS[n_items + i]
+        local fallback_key = KEYS[2 * n_items + i]
         local amount = redis.call('GET', reservation_key)
         if not amount then
             -- Reservation expired (TTL) — permanent failure
@@ -98,6 +107,7 @@ local function confirm_batch(KEYS, ARGV)
         end
         redis.call('HINCRBY', item_key, 'reserved_stock', -tonumber(amount))
         redis.call('DEL', reservation_key)
+        redis.call('DEL', fallback_key)
     end
 
     redis.call('SETEX', status_key, 86400, 'confirmed')
@@ -111,8 +121,8 @@ end
 local function cancel_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local outbox_key = KEYS[3 * n_items + 1]
+    local status_key = KEYS[3 * n_items + 2]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -121,13 +131,21 @@ local function cancel_batch(KEYS, ARGV)
     for i = 1, n_items do
         local item_key = KEYS[i]
         local reservation_key = KEYS[n_items + i]
+        local fallback_key = KEYS[2 * n_items + i]
         local amount = redis.call('GET', reservation_key)
         if amount then
             redis.call('HINCRBY', item_key, 'available_stock', tonumber(amount))
             redis.call('HINCRBY', item_key, 'reserved_stock', -tonumber(amount))
             redis.call('DEL', reservation_key)
+        else
+            -- Reservation key expired (TTL) — try fallback amount key
+            amount = redis.call('GET', fallback_key)
+            if amount then
+                redis.call('HINCRBY', item_key, 'available_stock', tonumber(amount))
+                redis.call('HINCRBY', item_key, 'reserved_stock', -tonumber(amount))
+            end
         end
-        -- If reservation already expired — idempotent no-op (TTL handled it)
+        redis.call('DEL', fallback_key)
     end
 
     redis.call('SETEX', status_key, 86400, 'cancelled')

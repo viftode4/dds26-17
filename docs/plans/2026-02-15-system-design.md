@@ -936,7 +936,106 @@ The new shipping service just needs to read from `shipping-commands` and write t
 
 ---
 
-## 22. References
+## 22. Formal Verification (TLA+)
+
+We formally specified the checkout protocol in TLA+/PlusCal to verify safety properties and expose edge-case bugs that are difficult to find through testing alone. The specification lives in `tla/CheckoutProtocol.tla`.
+
+### 22.1 What Was Modeled
+
+The specification models a single checkout saga at the protocol level, with 6 concurrent processes:
+
+| Process | Models | Key Behavior |
+|---------|--------|--------------|
+| **Orchestrator** | `executor.py` (TwoPCExecutor / SagaExecutor) | WAL state machine, parallel prepare, confirm with retry, cancel fire-and-forget |
+| **StockService** | `lua/stock_lib.lua` | try_reserve (idempotent), confirm (TTL check), cancel (idempotent restore) |
+| **PaymentService** | `lua/payment_lib.lua` | Same TCC pattern as stock, applied to credit |
+| **TTLDaemon** | Redis key expiry | Nondeterministically deletes reservation keys (key only, not counters) |
+| **CrashProcess** | Infrastructure failure | Nondeterministically kills the orchestrator at any non-terminal WAL state |
+| **RecoveryWorker** | `orchestrator/recovery.py` | Resumes saga based on last WAL state after crash |
+
+**Abstraction level:** Single-item, single-saga, message channels as sequences. This is sufficient to expose protocol-level bugs without combinatorial state explosion.
+
+### 22.2 Properties Verified
+
+TLC explored **275,784 states** (57,321 distinct) with search depth 96 in under 30 seconds (post-fix; pre-fix was 72,027 / 16,986 / depth 62). The larger state space results from the recovery worker's confirm retry logic.
+
+| Property | Formula | What It Checks | Result |
+|----------|---------|----------------|--------|
+| `NoDoubleSpend` | `stockAvailable ≥ 0 ∧ creditAvailable ≥ 0` | try_reserve never double-decrements | **PASS** |
+| `NonNegativeReserved` | `stockReserved ≥ 0 ∧ creditHeld ≥ 0` | Structural sanity | **PASS** |
+| `StockConservationTerminal` | `available + reserved + sold = initial` | Accounting identity at terminal | **PASS** |
+| `CreditConservationTerminal` | Same for credit | Accounting identity at terminal | **PASS** |
+| `EventualTermination` | `◇(walState ∈ {COMPLETED, FAILED})` | Every saga terminates (liveness) | **PASS** |
+| `CompletedImpliesBothConfirmed` | `COMPLETED ∧ Terminal ⇒ both confirmed` | WAL COMPLETED matches reality | **PASS** (was VIOLATED) |
+| `NoLeakedReservations` | `Terminal ⇒ reserved = 0 ∧ held = 0` | No permanently locked resources | **PASS** (was VIOLATED) |
+| `AtomicOutcome` | `Terminal ⇒ (stock=confirmed ⇔ payment=confirmed)` | Services agree on outcome | **PASS** (was VIOLATED) |
+
+### 22.3 Bugs Found by TLC
+
+#### Bug 1: Recovery Logs COMPLETED Blindly → Divergent Outcomes
+
+**TLC counterexample (30 steps):** Orchestrator reserves both services → enters COMMITTING → sends confirm → stock confirms, payment confirms → **crash** (state 23) → recovery reads WAL state COMMITTING → `_confirm_all` sends confirm to both and **immediately logs COMPLETED** (`recovery.py:121-123`) → TTL had expired on stock reservation → stock processes re-confirm but key is gone → returns `confirm_failed` → WAL says COMPLETED but stock status is "reserved" (never confirmed).
+
+**Violated invariants:** `CompletedImpliesBothConfirmed`, `AtomicOutcome` — WAL state COMPLETED while stock is "reserved" and payment is "confirmed".
+
+**Root cause:** `_send_to_all` (`recovery.py:92-115`) is fire-and-forget: it sends commands via XADD and immediately logs the final WAL state without waiting for or checking service responses.
+
+**Mitigation:** Recovery should use the same `_broadcast` + response collection pattern as the executor, with confirm retry logic. Only log COMPLETED after verifying all services responded with `confirmed`.
+
+#### Bug 2: TTL Expiry + Failed Confirm → Permanently Leaked Reservations
+
+**TLC counterexample (22 steps):** Orchestrator reserves both → TTL daemon expires a reservation key → confirm fails → retries exhaust → orchestrator logs **FAILED without sending cancel** (`executor.py:228-231`). Alternatively: crash during COMMITTING → recovery sends cancel → cancel finds key expired → no-op on counters (correct per `cancel_batch` line 125-130) → but `reserved_stock` stays permanently inflated at 3.
+
+**Violated invariant:** `NoLeakedReservations` — `stockReserved = 3` (or `creditHeld = 15`) at terminal state. Resources are permanently locked in "reserved" limbo.
+
+**Root cause:** Two interacting issues: (1) the executor's error path on confirm failure returns FAILED without compensating; (2) cancel with an expired key correctly does a no-op on counters (the key amount is lost), but the reserved counter was already inflated during try_reserve. The `available + reserved + sold = initial` conservation law still holds — the resources aren't double-spent, they're just permanently inaccessible.
+
+**Mitigation:** Store the reservation amount in a separate non-TTL key (or in the status key value) so cancel can restore counters even after the reservation key expires. Alternatively, the reconciliation worker (`_reconcile` in `recovery.py:193-198`) can periodically detect and fix these orphaned reservations.
+
+#### Bug 3: Idempotent Confirm Skips Outbox Event
+
+**Modeled but not directly violated by TLC** (because recovery is fire-and-forget, it doesn't wait for responses). This is a latent bug that would manifest if recovery were fixed to wait for responses.
+
+**Scenario:** Orchestrator sends confirm → stock confirms and emits outbox event → crash → recovery sends confirm again → stock hits idempotent path (`status == 'confirmed'`, `stock_lib.lua:86`) → returns `1` **without XADD to outbox** → a response-aware recovery would block forever waiting for a response that will never arrive.
+
+**Root cause:** The idempotent confirm path in both `stock_lib.lua:86` and `payment_lib.lua:53` returns early without emitting an outbox event. Idempotent `try_reserve` correctly re-emits (line 31-34); confirm should do the same.
+
+**Mitigation:** Always emit the outbox event on idempotent confirm. The outbox stream has `MAXLEN ~10000` so duplicates are harmless.
+
+#### Fixes Applied
+
+All three bugs were fixed and re-verified with TLC (all 8 invariants now PASS):
+
+1. **Fix 1 (Bug 3): Idempotent confirm re-emits outbox event.** Both `stock_lib.lua:confirm_batch` and `payment_lib.lua:payment_confirm` now emit an XADD to the outbox stream on the idempotent `status == 'confirmed'` path, matching how `try_reserve` already re-emits. This ensures response-aware recovery doesn't block forever.
+
+2. **Fix 2 (Bug 1): Recovery waits for confirm responses.** `recovery.py:_confirm_all` was replaced with response-aware logic that sends confirm to all services, creates outbox waiters, collects responses with `STEP_TIMEOUT`, retries `confirm_failed` up to `MAX_RETRIES`, and falls back to cancel-all + FAILED if retries exhaust. `_abort_all` remains fire-and-forget (cancel is idempotent).
+
+3. **Fix 3 (Bug 2): Executor cancels on retry exhaustion + fallback amount keys.**
+   - **Part A:** Both `TwoPCExecutor` and `SagaExecutor` now broadcast cancel to all services before logging FAILED when confirm retries exhaust (`executor.py`).
+   - **Part B:** `try_reserve` stores a fallback amount key (`reservation_amount:{saga_id}:{item_id}`) with 24h TTL that survives the short reservation TTL. Cancel reads the fallback when the reservation key has expired, restoring counters correctly. Confirm and cancel both delete the fallback key when done. This eliminates permanently leaked reservations.
+
+### 22.4 How to Run
+
+```bash
+# Prerequisites: Java 11+, TLA+ tools
+# Option 1: Download tla2tools.jar from https://github.com/tlaplus/tlaplus/releases
+
+# Step 1: Translate PlusCal to TLA+
+java -cp tla2tools.jar pcal.trans tla/CheckoutProtocol.tla
+
+# Step 2: Run TLC model checker
+java -jar tla2tools.jar -config tla/CheckoutProtocol.cfg tla/CheckoutProtocol.tla
+
+# Option 2: Open in TLA+ Toolbox IDE (visual counterexample traces)
+# File → Open Spec → Add New Spec → select CheckoutProtocol.tla
+# TLC Model Checker → New Model → use settings from CheckoutProtocol.cfg
+```
+
+TLC should report "Model checking completed. No error has been found." with all 8 invariants passing.
+
+---
+
+## 23. References
 
 ### Core Theory
 

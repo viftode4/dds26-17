@@ -11,6 +11,7 @@
 -- Reserve credit for a transaction
 -- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
+-- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = amount, ARGV[2] = saga_id, ARGV[3] = user_id, ARGV[4] = ttl
 local function payment_try_reserve(KEYS, ARGV)
     local status = redis.call('GET', KEYS[3])
@@ -38,6 +39,8 @@ local function payment_try_reserve(KEYS, ARGV)
     redis.call('HINCRBY', KEYS[1], 'held_credit', amount)
     redis.call('SET', KEYS[2], tostring(amount))
     redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4]))
+    -- Fallback amount key survives short reservation TTL (24h)
+    redis.call('SETEX', KEYS[5], 86400, tostring(amount))
     redis.call('SETEX', KEYS[3], 86400, 'reserved')
     redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
         'saga_id', ARGV[2], 'event', 'reserved', 'amount', ARGV[1])
@@ -47,10 +50,15 @@ end
 -- Confirm reserved credit (finalize payment)
 -- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
+-- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = saga_id
 local function payment_confirm(KEYS, ARGV)
     local status = redis.call('GET', KEYS[3])
-    if status == 'confirmed' then return 1 end
+    if status == 'confirmed' then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', ARGV[1], 'event', 'confirmed')
+        return 1
+    end
     local amount = redis.call('GET', KEYS[2])
     if not amount then
         redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
@@ -59,6 +67,7 @@ local function payment_confirm(KEYS, ARGV)
     end
     redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
     redis.call('DEL', KEYS[2])
+    redis.call('DEL', KEYS[5])
     redis.call('SETEX', KEYS[3], 86400, 'confirmed')
     redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
         'saga_id', ARGV[1], 'event', 'confirmed')
@@ -68,6 +77,7 @@ end
 -- Cancel reserved credit (restore to available)
 -- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
+-- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = saga_id
 local function payment_cancel(KEYS, ARGV)
     local status = redis.call('GET', KEYS[3])
@@ -77,7 +87,15 @@ local function payment_cancel(KEYS, ARGV)
         redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
         redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
         redis.call('DEL', KEYS[2])
+    else
+        -- Reservation key expired (TTL) — try fallback amount key
+        amount = redis.call('GET', KEYS[5])
+        if amount then
+            redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
+            redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
+        end
     end
+    redis.call('DEL', KEYS[5])
     redis.call('SETEX', KEYS[3], 86400, 'cancelled')
     redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
         'saga_id', ARGV[1], 'event', 'cancelled')
