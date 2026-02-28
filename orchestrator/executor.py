@@ -257,7 +257,7 @@ class TwoPCExecutor(_BaseExecutor):
             # (Lua idempotent, TTL >> confirm latency). Fire confirms without
             # waiting for responses. WAL stays COMMITTING so recovery worker
             # will complete any stragglers.
-            await self.wal.log(saga_id, "COMMITTING")
+            asyncio.create_task(self.wal.log(saga_id, "COMMITTING"))
             await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
             for step in tx_def.steps:
                 self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
@@ -325,7 +325,7 @@ class SagaExecutor(_BaseExecutor):
         # All reserved — presumed commit: fire confirms, don't wait for responses.
         # Lua confirm is idempotent, TTL >> confirm latency. WAL stays
         # CONFIRMING so recovery worker completes any stragglers.
-        await self.wal.log(saga_id, "CONFIRMING")
+        asyncio.create_task(self.wal.log(saga_id, "CONFIRMING"))
         await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
         for step in tx_def.steps:
             self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()

@@ -14,24 +14,31 @@
 -- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = amount, ARGV[2] = saga_id, ARGV[3] = user_id, ARGV[4] = ttl
 local function payment_try_reserve(KEYS, ARGV)
+    local skip_outbox = ARGV[5]  -- optional, "1" to skip
     local status = redis.call('GET', KEYS[3])
     if status == 'reserved' then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[2], 'event', 'reserved')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                'saga_id', ARGV[2], 'event', 'reserved')
+        end
         return 1
     end
 
     local available = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))
     if not available then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[2], 'event', 'failed', 'reason', 'user_not_found')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                'saga_id', ARGV[2], 'event', 'failed', 'reason', 'user_not_found')
+        end
         return 0
     end
 
     local amount = tonumber(ARGV[1])
     if available < amount then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[2], 'event', 'failed', 'reason', 'insufficient_credit')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                'saga_id', ARGV[2], 'event', 'failed', 'reason', 'insufficient_credit')
+        end
         return 0
     end
 
@@ -42,8 +49,10 @@ local function payment_try_reserve(KEYS, ARGV)
     -- Fallback amount key survives short reservation TTL (24h)
     redis.call('SETEX', KEYS[5], 86400, tostring(amount))
     redis.call('SETEX', KEYS[3], 86400, 'reserved')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', ARGV[2], 'event', 'reserved', 'amount', ARGV[1])
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', ARGV[2], 'event', 'reserved', 'amount', ARGV[1])
+    end
     return 1
 end
 
@@ -53,24 +62,31 @@ end
 -- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = saga_id
 local function payment_confirm(KEYS, ARGV)
+    local skip_outbox = ARGV[2]  -- optional, "1" to skip
     local status = redis.call('GET', KEYS[3])
     if status == 'confirmed' then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[1], 'event', 'confirmed')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                'saga_id', ARGV[1], 'event', 'confirmed')
+        end
         return 1
     end
     local amount = redis.call('GET', KEYS[2])
     if not amount then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
+        end
         return -1
     end
     redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
     redis.call('DEL', KEYS[2])
     redis.call('DEL', KEYS[5])
     redis.call('SETEX', KEYS[3], 86400, 'confirmed')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', ARGV[1], 'event', 'confirmed')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', ARGV[1], 'event', 'confirmed')
+    end
     return 1
 end
 
@@ -80,6 +96,7 @@ end
 -- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
 -- ARGV[1] = saga_id
 local function payment_cancel(KEYS, ARGV)
+    local skip_outbox = ARGV[2]  -- optional, "1" to skip
     local status = redis.call('GET', KEYS[3])
     if status == 'cancelled' then return 1 end
     local amount = redis.call('GET', KEYS[2])
@@ -97,8 +114,10 @@ local function payment_cancel(KEYS, ARGV)
     end
     redis.call('DEL', KEYS[5])
     redis.call('SETEX', KEYS[3], 86400, 'cancelled')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', ARGV[1], 'event', 'cancelled')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', ARGV[1], 'event', 'cancelled')
+    end
     return 1
 end
 

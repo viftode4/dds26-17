@@ -85,6 +85,7 @@ async def stock_direct_executor(
         args = [saga_id, str(ttl)]
         for iid, qty in items:
             args += [str(iid), str(qty)]
+        args.append("1")  # skip_outbox — result returned in-process
         result = await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
         if result == 1:
             return {"event": "reserved"}
@@ -95,7 +96,7 @@ async def stock_direct_executor(
         keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
         keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
         keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        result = await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n))
+        result = await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n), "1")
         if result == 1:
             return {"event": "confirmed"}
         return {"event": "confirm_failed", "reason": "reservation_expired"}
@@ -105,7 +106,7 @@ async def stock_direct_executor(
         keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
         keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
         keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n))
+        await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n), "1")
         return {"event": "cancelled"}
 
     return {"event": "failed", "reason": f"unknown_action:{action}"}
@@ -127,7 +128,7 @@ async def payment_direct_executor(
             "payment-outbox",
             f"reservation_amount:{saga_id}:{user_id}",
         ]
-        args = [str(amount), saga_id, user_id, str(ttl)]
+        args = [str(amount), saga_id, user_id, str(ttl), "1"]  # skip_outbox
         result = await db.fcall("payment_try_reserve", len(keys), *keys, *args)
         if result == 1:
             return {"event": "reserved"}
@@ -141,7 +142,7 @@ async def payment_direct_executor(
             "payment-outbox",
             f"reservation_amount:{saga_id}:{user_id}",
         ]
-        result = await db.fcall("payment_confirm", len(keys), *keys, saga_id)
+        result = await db.fcall("payment_confirm", len(keys), *keys, saga_id, "1")
         if result == 1:
             return {"event": "confirmed"}
         return {"event": "confirm_failed", "reason": "reservation_expired"}
@@ -156,7 +157,7 @@ async def payment_direct_executor(
             "payment-outbox",
             f"reservation_amount:{saga_id}:{user_id}",
         ]
-        await db.fcall("payment_cancel", len(keys), *keys, saga_id)
+        await db.fcall("payment_cancel", len(keys), *keys, saga_id, "1")
         return {"event": "cancelled"}
 
     return {"event": "failed", "reason": f"unknown_action:{action}"}
@@ -297,9 +298,9 @@ async def lifespan(app):
     await payment_db.function_load(payment_lua, replace=True)
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
-    await asyncio.gather(*[db.ping() for _ in range(8)])
-    await asyncio.gather(*[stock_db.ping() for _ in range(8)])
-    await asyncio.gather(*[payment_db.ping() for _ in range(8)])
+    await asyncio.gather(*[db.ping() for _ in range(32)])
+    await asyncio.gather(*[stock_db.ping() for _ in range(32)])
+    await asyncio.gather(*[payment_db.ping() for _ in range(32)])
 
     service_dbs = {"stock": stock_db, "payment": payment_db}
 
@@ -474,15 +475,31 @@ async def checkout(request: Request):
     order_id = request.path_params["order_id"]
     log.debug("Checking out order", order_id=order_id)
 
-    # 1. Load order data + claim idempotency key in parallel (saves 1 RTT)
+    # 1. Load order data + claim idempotency key in single Lua FCALL (1 RTT)
     idempotency_key = f"idempotency:checkout:{order_id}"
     saga_id = str(uuid.uuid4())
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
-    (entry, items), acquired = await asyncio.gather(
-        _load_order(order_id),
-        db.set(idempotency_key, claim_value, nx=True, ex=3600),
-    )
+    keys = [f"order:{order_id}", f"order:{order_id}:items", idempotency_key]
+    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "3600")
+    found, entry_flat_json, items_json, acquired_int = raw[0], raw[1], raw[2], raw[3]
+    if not found:
+        raise HTTPException(400, detail=f"Order: {order_id} not found!")
+
+    # Parse flat HGETALL array [k1, v1, k2, v2, ...] into dict
+    entry_flat = json.loads(entry_flat_json)
+    entry = {}
+    for i in range(0, len(entry_flat), 2):
+        entry[entry_flat[i]] = entry_flat[i + 1]
+
+    # Parse items list ["item_id:qty", ...]
+    raw_items = json.loads(items_json)
+    items = []
+    for raw_item in raw_items:
+        item_id, quantity = raw_item.split(":", 1)
+        items.append((item_id, int(quantity)))
+
+    acquired = acquired_int == 1
     total_cost = int(entry["total_cost"])
     user_id = entry["user_id"]
 

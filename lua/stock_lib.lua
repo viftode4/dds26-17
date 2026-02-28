@@ -20,18 +20,22 @@
 --   ARGV[1]          = saga_id
 --   ARGV[2]          = reservation_ttl
 --   ARGV[3..3+2N]    = pairs of (item_id, amount)
+--   ARGV[3+2N]        = optional skip_outbox ("1" to skip XADD)
 local function try_reserve_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local ttl = tonumber(ARGV[2])
-    local n_items = (#ARGV - 2) / 2
+    local n_items = (#KEYS - 2) / 3  -- derive from KEYS layout (3N+2), stable regardless of skip_outbox
+    local skip_outbox = ARGV[3 + 2 * n_items]  -- optional, "1" to skip
     local outbox_key = KEYS[3 * n_items + 1]
     local status_key = KEYS[3 * n_items + 2]
 
     -- Idempotency check
     local status = redis.call('GET', status_key)
     if status == 'reserved' then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'reserved')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                'saga_id', saga_id, 'event', 'reserved')
+        end
         return 1
     end
 
@@ -41,15 +45,19 @@ local function try_reserve_batch(KEYS, ARGV)
         local amount = tonumber(ARGV[2 + i * 2])
         local available = tonumber(redis.call('HGET', item_key, 'available_stock'))
         if not available then
-            redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-                'saga_id', saga_id, 'event', 'failed',
-                'reason', 'item_not_found', 'item_id', ARGV[1 + i * 2])
+            if skip_outbox ~= "1" then
+                redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                    'saga_id', saga_id, 'event', 'failed',
+                    'reason', 'item_not_found', 'item_id', ARGV[1 + i * 2])
+            end
             return 0
         end
         if available < amount then
-            redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-                'saga_id', saga_id, 'event', 'failed',
-                'reason', 'insufficient_stock', 'item_id', ARGV[1 + i * 2])
+            if skip_outbox ~= "1" then
+                redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                    'saga_id', saga_id, 'event', 'failed',
+                    'reason', 'insufficient_stock', 'item_id', ARGV[1 + i * 2])
+            end
             return 0
         end
     end
@@ -72,8 +80,10 @@ local function try_reserve_batch(KEYS, ARGV)
 
     -- Idempotency marker + outbox event (atomic with state change)
     redis.call('SETEX', status_key, 86400, 'reserved')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'reserved')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'reserved')
+    end
     return 1
 end
 
@@ -82,14 +92,17 @@ end
 local function confirm_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = (tonumber(ARGV[2]))
+    local skip_outbox = ARGV[3]  -- optional, "1" to skip
     local outbox_key = KEYS[3 * n_items + 1]
     local status_key = KEYS[3 * n_items + 2]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
     if status == 'confirmed' then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'confirmed')
+        if skip_outbox ~= "1" then
+            redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                'saga_id', saga_id, 'event', 'confirmed')
+        end
         return 1
     end
 
@@ -100,9 +113,11 @@ local function confirm_batch(KEYS, ARGV)
         local amount = redis.call('GET', reservation_key)
         if not amount then
             -- Reservation expired (TTL) — permanent failure
-            redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-                'saga_id', saga_id, 'event', 'confirm_failed',
-                'reason', 'reservation_expired')
+            if skip_outbox ~= "1" then
+                redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                    'saga_id', saga_id, 'event', 'confirm_failed',
+                    'reason', 'reservation_expired')
+            end
             return -1
         end
         redis.call('HINCRBY', item_key, 'reserved_stock', -tonumber(amount))
@@ -111,8 +126,10 @@ local function confirm_batch(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'confirmed')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'confirmed')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'confirmed')
+    end
     return 1
 end
 
@@ -121,6 +138,7 @@ end
 local function cancel_batch(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
+    local skip_outbox = ARGV[3]  -- optional, "1" to skip
     local outbox_key = KEYS[3 * n_items + 1]
     local status_key = KEYS[3 * n_items + 2]
 
@@ -149,8 +167,10 @@ local function cancel_batch(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'cancelled')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'cancelled')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'cancelled')
+    end
     return 1
 end
 
