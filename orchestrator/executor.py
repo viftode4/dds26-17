@@ -150,6 +150,16 @@ class _BaseExecutor:
             await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
         return None  # exhausted retries
 
+    async def _direct_broadcast(
+        self, action: str, saga_id: str, steps: list[Step], context: dict
+    ) -> list[tuple[Step, dict | BaseException]]:
+        """Call ``direct_executor`` on each step in parallel — bypasses streams."""
+        results = await asyncio.gather(*[
+            step.direct_executor(saga_id, action, context, self.service_dbs[step.service])
+            for step in steps
+        ], return_exceptions=True)
+        return list(zip(steps, results))
+
     async def _broadcast(
         self, action: str, saga_id: str, steps: list[Step], context: dict
     ) -> list[tuple[Step, dict | BaseException]]:
@@ -158,7 +168,12 @@ class _BaseExecutor:
         Returns ``(step, result)`` pairs where *result* is the event dict on
         success, or a ``BaseException`` (e.g. ``TimeoutError``) if the step
         didn't respond within ``STEP_TIMEOUT``.
+
+        When all steps have a ``direct_executor``, bypasses streams entirely
+        for a ~20-30ms latency saving per checkout.
         """
+        if all(step.direct_executor for step in steps):
+            return await self._direct_broadcast(action, saga_id, steps, context)
         pairs = [
             (step, self.outbox_reader.create_waiter(saga_id, step.service))
             for step in steps
@@ -182,7 +197,16 @@ class _BaseExecutor:
         reserved successfully, the confirms are guaranteed to succeed (Lua is
         idempotent, TTL >> confirm latency). The WAL stays in CONFIRMING so
         the recovery worker will complete any that don't land.
+
+        When all steps have a ``direct_executor``, fires them directly as
+        background tasks (still fire-and-forget semantics).
         """
+        if all(step.direct_executor for step in steps):
+            for step in steps:
+                asyncio.create_task(
+                    step.direct_executor(saga_id, action, context, self.service_dbs[step.service])
+                )
+            return
         await asyncio.gather(*[
             self._send_command(step, saga_id, action, context)
             for step in steps

@@ -40,6 +40,9 @@ async def lifespan(app):
     db = create_redis_connection(prefix="", decode_responses=True)
     await wait_for_redis(db, "payment-db")
 
+    # Prewarm connection pool
+    await asyncio.gather(*[db.ping() for _ in range(8)])
+
     # Replica connection for read-only find endpoints
     db_read = create_replica_connection(prefix="", decode_responses=True)
 

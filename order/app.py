@@ -65,6 +65,104 @@ def payment_payload(saga_id: str, action: str, context: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Direct executors — bypass streams, call Lua FCALL directly on target Redis.
+# Signature: (saga_id, action, context, db) -> {"event": ...}
+# ---------------------------------------------------------------------------
+
+async def stock_direct_executor(
+    saga_id: str, action: str, context: dict, db: aioredis.Redis
+) -> dict:
+    """Call stock Lua functions directly — eliminates 2 stream hops."""
+    items = context.get("items", [])
+    n = len(items)
+
+    if action == "try_reserve":
+        ttl = context.get("_reservation_ttl", 60)
+        keys = [f"item:{iid}" for iid, _ in items]
+        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
+        args = [saga_id, str(ttl)]
+        for iid, qty in items:
+            args += [str(iid), str(qty)]
+        result = await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
+        if result == 1:
+            return {"event": "reserved"}
+        return {"event": "failed", "reason": "insufficient_stock"}
+
+    elif action == "confirm":
+        keys = [f"item:{iid}" for iid, _ in items]
+        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
+        result = await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n))
+        if result == 1:
+            return {"event": "confirmed"}
+        return {"event": "confirm_failed", "reason": "reservation_expired"}
+
+    elif action == "cancel":
+        keys = [f"item:{iid}" for iid, _ in items]
+        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
+        await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n))
+        return {"event": "cancelled"}
+
+    return {"event": "failed", "reason": f"unknown_action:{action}"}
+
+
+async def payment_direct_executor(
+    saga_id: str, action: str, context: dict, db: aioredis.Redis
+) -> dict:
+    """Call payment Lua functions directly — eliminates 2 stream hops."""
+    user_id = context.get("user_id", "")
+    amount = context.get("total_cost", 0)
+    ttl = context.get("_reservation_ttl", 60)
+
+    if action == "try_reserve":
+        keys = [
+            f"user:{user_id}",
+            f"reservation:{saga_id}:{user_id}",
+            f"saga:{saga_id}:payment:status",
+            "payment-outbox",
+            f"reservation_amount:{saga_id}:{user_id}",
+        ]
+        args = [str(amount), saga_id, user_id, str(ttl)]
+        result = await db.fcall("payment_try_reserve", len(keys), *keys, *args)
+        if result == 1:
+            return {"event": "reserved"}
+        return {"event": "failed", "reason": "insufficient_credit"}
+
+    elif action == "confirm":
+        keys = [
+            f"user:{user_id}",
+            f"reservation:{saga_id}:{user_id}",
+            f"saga:{saga_id}:payment:status",
+            "payment-outbox",
+            f"reservation_amount:{saga_id}:{user_id}",
+        ]
+        result = await db.fcall("payment_confirm", len(keys), *keys, saga_id)
+        if result == 1:
+            return {"event": "confirmed"}
+        return {"event": "confirm_failed", "reason": "reservation_expired"}
+
+    elif action == "cancel":
+        if not user_id:
+            return {"event": "cancelled"}
+        keys = [
+            f"user:{user_id}",
+            f"reservation:{saga_id}:{user_id}",
+            f"saga:{saga_id}:payment:status",
+            "payment-outbox",
+            f"reservation_amount:{saga_id}:{user_id}",
+        ]
+        await db.fcall("payment_cancel", len(keys), *keys, saga_id)
+        return {"event": "cancelled"}
+
+    return {"event": "failed", "reason": f"unknown_action:{action}"}
+
+
+# ---------------------------------------------------------------------------
 # Transaction definition — application-specific, uses payload builders above.
 # ---------------------------------------------------------------------------
 
@@ -78,6 +176,7 @@ checkout_tx = TransactionDefinition(
             compensate="cancel",
             confirm="confirm",
             payload_builder=stock_payload,
+            direct_executor=stock_direct_executor,
         ),
         Step(
             name="reserve_payment",
@@ -86,6 +185,7 @@ checkout_tx = TransactionDefinition(
             compensate="cancel",
             confirm="confirm",
             payload_builder=payment_payload,
+            direct_executor=payment_direct_executor,
         ),
     ],
 )
@@ -188,6 +288,18 @@ async def lifespan(app):
     payment_db = create_redis_connection(prefix="PAYMENT_", decode_responses=True)
     await wait_for_redis(stock_db, "stock-db")
     await wait_for_redis(payment_db, "payment-db")
+
+    # Load Lua function libraries on stock/payment Redis (eliminates startup race —
+    # order service may call FCALL before stock/payment services have loaded their Lua)
+    stock_lua = (Path(__file__).parent / "lua" / "stock_lib.lua").read_text()
+    payment_lua = (Path(__file__).parent / "lua" / "payment_lib.lua").read_text()
+    await stock_db.function_load(stock_lua, replace=True)
+    await payment_db.function_load(payment_lua, replace=True)
+
+    # Prewarm connection pools — prevents first requests from hitting connection creation latency
+    await asyncio.gather(*[db.ping() for _ in range(8)])
+    await asyncio.gather(*[stock_db.ping() for _ in range(8)])
+    await asyncio.gather(*[payment_db.ping() for _ in range(8)])
 
     service_dbs = {"stock": stock_db, "payment": payment_db}
 
