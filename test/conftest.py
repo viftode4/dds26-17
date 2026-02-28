@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -117,3 +118,15 @@ def checkout_tx(checkout_steps) -> TransactionDefinition:
 @pytest.fixture
 def tx_definitions(checkout_tx) -> dict[str, TransactionDefinition]:
     return {"checkout": checkout_tx}
+
+
+# ---------------------------------------------------------------------------
+# Docker Compose helper (for integration tests)
+# ---------------------------------------------------------------------------
+
+def docker_compose(*args, check=False):
+    """Run a docker compose command, returning CompletedProcess."""
+    return subprocess.run(
+        ["docker", "compose", *args],
+        capture_output=True, text=True, check=check, timeout=60,
+    )
