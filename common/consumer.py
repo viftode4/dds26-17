@@ -13,7 +13,7 @@ from common.logging import get_logger
 
 log = get_logger("consumer")
 
-MAX_INFLIGHT = 50  # concurrent handler tasks (bounded by connection pool)
+MAX_INFLIGHT = 100  # concurrent handler tasks (bounded by connection pool)
 
 
 async def _process_and_ack(

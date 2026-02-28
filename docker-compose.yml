@@ -19,6 +19,11 @@ services:
         condition: service_healthy
       payment-service-2:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
 
   order-service-1:
     build: ./order
@@ -26,7 +31,7 @@ services:
     environment:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/order_redis.env
     volumes:
@@ -54,6 +59,11 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
 
   order-service-2:
     build: ./order
@@ -61,7 +71,7 @@ services:
     environment:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/order_redis.env
     volumes:
@@ -89,6 +99,11 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 512M
 
   # ---- Redis Masters ----
   order-db:
@@ -99,6 +114,13 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
+        --io-threads 3
+        --io-threads-do-reads yes
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
 
   stock-db:
     image: redis:7.2-bookworm
@@ -108,6 +130,13 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
+        --io-threads 3
+        --io-threads-do-reads yes
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
 
   payment-db:
     image: redis:7.2-bookworm
@@ -117,6 +146,13 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
+        --io-threads 3
+        --io-threads-do-reads yes
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
 
   # ---- Redis Replicas ----
   order-db-replica:
@@ -132,6 +168,11 @@ services:
     depends_on:
       order-db:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   stock-db-replica:
     image: redis:7.2-bookworm
@@ -146,6 +187,11 @@ services:
     depends_on:
       stock-db:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   payment-db-replica:
     image: redis:7.2-bookworm
@@ -160,6 +206,11 @@ services:
     depends_on:
       payment-db:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
 
   # ---- Sentinel Nodes ----
   # Entrypoint resolves hostnames to IPs at startup so Sentinel
@@ -182,6 +233,11 @@ services:
         condition: service_started
       payment-db-replica:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
 
   sentinel-2:
     image: redis:7.2-bookworm
@@ -201,6 +257,11 @@ services:
         condition: service_started
       payment-db-replica:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
 
   sentinel-3:
     image: redis:7.2-bookworm
@@ -220,11 +281,16 @@ services:
         condition: service_started
       payment-db-replica:
         condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: 64M
 
   stock-service:
     build: ./stock
     image: stock:latest
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/stock_redis.env
     volumes:
@@ -248,11 +314,16 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 384M
 
   stock-service-2:
     build: ./stock
     image: stock:latest
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/stock_redis.env
     volumes:
@@ -276,11 +347,16 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 384M
 
   payment-service:
     build: ./payment
     image: payment:latest
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/payment_redis.env
     volumes:
@@ -304,11 +380,16 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 384M
 
   payment-service-2:
     build: ./payment
     image: payment:latest
-    command: hypercorn -b 0.0.0.0:5000 -w 2 app:app
+    command: hypercorn -b 0.0.0.0:5000 -w 2 -k uvloop app:app
     env_file:
       - env/payment_redis.env
     volumes:
@@ -332,3 +413,8 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 384M
