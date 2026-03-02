@@ -5,6 +5,9 @@ This repository contains a microservices-based distributed system built with Pyt
 ## Prerequisites
 - Docker
 - Docker Compose
+- [minikube](https://minikube.sigs.k8s.io/docs/start/) (for Kubernetes)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) (for Kubernetes)
+- [Helm](https://helm.sh/docs/intro/install/) (for Kubernetes)
 
 ## Running the Application
 
@@ -88,9 +91,48 @@ curl -X POST http://localhost:8000/payment/create_user
 curl -X POST http://localhost:8000/stock/item/create/10
 ```
 
+## Running with Kubernetes (minikube)
+
+### 1. Deploy
+
+A single script handles everything: starts minikube, builds images inside the cluster, installs Redis via Helm, and deploys all services.
+
+```bash
+./minikube-deploy.sh
+```
+
+The script ends by starting a port-forward, making the gateway available on `localhost:8000` — identical to the Docker Compose setup. Press `Ctrl+C` to stop the port-forward (the cluster keeps running).
+
+### 2. Transaction mode
+
+```bash
+# SAGA (default)
+./minikube-deploy.sh
+
+# SAGA (explicit)
+TX_MODE=saga ./minikube-deploy.sh
+
+# 2PC
+TX_MODE=2pc ./minikube-deploy.sh
+```
+
+### 3. Teardown
+
+```bash
+./minikube-teardown.sh
+```
+
+This removes all k8s resources and Helm releases. To also delete the minikube cluster entirely:
+
+```bash
+minikube delete
+```
+
+---
+
 ## Running the Tests
 
-The project includes an end-to-end test suite (`test/test_microservices.py`) that interacts with the live system. Ensure the services are running (via `docker compose up -d`) before executing the tests.
+The project includes an end-to-end test suite (`test/test_microservices.py`) that interacts with the live system. Ensure the services are running (via `docker compose up -d` or `./minikube-deploy.sh`) before executing the tests.
 
 Run the test suite using Python's built-in `unittest` module:
 
@@ -99,3 +141,26 @@ python -m unittest test/test_microservices.py
 ```
 
 *Note: The test suite uses the `test/utils.py` helper methods to make HTTP requests against the gateway on port `8000`.*
+
+## Fault Tolerance Tests
+
+> **These tests require Docker Compose.** They rely on `docker kill` / `docker start` to inject failures into specific containers and cannot be used with the Kubernetes setup.
+
+The fault tolerance suite (`test/test_fault_tolerance.py`) verifies that the system maintains data consistency under random container failures. It runs a **Chaos Monkey** alongside concurrent purchase workloads: a background thread randomly kills and restarts service and Redis replica containers while 40 worker threads simultaneously attempt checkouts.
+
+Containers targeted by the Chaos Monkey:
+- `order-service`, `stock-service`, `payment-service`
+- `order-db-replica`, `stock-db-replica`, `payment-db-replica`
+
+After the workload completes, the test asserts:
+1. Credit spent equals the value of stock actually sold (no money lost or duplicated)
+2. Workers never reported more successes than stock was actually deducted
+
+Start the services with Docker Compose first, then run:
+
+```bash
+docker compose up -d
+python -m unittest test/test_fault_tolerance.py
+```
+
+The test takes roughly a minute to complete as it waits 20 seconds at the end for any in-flight async transactions to settle.

@@ -5,7 +5,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    component: stock
+    app: stock
   ports:
     - port: 5000
       name: http
@@ -19,32 +19,47 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      component: stock
+      app: stock
   template:
     metadata:
       labels:
-        component: stock
+        app: stock
     spec:
       containers:
         - name: stock
           image: stock:latest
-          resources:
-            limits:
-              memory: "1Gi"
-              cpu: "1"
-            requests:
-              memory: "1Gi"
-              cpu: "1"
-          command: ["gunicorn"]
-          args: ["-b", "0.0.0.0:5000", "app:app"]
+          imagePullPolicy: Never
+          command: ["hypercorn"]
+          args: ["--bind", "0.0.0.0:5000", "--workers", "1", "app:app"]
           ports:
             - containerPort: 5000
           env:
             - name: REDIS_HOST
-              value: redis-master
+              value: stock-redis-master
             - name: REDIS_PORT
-              value: '6379'
+              value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
             - name: REDIS_DB
               value: "0"
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 256Mi
+              cpu: 250m
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
