@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences
+POST,/orders/checkout,CatchResponseError('Checkout error: 500'),7

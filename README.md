@@ -9,34 +9,36 @@ crash recovery, and horizontal scaling.
 
 ```
                      ┌──────────┐
-        HTTP :8000 → │  Nginx   │ (round-robin)
+        HTTP :8000 → │ HAProxy  │ (path-prefix routing)
                      └────┬─────┘
-                ┌─────────┼─────────┐
-                ▼                   ▼
-         ┌────────────┐      ┌────────────┐
-         │  Order ×2  │      │  Order ×2  │   ← active-active, both execute sagas
-         │ Orchestrator│      │ Orchestrator│
-         └──────┬─────┘      └──────┬─────┘
-                │  Redis Streams     │
-        ┌───────┴────────────────────┴───────┐
-        ▼                                    ▼
-  ┌───────────┐                        ┌───────────┐
-  │ Stock ×2  │                        │Payment ×2 │   ← consumer groups
-  │ Lua atoms │                        │ Lua atoms │
-  └─────┬─────┘                        └─────┬─────┘
-        ▼                                    ▼
-  ┌───────────┐                        ┌───────────┐
-  │ Redis     │  ← Sentinel ×3 →      │ Redis     │   ← AOF, replicas
-  │ master+rep│    (failover)          │ master+rep│
-  └───────────┘                        └───────────┘
+              ┌──────────┼──────────┐
+              ▼                     ▼
+       ┌────────────┐        ┌────────────┐
+       │  Order #1  │        │  Order #2  │   ← active-active, 2PC or Saga
+       │ Orchestrator│        │ Orchestrator│
+       └──────┬─────┘        └──────┬─────┘
+              │     Redis Streams    │
+     ┌────────┴──────────────────────┴────────┐
+     ▼                  ▼                     ▼
+┌──────────┐     ┌───────────┐         ┌───────────┐
+│ Order DB │     │ Stock ×2  │         │Payment ×2 │
+│master+rep│     │ Lua atoms │         │ Lua atoms │
+└──────────┘     └─────┬─────┘         └─────┬─────┘
+     ↑                 ▼                     ▼
+  Sentinel ×3    ┌───────────┐         ┌───────────┐
+  (failover)     │ Stock DB  │         │Payment DB │
+                 │master+rep │         │master+rep │
+                 └───────────┘         └───────────┘
 ```
 
 **16 containers total:** 2 order, 2 stock, 2 payment, 3 Redis masters,
-3 Redis replicas, 3 Sentinels, 1 Nginx gateway.
+3 Redis replicas, 3 Sentinels, 1 HAProxy gateway.
 
 ### Key Features
 
 - **Hybrid 2PC/Saga** with adaptive protocol selection (hysteresis on abort rate)
+- **Direct FCALL bypass** for checkout hot path (skips Redis Streams entirely on fast path)
+- **Concurrent consumer dispatch** with asyncio Semaphore (eliminates head-of-line blocking)
 - **Atomic Lua functions** for stock/payment operations (no race conditions)
 - **Redis Streams** for async inter-service communication (event-driven)
 - **Write-Ahead Log** for crash recovery (survives any single container kill)
@@ -53,6 +55,11 @@ The orchestrator (`orchestrator/`) is a **standalone reusable package** with zer
 application-specific code. It coordinates distributed transactions for any set of
 services — adding a new service requires zero orchestrator changes. See
 [`orchestrator/README.md`](orchestrator/README.md) for package documentation.
+
+### Stack
+
+Services run **Starlette** (ASGI framework) with **Granian** as the HTTP server on **Python 3.13**.
+Redis client is `redis.asyncio` with `hiredis`, `decode_responses=True`, `max_connections=512`.
 
 ## Prerequisites
 
@@ -79,12 +86,23 @@ All 6 application services should show `healthy`. The gateway is available at
 
 ### 2. Run correctness tests
 
+With the system running:
+
 ```bash
 pip install requests    # if not already installed
 python -m pytest test/test_microservices.py -v
 ```
 
 Expected output: **3/3 passed**.
+
+Unit tests (no Docker required):
+
+```bash
+pip install -r test/requirements-test.txt
+python -m pytest test/ -v -m "not integration"
+```
+
+Expected: **78/78 passed**.
 
 ### 3. Verify consistency
 
@@ -130,10 +148,10 @@ Install Locust:
 pip install locust
 ```
 
-Create a `locustfile.py` (or use one from `wdm-project-benchmark`):
+Use the included locust file or one from `wdm-project-benchmark`:
 
 ```bash
-locust -f locustfile.py --host=http://localhost:8000 --users 200 --spawn-rate 20
+locust -f test/locustfile.py --host=http://localhost:8000 --users 200 --spawn-rate 20
 ```
 
 Open http://localhost:8089 for the Locust web UI with live throughput/latency charts.
@@ -216,14 +234,27 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   └── metrics.py          # Latency histograms + abort rate
 ├── common/                 # Shared utilities
 │   ├── config.py           # Redis connection factory (Sentinel-aware)
+│   ├── consumer.py         # Stream consumer loop + DLQ sweep
 │   ├── logging.py          # structlog setup
 │   └── result.py           # Pub/sub wait_for_result
 ├── lua/                    # Atomic Lua function libraries
 │   ├── order_lib.lua
 │   ├── stock_lib.lua
 │   └── payment_lib.lua
-├── test/                   # Correctness tests
+├── test/                   # 78 unit + 11 integration tests
 │   ├── test_microservices.py
+│   ├── test_circuit_breaker.py
+│   ├── test_consumer.py
+│   ├── test_crash_recovery.py
+│   ├── test_executor.py
+│   ├── test_orchestrator_core.py
+│   ├── test_outbox_reader.py
+│   ├── test_recovery.py
+│   ├── test_sentinel_failover.py
+│   ├── test_stress.py
+│   ├── test_wal_metrics.py
+│   ├── conftest.py
+│   ├── locustfile.py
 │   └── utils.py
 ├── docs/
 │   ├── plans/2026-02-15-system-design.md   # Design document
@@ -231,8 +262,11 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   └── stress_test_results.png             # Benchmark results
 ├── env/                    # Redis connection env vars
 ├── docker-compose.yml      # Full 16-container deployment
-├── gateway_nginx.conf      # Nginx reverse proxy config
+├── haproxy.cfg             # HAProxy reverse proxy config
+├── sentinel.conf           # Redis Sentinel configuration
 ├── sentinel-entrypoint.sh  # Sentinel startup script
+├── requirements.txt        # Python dependencies (top-level)
+├── tla/                    # TLA+ formal specification (CheckoutProtocol.tla)
 ├── contributions.txt       # Team contributions
 └── README.md               # This file
 ```
@@ -271,26 +305,34 @@ All endpoints are available via the gateway at `http://localhost:8000`.
 
 ## Performance Results
 
-Benchmarked with 200 concurrent users on Docker Desktop (20 CPU limit):
+Benchmarked on Docker Desktop (run r8 — direct FCALL + skip_outbox + merged Lua):
+
+**100 concurrent users:**
 
 | Metric | Value |
 |--------|-------|
-| Throughput | 163 req/s |
-| p50 latency | 33 ms |
-| p90 latency | 90 ms |
-| p99 latency | 160 ms |
-| Max latency | 240 ms |
+| Throughput | 573 req/s |
+| Checkout p50 | 10 ms |
+| Checkout p99 | 91 ms |
 | Consistency | 0 inconsistencies |
-| Success rate | 99.99% |
+
+**200 concurrent users:**
+
+| Metric | Value |
+|--------|-------|
+| Throughput | 759 req/s |
+| Checkout p50 | 67 ms |
+| Checkout p99 | 210 ms |
+| Consistency | 0 inconsistencies |
 
 ## Logs
 
 View structured JSON logs from any service:
 
 ```bash
-docker compose logs -f order-service-1
-docker compose logs -f stock-service
-docker compose logs -f payment-service
+docker compose logs -f order-service-1 order-service-2
+docker compose logs -f stock-service stock-service-2
+docker compose logs -f payment-service payment-service-2
 ```
 
 ## Design Document

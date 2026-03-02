@@ -52,3 +52,4 @@ tla/*_TTrace_*
 
 # Serena
 .serena/
+.grepai/

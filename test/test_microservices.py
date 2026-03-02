@@ -1,6 +1,9 @@
 import unittest
 
+import pytest
 import utils as tu
+
+pytestmark = pytest.mark.integration
 
 
 class TestMicroservices(unittest.TestCase):
