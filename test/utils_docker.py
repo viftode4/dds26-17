@@ -18,17 +18,17 @@ def run_command(command: str) -> str:
 
 def kill_container(container_name: str):
     """Kills a Docker container forcefully."""
-    print(f"💀 Killing container: {container_name}")
+    print(f"Killing container: {container_name}")
     run_command(f"docker kill {container_name}")
 
 
 def start_container(container_name: str):
     """Starts a previously killed Docker container."""
-    print(f"🚀 Starting container: {container_name}")
+    print(f"Starting container: {container_name}")
     run_command(f"docker start {container_name}")
 
 
 def restart_container(container_name: str):
     """Restarts a Docker container."""
-    print(f"🔄 Restarting container: {container_name}")
+    print(f"Restarting container: {container_name}")
     run_command(f"docker restart {container_name}")

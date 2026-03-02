@@ -11,6 +11,8 @@ from quart import Quart, jsonify, abort, Response
 
 DB_ERROR_STR = "DB error"
 
+RECONCILE_INTERVAL = 60
+
 app = Quart("stock-service")
 
 # --- Redis connection with pool (own database) ---
@@ -393,21 +395,48 @@ async def consumer_loop():
             await asyncio.sleep(1)
 
 
+async def reconciliation_loop():
+    """Background task: periodically clean up stale response keys that missed TTL expiration."""
+    app.logger.info("Stock cleanup task started")
+    while True:
+        try:
+            await asyncio.sleep(RECONCILE_INTERVAL)
+            cursor = 0
+            cleaned = 0
+            while True:
+                cursor, keys = await db.scan(cursor, match="response:*", count=50)
+                for key in keys:
+                    ttl = await db.ttl(key)
+                    if ttl == -1:  # No TTL set — add 60s expiry
+                        await db.expire(key, 60)
+                        cleaned += 1
+                if cursor == 0:
+                    break
+            if cleaned > 0:
+                app.logger.info(f"Cleaned up {cleaned} stale response keys")
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            app.logger.error(f"Cleanup error: {e}")
+
+
 # ==========================================
 #   LIFECYCLE
 # ==========================================
 
 _consumer_task = None
+_cleanup_task = None
 
 
 @app.before_serving
 async def startup():
-    global _subtract_script, _direct_subtract_script, _confirm_script, _compensate_script, _consumer_task
+    global _subtract_script, _direct_subtract_script, _confirm_script, _compensate_script, _consumer_task, _cleanup_task
     _subtract_script = db.register_script(SUBTRACT_LUA)
     _direct_subtract_script = db.register_script(DIRECT_SUBTRACT_LUA)
     _confirm_script = db.register_script(CONFIRM_LUA)
     _compensate_script = db.register_script(COMPENSATE_LUA)
     _consumer_task = asyncio.create_task(consumer_loop())
+    _cleanup_task = asyncio.create_task(reconciliation_loop())
 
 
 @app.after_serving
@@ -416,6 +445,12 @@ async def shutdown():
         _consumer_task.cancel()
         try:
             await _consumer_task
+        except asyncio.CancelledError:
+            pass
+    if _cleanup_task:
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
         except asyncio.CancelledError:
             pass
     await db.aclose()

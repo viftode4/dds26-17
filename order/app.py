@@ -168,10 +168,14 @@ async def add_item(order_id: str, item_id: str, quantity):
     except ValueError:
         return Response("Invalid quantity", status=400)
         
-    price_bytes = await stock_db.hget(item_id, 'price')
-    if not price_bytes:
-        return Response(f"Item: {item_id} does not exist!", status=400)
-    price = int(price_bytes)
+    try:
+        r = await http_client.get(f"{GATEWAY_URL}/stock/find/{item_id}")
+        if r.status_code != 200:
+            return Response(f"Item: {item_id} does not exist!", status=400)
+        price = r.json()["price"]
+    except Exception as e:
+        app.logger.error(f"Error communicating with stock service: {e}")
+        return Response(REQ_ERROR_STR, status=400)
 
     async with db.pipeline(transaction=True) as pipe:
         while True:
@@ -202,6 +206,10 @@ async def checkout(order_id: str):
     app.logger.debug(f"Checking out {order_id} (mode: {TX_MODE})")
     order_entry: OrderValue = await get_order_from_db(order_id)
 
+    items_quantities: dict[str, int] = defaultdict(int)
+    for item_id, quantity in order_entry.items:
+        items_quantities[item_id] += quantity
+
     if order_entry.checkout_status == "COMMITTED":
         return Response("Order already checked out", status=400)
     if order_entry.checkout_status == "PENDING":
@@ -210,18 +218,9 @@ async def checkout(order_id: str):
         # For 2PC retries, wipe stale lock state from participants so the
         # new prepare phase starts fresh.
         if TX_MODE == '2pc':
-            items_quantities_tmp: dict[str, int] = defaultdict(int)
-            for item_id, quantity in order_entry.items:
-                items_quantities_tmp[item_id] += quantity
-            for item_id in items_quantities_tmp:
-                await stock_db.delete(f"2pc:lock:{order_id}:{item_id}")
-            await payment_db.delete(f"2pc:lock:{order_id}")
+            await tpc._clear_locks(order_id, order_entry, items_quantities, stock_db, payment_db)
         order_entry.checkout_status = ""
         order_entry.checkout_step = ""
-
-    items_quantities: dict[str, int] = defaultdict(int)
-    for item_id, quantity in order_entry.items:
-        items_quantities[item_id] += quantity
 
     if not items_quantities:
         abort(400, "Order has no items")

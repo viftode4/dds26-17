@@ -32,7 +32,7 @@ async def reconciliation_loop(db, stock_db, payment_db, tx_mode: str):
     while True:
         try:
             await asyncio.sleep(RECONCILE_INTERVAL)
-            await _reconcile(db, stock_db, payment_db, tx_mode)
+            await _reconcile(db, tx_mode)
         except asyncio.CancelledError:
             logger.info("Reconciliation worker stopped")
             return
@@ -40,7 +40,7 @@ async def reconciliation_loop(db, stock_db, payment_db, tx_mode: str):
             logger.error(f"Reconciliation error: {e}")
 
 
-async def _reconcile(db, stock_db, payment_db, tx_mode):
+async def _reconcile(db, tx_mode):
     """Run one reconciliation pass."""
     from app import OrderValue, save_order
 
@@ -83,25 +83,7 @@ async def _reconcile(db, stock_db, payment_db, tx_mode):
         except Exception as e:
             logger.error(f"Reconcile: WAL check error: {e}")
 
-    # 3. Clean up stale response keys on stock-db and payment-db
-    for target_db, name in [(stock_db, "stock"), (payment_db, "payment")]:
-        try:
-            cursor = 0
-            cleaned = 0
-            while True:
-                cursor, keys = await target_db.scan(cursor, match="response:*", count=50)
-                for key in keys:
-                    ttl = await target_db.ttl(key)
-                    if ttl == -1:  # No TTL set — add 60s expiry
-                        await target_db.expire(key, 60)
-                        cleaned += 1
-                if cursor == 0:
-                    break
-            if cleaned:
-                logger.info(f"Reconcile: set TTL on {cleaned} stale {name} response keys")
-                issues += cleaned
-        except Exception as e:
-            logger.error(f"Reconcile: {name} cleanup error: {e}")
+
 
     if issues:
         logger.info(f"Reconciliation pass complete: {issues} issues resolved")
