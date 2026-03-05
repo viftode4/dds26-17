@@ -1,0 +1,8 @@
+Method,Name,Error,Occurrences
+GET,/stock/find,HTTPError('502 Server Error: Bad Gateway for url: /stock/find'),4
+POST,/orders/checkout,CatchResponseError('Checkout error: 0'),9
+POST,/orders/create,CatchResponseError('Create order failed: 400'),1
+POST,/orders/addItem,CatchResponseError('Add item failed: 502'),33
+POST,/orders/create,CatchResponseError('Create order failed: 502'),61
+POST,/payment/add_funds,HTTPError('502 Server Error: Bad Gateway for url: /payment/add_funds'),6
+POST,/orders/checkout,CatchResponseError('Checkout error: 502'),23

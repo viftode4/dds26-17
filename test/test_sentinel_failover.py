@@ -81,6 +81,9 @@ async def test_sentinel_failover_stock_master():
 
         item_id, user_id = await _setup_item_and_user(client, stock=100, credit=100000)
 
+        # Wait for replication to propagate to replica before killing master
+        await asyncio.sleep(3)
+
         # Kill the stock master
         _docker_compose("kill", "stock-db")
 
@@ -106,6 +109,12 @@ async def test_sentinel_failover_stock_master():
         # Restart killed containers and wait for full recovery
         _docker_compose("start", "stock-db")
         await asyncio.sleep(10)
+
+        # Restart app services to force connection pool refresh after topology change
+        # (sentinel promoted replica to master — old connections to original master are stale)
+        _docker_compose("restart", "stock-service", "stock-service-2",
+                        "order-service-1", "order-service-2")
+        await asyncio.sleep(15)
 
         # At least one checkout should have succeeded or failed gracefully (not all 5xx)
         non_5xx = [r for r in results if r < 500 and r > 0]

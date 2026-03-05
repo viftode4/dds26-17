@@ -56,6 +56,12 @@ application-specific code. It coordinates distributed transactions for any set o
 services — adding a new service requires zero orchestrator changes. See
 [`orchestrator/README.md`](orchestrator/README.md) for package documentation.
 
+### Architectural Compliance Report
+
+For a detailed analysis of how this project adheres to the assignment requirements and how
+our design decisions compare to real-world production systems (Amazon, Uber, Stripe, etc.),
+see [`docs/architectural_compliance_report.md`](docs/architectural_compliance_report.md).
+
 ### Stack
 
 Services run **Starlette** (ASGI framework) with **Granian** as the HTTP server on **Python 3.13**.

@@ -1,0 +1,8 @@
+Method,Name,Error,Occurrences
+POST,/orders/create,CatchResponseError('Create order failed: 0'),2
+POST,/payment/add_funds,HTTPError('404 Client Error: Not Found for url: /payment/add_funds'),3655
+POST,/orders/addItem,CatchResponseError('Add item failed: 404'),629
+POST,/orders/create,CatchResponseError('Create order failed: 502'),4
+POST,/orders/create,CatchResponseError('Create order failed: 404'),14788
+POST,/orders/checkout,CatchResponseError('Checkout error: 502'),1
+POST,/orders/checkout,CatchResponseError('Checkout error: 404'),236

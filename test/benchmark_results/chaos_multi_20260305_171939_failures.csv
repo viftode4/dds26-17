@@ -1,0 +1,13 @@
+Method,Name,Error,Occurrences
+GET,/stock/find,HTTPError('502 Server Error: Bad Gateway for url: /stock/find'),6
+POST,/orders/addItem,CatchResponseError('Add item failed: 502'),52
+POST,/payment/add_funds,RemoteDisconnected('Remote end closed connection without response'),1
+POST,/orders/create,CatchResponseError('Create order failed: 0'),1
+POST,/payment/add_funds,HTTPError('404 Client Error: Not Found for url: /payment/add_funds'),1543
+POST,/orders/addItem,CatchResponseError('Add item failed: 404'),1156
+POST,/orders/create,CatchResponseError('Create order failed: 502'),84
+POST,/payment/add_funds,HTTPError('502 Server Error: Bad Gateway for url: /payment/add_funds'),2
+POST,/orders/create,CatchResponseError('Create order failed: 404'),5254
+POST,/orders/checkout,CatchResponseError('Checkout error: 502'),33
+POST,/orders/checkout,CatchResponseError('Checkout error: 404'),466
+GET,/stock/find,RemoteDisconnected('Remote end closed connection without response'),3
