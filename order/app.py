@@ -7,7 +7,6 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import httpx
 import redis.asyncio as aioredis
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
@@ -25,15 +24,12 @@ from orchestrator import (
 
 
 DB_ERROR_STR = "DB error"
-REQ_ERROR_STR = "Requests error"
 
-GATEWAY_URL = os.environ['GATEWAY_URL']
 
 log = get_logger("order")
 
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
-http_client: httpx.AsyncClient | None = None
 orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
@@ -262,7 +258,7 @@ async def _leadership_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, http_client, orchestrator, leader_election, recovery_worker, _leader_task
+    global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task
 
     setup_logging("order-service")
 
@@ -272,8 +268,6 @@ async def lifespan(app):
 
     # Replica connection for read-only lookups
     db_read = create_replica_connection(prefix="", decode_responses=True)
-
-    http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=10.0)
 
     # Load Lua function library
     lua_path = Path(__file__).parent / "lua" / "order_lib.lua"
@@ -340,8 +334,6 @@ async def lifespan(app):
         await orchestrator.stop()
         for db_conn in orchestrator.service_dbs.values():
             await db_conn.aclose()
-    if http_client:
-        await http_client.aclose()
     if db_read:
         await db_read.aclose()
     if db:
@@ -427,14 +419,10 @@ async def add_item(request: Request):
     quantity = int(request.path_params["quantity"])
     if quantity <= 0:
         raise HTTPException(400, detail="Quantity must be positive")
-    try:
-        item_reply = await http_client.get(f"/stock/find/{item_id}")
-    except httpx.RequestError:
-        raise HTTPException(400, detail=REQ_ERROR_STR)
-    if item_reply.status_code != 200:
+    item_data = await orchestrator.service_dbs["stock"].hgetall(f"item:{item_id}")
+    if not item_data:
         raise HTTPException(400, detail=f"Item: {item_id} does not exist!")
-    item_json: dict = item_reply.json()
-    cost_increase = quantity * item_json["price"]
+    cost_increase = quantity * int(item_data["price"])
 
     items_key = f"order:{order_id}:items"
     order_key = f"order:{order_id}"

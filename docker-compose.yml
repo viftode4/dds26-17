@@ -22,7 +22,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "1.0"
           memory: 128M
 
   order-service-1:
@@ -62,7 +62,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "3.0"
           memory: 512M
 
   order-service-2:
@@ -102,7 +102,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.0"
+          cpus: "3.0"
           memory: 512M
 
   # ---- Redis Masters ----
@@ -114,12 +114,12 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 3
+        --io-threads 4
         --io-threads-do-reads yes
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "3.5"
           memory: 256M
 
   stock-db:
@@ -130,12 +130,12 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 3
+        --io-threads 4
         --io-threads-do-reads yes
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.5"
           memory: 256M
 
   payment-db:
@@ -146,12 +146,12 @@ services:
         --maxmemory 512mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 3
+        --io-threads 4
         --io-threads-do-reads yes
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.0"
           memory: 256M
 
   # ---- Redis Replicas ----
@@ -317,7 +317,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
+          cpus: "1.0"
           memory: 384M
 
   stock-service-2:
@@ -350,7 +350,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
+          cpus: "1.0"
           memory: 384M
 
   payment-service:
@@ -383,7 +383,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
+          cpus: "1.0"
           memory: 384M
 
   payment-service-2:
@@ -416,5 +416,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
+          cpus: "1.0"
           memory: 384M
