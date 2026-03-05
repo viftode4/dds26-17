@@ -1,0 +1,26 @@
+# Default: auto line endings
+* text=auto
+
+# Shell scripts must always be LF — CRLF breaks bash in Docker/Linux
+*.sh text eol=lf
+
+# Python files LF
+*.py text eol=lf
+
+# Lua files LF
+*.lua text eol=lf
+
+# Config files LF
+*.cfg text eol=lf
+*.conf text eol=lf
+*.env text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+
+# Binaries
+*.png binary
+*.jpg binary
+*.gif binary
