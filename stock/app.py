@@ -23,7 +23,6 @@ STREAM_COMMANDS = "stock-commands"
 STREAM_OUTBOX = "stock-outbox"
 CONSUMER_GROUP = "stock-workers"
 CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
-RESERVATION_TTL = 60  # 1 minute
 DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
 log = get_logger("stock")
@@ -88,67 +87,75 @@ async def handle_command(fields: dict):
     action = fields.get("action", "")
     saga_id = fields.get("saga_id", "")
 
-    if action == "try_reserve":
-        items_raw = fields.get("items", "")
-        if not items_raw:
-            log.warning("try_reserve with no items", saga_id=saga_id)
-            await db.xadd(STREAM_OUTBOX, {
-                "saga_id": saga_id, "event": "failed", "reason": "no_items",
-            }, maxlen=10000, approximate=True)
-            return
-        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)]
-        ttl = int(fields.get("ttl", RESERVATION_TTL))
-        await _try_reserve(saga_id, items, ttl)
-    elif action == "confirm":
-        items_raw = fields.get("items", "")
-        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)] if items_raw else []
-        await _confirm(saga_id, items)
-    elif action == "cancel":
-        items_raw = fields.get("items", "")
-        items = [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)] if items_raw else []
-        await _cancel(saga_id, items)
+    if action == "prepare":
+        items = _parse_items(fields)
+        ttl = int(fields.get("ttl", "30"))
+        await _2pc_prepare(saga_id, items, ttl)
+    elif action == "commit":
+        items = _parse_items(fields)
+        await _2pc_commit(saga_id, items)
+    elif action == "abort":
+        items = _parse_items(fields)
+        await _2pc_abort(saga_id, items)
+    elif action == "execute":
+        items = _parse_items(fields)
+        await _saga_execute(saga_id, items)
+    elif action == "compensate":
+        items = _parse_items(fields)
+        await _saga_compensate(saga_id, items)
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
 
 
-async def _try_reserve(saga_id: str, items: list[tuple[str, int]], ttl: int = RESERVATION_TTL):
+def _parse_items(fields: dict) -> list[tuple[str, int]]:
+    items_raw = fields.get("items", "")
+    if not items_raw:
+        return []
+    return [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)]
+
+
+async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
+    await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
 
 
-async def _confirm(saga_id: str, items: list[tuple[str, int]]):
-    if not items:
-        await db.xadd(STREAM_OUTBOX, {
-            "saga_id": saga_id, "event": "confirmed", "reason": "no_items",
-        }, maxlen=10000, approximate=True)
-        return
+async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
-    await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n))
+    await db.fcall("stock_2pc_commit", len(keys), *keys, saga_id, str(n))
 
 
-async def _cancel(saga_id: str, items: list[tuple[str, int]]):
-    if not items:
-        await db.xadd(STREAM_OUTBOX, {
-            "saga_id": saga_id, "event": "cancelled", "reason": "no_items",
-        }, maxlen=10000, approximate=True)
-        return
+async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"reservation:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"reservation_amount:{saga_id}:{item_id}" for item_id, _ in items]
+    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
-    await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n))
+    await db.fcall("stock_2pc_abort", len(keys), *keys, saga_id, str(n))
+
+
+async def _saga_execute(saga_id: str, items: list[tuple[str, int]]):
+    n = len(items)
+    keys = [f"item:{item_id}" for item_id, _ in items]
+    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+    args = [saga_id]
+    for item_id, amount in items:
+        args += [item_id, str(amount)]
+    await db.fcall("stock_saga_execute", len(keys), *keys, *args)
+
+
+async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
+    n = len(items)
+    keys = [f"item:{item_id}" for item_id, _ in items]
+    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+    await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n))
 
 
 # ============================================================================

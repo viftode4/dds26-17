@@ -29,8 +29,8 @@ def _make_orchestrator(protocol: str = "auto") -> Orchestrator:
 
     service_dbs = {"stock": AsyncMock(), "payment": AsyncMock()}
     tx_def = TransactionDefinition("checkout", [
-        Step("stock", "stock", "try_reserve", "cancel", "confirm"),
-        Step("payment", "payment", "try_reserve", "cancel", "confirm"),
+        Step("stock", "stock"),
+        Step("payment", "payment"),
     ])
     orch = Orchestrator(order_db, service_dbs, [tx_def], protocol=protocol)
     # Replace WAL with a no-op mock so tests don't touch Redis

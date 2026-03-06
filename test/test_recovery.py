@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from orchestrator.recovery import RecoveryWorker, MAX_RETRIES
+from orchestrator.recovery import RecoveryWorker
 from orchestrator.executor import OutboxReader
 from orchestrator.wal import WALEngine
 from orchestrator.definition import TransactionDefinition, Step
@@ -48,8 +48,8 @@ def _wal_with_saga(saga_id: str, last_step: str, data: dict | None = None) -> As
 
 def _make_steps():
     return [
-        Step("stock", "stock", "try_reserve", "cancel", "confirm"),
-        Step("payment", "payment", "try_reserve", "cancel", "confirm"),
+        Step("stock", "stock"),
+        Step("payment", "payment"),
     ]
 
 
@@ -75,7 +75,7 @@ class _XaddResponseHook:
         async def _hooked(stream, fields, *args, **kwargs):
             hook.call_log.append((service, stream, dict(fields)))
             result = await original_xadd(stream, fields, *args, **kwargs)
-            if fields.get("action") == "confirm" and service in hook._queues and hook._queues[service]:
+            if fields.get("action") == "commit" and service in hook._queues and hook._queues[service]:
                 resp = hook._queues[service].pop(0)
                 # Schedule resolution as a background task so the caller can
                 # create_waiter() before we resolve it.
@@ -86,10 +86,10 @@ class _XaddResponseHook:
             return result
         return _hooked
 
-    def cancel_calls(self, service: str | None = None) -> list[tuple[str, str, dict]]:
+    def abort_calls(self, service: str | None = None) -> list[tuple[str, str, dict]]:
         return [
             (svc, stream, fields) for svc, stream, fields in self.call_log
-            if fields.get("action") == "cancel" and (service is None or svc == service)
+            if fields.get("action") == "abort" and (service is None or svc == service)
         ]
 
 
@@ -116,7 +116,7 @@ async def test_recover_started(mock_sleep):
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
 async def test_recover_preparing_aborts(mock_sleep):
-    """WAL='PREPARING' -> cancel to all services, FAILED."""
+    """WAL='PREPARING' -> abort to all services, FAILED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-prep", "PREPARING", {"tx_name": "checkout"})
     outbox = OutboxReader()
@@ -126,24 +126,24 @@ async def test_recover_preparing_aborts(mock_sleep):
     await worker.recover_incomplete_sagas()
 
     stock_calls = service_dbs["stock"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "cancel" for c in stock_calls)
+    assert any(c.args[1].get("action") == "abort" for c in stock_calls)
     payment_calls = service_dbs["payment"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "cancel" for c in payment_calls)
+    assert any(c.args[1].get("action") == "abort" for c in payment_calls)
     assert wal.log.call_args_list[-1].args == ("saga-prep", "FAILED")
 
 
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
-async def test_recover_committing_confirms(mock_sleep):
-    """WAL='COMMITTING', both respond 'confirmed' -> COMPLETED (Fix 2)."""
+async def test_recover_committing_commits(mock_sleep):
+    """WAL='COMMITTING', both respond 'committed' -> COMPLETED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-commit", "COMMITTING", {"tx_name": "checkout"})
     outbox = OutboxReader()
     tx_def = TransactionDefinition("checkout", _make_steps())
 
     _XaddResponseHook(outbox, "saga-commit", {
-        "stock": [{"event": "confirmed"}],
-        "payment": [{"event": "confirmed"}],
+        "stock": [{"event": "committed"}],
+        "payment": [{"event": "committed"}],
     }, service_dbs)
 
     worker = RecoveryWorker(wal, service_dbs, outbox, definitions={"checkout": tx_def})
@@ -155,15 +155,15 @@ async def test_recover_committing_confirms(mock_sleep):
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
 async def test_recover_committing_retries(mock_sleep):
-    """First 'confirm_failed', then 'confirmed' -> retries then COMPLETED (Fix 2)."""
+    """First 'commit_failed', then 'committed' -> retries then COMPLETED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-retry", "COMMITTING", {"tx_name": "checkout"})
     outbox = OutboxReader()
     tx_def = TransactionDefinition("checkout", _make_steps())
 
     _XaddResponseHook(outbox, "saga-retry", {
-        "stock": [{"event": "confirm_failed"}, {"event": "confirmed"}],
-        "payment": [{"event": "confirmed"}, {"event": "confirmed"}],
+        "stock": [{"event": "commit_failed"}, {"event": "committed"}],
+        "payment": [{"event": "committed"}, {"event": "committed"}],
     }, service_dbs)
 
     worker = RecoveryWorker(wal, service_dbs, outbox, definitions={"checkout": tx_def})
@@ -175,31 +175,33 @@ async def test_recover_committing_retries(mock_sleep):
 
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
-async def test_recover_committing_exhaustion_cancels(mock_sleep):
-    """All retries fail -> cancel-all, FAILED (Fix 2)."""
+async def test_recover_committing_retries_until_success(mock_sleep):
+    """Commit retries indefinitely (never aborts) — eventually succeeds."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-exh", "COMMITTING", {"tx_name": "checkout"})
     outbox = OutboxReader()
     tx_def = TransactionDefinition("checkout", _make_steps())
 
-    hook = _XaddResponseHook(outbox, "saga-exh", {
-        "stock": [{"event": "confirm_failed"}] * (MAX_RETRIES + 1),
-        "payment": [{"event": "confirmed"}] * (MAX_RETRIES + 1),
+    # Stock fails 3 times then succeeds; payment succeeds immediately
+    _XaddResponseHook(outbox, "saga-exh", {
+        "stock": [{"event": "commit_failed"}, {"event": "commit_failed"},
+                  {"event": "commit_failed"}, {"event": "committed"}],
+        "payment": [{"event": "committed"}, {"event": "committed"},
+                    {"event": "committed"}, {"event": "committed"}],
     }, service_dbs)
 
     worker = RecoveryWorker(wal, service_dbs, outbox, definitions={"checkout": tx_def})
     await worker.recover_incomplete_sagas()
 
     final_log = wal.log.call_args_list[-1].args
-    assert final_log[1] == "FAILED"
-    assert len(hook.cancel_calls("stock")) > 0, \
-        "Fix 2: cancel must be sent on confirm exhaustion"
+    assert final_log[1] == "COMPLETED", \
+        "Commit must never fall back to abort — irrevocable decision"
 
 
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
 async def test_recover_aborting(mock_sleep):
-    """WAL='ABORTING' -> cancel to all services, FAILED."""
+    """WAL='ABORTING' -> abort to all services, FAILED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-abort", "ABORTING", {"tx_name": "checkout"})
     outbox = OutboxReader()
@@ -209,7 +211,7 @@ async def test_recover_aborting(mock_sleep):
     await worker.recover_incomplete_sagas()
 
     stock_calls = service_dbs["stock"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "cancel" for c in stock_calls)
+    assert any(c.args[1].get("action") == "abort" for c in stock_calls)
     assert wal.log.call_args_list[-1].args == ("saga-abort", "FAILED")
 
 
@@ -225,7 +227,7 @@ async def test_recover_no_definition_fallback(mock_sleep):
     await worker.recover_incomplete_sagas()
 
     stock_calls = service_dbs["stock"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "confirm" for c in stock_calls)
+    assert any(c.args[1].get("action") == "commit" for c in stock_calls)
     payment_calls = service_dbs["payment"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "confirm" for c in payment_calls)
+    assert any(c.args[1].get("action") == "commit" for c in payment_calls)
     assert wal.log.call_args_list[-1].args == ("saga-nodef", "COMPLETED")

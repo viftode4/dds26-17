@@ -10,7 +10,6 @@ from orchestrator.wal import WALEngine
 logger = structlog.get_logger("orchestrator.executor")
 
 STEP_TIMEOUT = 10.0
-CONFIRM_MAX_RETRIES = 3
 
 
 class CircuitBreaker:
@@ -25,10 +24,12 @@ class CircuitBreaker:
         self._failure_count = 0
         self._last_failure_time: float | None = None
         self._state = "closed"
+        self._probe_in_flight = False
 
     def record_failure(self):
         self._failure_count += 1
         self._last_failure_time = time.monotonic()
+        self._probe_in_flight = False
         if self._failure_count >= self.failure_threshold:
             if self._state != "open":
                 logger.warning("Circuit breaker OPEN", failures=self._failure_count)
@@ -39,6 +40,7 @@ class CircuitBreaker:
             logger.info("Circuit breaker CLOSED (recovered)")
         self._failure_count = 0
         self._state = "closed"
+        self._probe_in_flight = False
 
     def is_open(self) -> bool:
         if self._state == "closed":
@@ -47,9 +49,16 @@ class CircuitBreaker:
             elapsed = time.monotonic() - (self._last_failure_time or 0)
             if elapsed >= self.recovery_timeout:
                 self._state = "half-open"
-                return False  # Allow one probe request through
+                if not self._probe_in_flight:
+                    self._probe_in_flight = True
+                    return False
+                return True  # probe already in flight
             return True
-        return False  # half-open: allow probe
+        # half-open
+        if not self._probe_in_flight:
+            self._probe_in_flight = True
+            return False
+        return True
 
 
 class OutboxReader:
@@ -163,160 +172,123 @@ class _BaseExecutor:
                 out.append((step, result))
         return out
 
-    async def _retry_confirm_step(self, step: Step, saga_id: str, context: dict,
-                                   retries: int = CONFIRM_MAX_RETRIES) -> bool:
-        """Retry a single step's confirm with exponential backoff.
-
-        Returns True if confirm eventually succeeded, False if exhausted.
-        """
-        for attempt in range(retries):
-            result = await self._try_step(step, saga_id, "confirm", context)
-            if isinstance(result, dict) and result.get("event") == "confirmed":
-                return True
-            logger.warning("Confirm retry", step=step.name, saga_id=saga_id,
-                           attempt=attempt + 1, result=result)
-            await asyncio.sleep(0.5 * (2 ** attempt))
-        logger.error("Confirm exhausted retries", step=step.name, saga_id=saga_id)
-        return False
-
-    async def _verified_confirm(
-        self, saga_id: str, steps: list[Step], context: dict
-    ) -> None:
-        """Confirm all steps with verification and retry on failure.
-
-        Sends confirms in parallel, then retries any that failed.
-        """
-        results = await self._broadcast("confirm", saga_id, steps, context)
-        for step, result in results:
-            if isinstance(result, dict) and result.get("event") == "confirmed":
-                cb = self.circuit_breakers.get(step.service)
-                if cb:
-                    cb.record_success()
-            else:
-                # Retry this step
-                success = await self._retry_confirm_step(step, saga_id, context)
-                cb = self.circuit_breakers.get(step.service)
-                if cb:
-                    if success:
-                        cb.record_success()
-                    else:
+    async def _verified_action(self, action: str, expected_event: str,
+                                saga_id: str, steps: list[Step], context: dict):
+        """Execute action on all steps with infinite retry until all succeed."""
+        pending = list(steps)
+        backoff = 0.5
+        max_backoff = 60.0
+        while pending:
+            results = await asyncio.gather(*[
+                self._try_step(step, saga_id, action, context) for step in pending
+            ], return_exceptions=True)
+            still_pending = []
+            for step, result in zip(pending, results):
+                if isinstance(result, BaseException):
+                    still_pending.append(step)
+                    cb = self.circuit_breakers.get(step.service)
+                    if cb:
                         cb.record_failure()
-
-    def _inject_ttl(self, context: dict) -> None:
-        """Compute adaptive reservation TTL from p99 latency and store in context."""
-        p99_ms = self.metrics.get_percentile(99) if self.metrics else 5000.0
-        context["_reservation_ttl"] = max(30, min(120, int(p99_ms / 1000 * 3) + 10))
+                elif isinstance(result, dict) and result.get("event") == expected_event:
+                    cb = self.circuit_breakers.get(step.service)
+                    if cb:
+                        cb.record_success()
+                else:
+                    still_pending.append(step)
+                    logger.warning(f"{action} retry needed", step=step.name,
+                                 saga_id=saga_id, result=result)
+            pending = still_pending
+            if pending:
+                await asyncio.sleep(min(backoff, max_backoff))
+                backoff *= 2
 
 
 class TwoPCExecutor(_BaseExecutor):
-    """Two-Phase Commit executor.
-
-    Phase 1: Parallel prepare — send try_reserve to ALL participants, collect votes.
-    Phase 2a (all reserved): Verified confirm all in parallel.
-    Phase 2b (any failed): Cancel all in parallel.
-
-    Differs from Saga in that ALL participants are queried in parallel before
-    any decision is made. Optimal for low-contention workloads where most
-    transactions succeed.
-    """
+    """Real Two-Phase Commit: prepare (lock, no mutations) -> commit (apply) or abort (release)."""
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
-        # Check circuit breakers before any work
         err = self._check_circuit_breakers(tx_def.steps, saga_id)
         if err:
             await self.wal.log(saga_id, "FAILED")
             return {"status": "failed", "error": err}
 
-        self._inject_ttl(context)
-
-        # WAL: durable BEFORE sending any reservations
-        await self.wal.log(saga_id, "PREPARING")
-
-        # Phase 1: parallel prepare — all participants vote simultaneously
-        votes = await self._broadcast("try_reserve", saga_id, tx_def.steps, context)
+        # Phase 1: Prepare
+        await self.wal.log(saga_id, "PREPARING", context)
+        votes = await self._broadcast("prepare", saga_id, tx_def.steps, context)
 
         # Record circuit breaker outcomes
         for step, result in votes:
             cb = self.circuit_breakers.get(step.service)
-            if cb and result.get("event") == "failed" and result.get("reason") == "timeout":
-                cb.record_failure()
+            if cb:
+                if isinstance(result, dict) and result.get("event") == "prepared":
+                    cb.record_success()
+                elif isinstance(result, dict) and result.get("reason") == "timeout":
+                    cb.record_failure()
 
-        all_reserved = all(v[1].get("event") == "reserved" for v in votes)
+        all_prepared = all(
+            isinstance(v[1], dict) and v[1].get("event") == "prepared"
+            for v in votes
+        )
 
-        if all_reserved:
-            # Phase 2a: COMMIT — WAL durable BEFORE confirming
-            await self.wal.log(saga_id, "COMMITTING")
-            await self._verified_confirm(saga_id, tx_def.steps, context)
+        if all_prepared:
+            # Phase 2a: COMMIT (irrevocable)
+            await self.wal.log(saga_id, "COMMITTING", context)
+            await self._verified_action("commit", "committed", saga_id, tx_def.steps, context)
+            await self.wal.log(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
-            # Phase 2b: ABORT — cancel all (idempotent, fire-and-forget WAL ok)
-            asyncio.create_task(self.wal.log(saga_id, "ABORTING"))
-            await self._broadcast("cancel", saga_id, tx_def.steps, context)
+            # Phase 2b: ABORT (release locks)
+            await self.wal.log(saga_id, "ABORTING", context)
+            await self._broadcast("abort", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
             for _, vote in votes:
-                if vote.get("event") == "failed":
+                if isinstance(vote, dict) and vote.get("event") == "failed":
                     reason = vote.get("reason", reason)
                     break
             return {"status": "failed", "error": reason}
 
 
 class SagaExecutor(_BaseExecutor):
-    """Saga + TCC executor with sequential try and early abort.
-
-    Sequential try: reserve steps one by one, abort immediately on first
-    failure. Under high contention this avoids wasting resources on steps
-    that would need to be cancelled anyway.
-
-    Differs from 2PC in the failure profile: Saga aborts faster (fails on
-    first step) but has higher happy-path latency (sequential vs parallel).
-    The adaptive protocol selector uses this: 2PC for low contention,
-    Saga for high contention.
-    """
+    """Real Saga: execute (direct mutation) -> compensate in reverse on failure."""
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
-        # Check circuit breakers before any work
         err = self._check_circuit_breakers(tx_def.steps, saga_id)
         if err:
             await self.wal.log(saga_id, "FAILED")
             return {"status": "failed", "error": err}
 
-        self._inject_ttl(context)
+        await self.wal.log(saga_id, "EXECUTING", context)
 
-        # WAL: durable BEFORE sending any reservations
-        await self.wal.log(saga_id, "TRYING")
-
-        # Sequential try: reserve one step at a time, abort early on failure
-        reserved_steps: list[Step] = []
+        # Sequential execute
+        completed_steps = []
         failure_reason = ""
-
         for step in tx_def.steps:
-            result = await self._try_step(step, saga_id, "try_reserve", context)
-
-            if result.get("event") == "reserved":
-                reserved_steps.append(step)
+            result = await self._try_step(step, saga_id, "execute", context)
+            if isinstance(result, dict) and result.get("event") == "executed":
+                completed_steps.append(step)
                 cb = self.circuit_breakers.get(step.service)
                 if cb:
                     cb.record_success()
             else:
-                # Record failure for circuit breaker
-                if result.get("reason") == "timeout":
+                if isinstance(result, dict) and result.get("reason") == "timeout":
                     cb = self.circuit_breakers.get(step.service)
                     if cb:
                         cb.record_failure()
-                failure_reason = result.get("reason", "insufficient_resources")
-                break  # Early abort — don't try remaining steps
+                failure_reason = result.get("reason", "insufficient_resources") if isinstance(result, dict) else str(result)
+                break
 
-        if len(reserved_steps) < len(tx_def.steps):
-            # Compensate: cancel ALL steps (cancel is idempotent for unreserved)
-            asyncio.create_task(self.wal.log(saga_id, "COMPENSATING"))
-            await self._broadcast("cancel", saga_id, tx_def.steps, context)
+        if len(completed_steps) == len(tx_def.steps):
+            # All executed — done! No confirm phase needed.
+            await self.wal.log(saga_id, "COMPLETED")
+            return {"status": "success"}
+        else:
+            # Compensate completed steps in REVERSE order
+            comp_context = {**context, "completed_steps": [s.name for s in completed_steps]}
+            await self.wal.log(saga_id, "COMPENSATING", comp_context)
+            for step in reversed(completed_steps):
+                await self._verified_action("compensate", "compensated", saga_id, [step], context)
             await self.wal.log(saga_id, "FAILED")
             return {"status": "failed", "error": failure_reason}
-
-        # All reserved — WAL durable BEFORE confirming
-        await self.wal.log(saga_id, "CONFIRMING")
-        await self._verified_confirm(saga_id, tx_def.steps, context)
-        return {"status": "success"}

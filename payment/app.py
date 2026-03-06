@@ -22,7 +22,6 @@ STREAM_COMMANDS = "payment-commands"
 STREAM_OUTBOX = "payment-outbox"
 CONSUMER_GROUP = "payment-workers"
 CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
-RESERVATION_TTL = 60  # 1 minute
 DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
 log = get_logger("payment")
@@ -89,55 +88,81 @@ async def handle_command(fields: dict):
     user_id = fields.get("user_id", "")
     amount = fields.get("amount", "0")
 
-    if action == "try_reserve":
-        ttl = int(fields.get("ttl", RESERVATION_TTL))
-        await _try_reserve(saga_id, user_id, int(amount), ttl)
-    elif action == "confirm":
-        await _confirm(saga_id, user_id)
-    elif action == "cancel":
-        await _cancel(saga_id, user_id)
+    if action == "prepare":
+        ttl = int(fields.get("ttl", "30"))
+        await _2pc_prepare(saga_id, user_id, int(amount), ttl)
+    elif action == "commit":
+        await _2pc_commit(saga_id, user_id)
+    elif action == "abort":
+        await _2pc_abort(saga_id, user_id)
+    elif action == "execute":
+        await _saga_execute(saga_id, user_id, int(amount))
+    elif action == "compensate":
+        await _saga_compensate(saga_id, user_id)
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
 
 
-async def _try_reserve(saga_id: str, user_id: str, amount: int, ttl: int = RESERVATION_TTL):
+async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30):
     keys = [
         f"user:{user_id}",
-        f"reservation:{saga_id}:{user_id}",
+        f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
-        f"reservation_amount:{saga_id}:{user_id}",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
-    await db.fcall("payment_try_reserve", len(keys), *keys, *args)
+    await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
 
 
-async def _confirm(saga_id: str, user_id: str):
+async def _2pc_commit(saga_id: str, user_id: str):
     keys = [
         f"user:{user_id}",
-        f"reservation:{saga_id}:{user_id}",
+        f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
-        f"reservation_amount:{saga_id}:{user_id}",
     ]
-    await db.fcall("payment_confirm", len(keys), *keys, saga_id)
+    await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id)
 
 
-async def _cancel(saga_id: str, user_id: str):
+async def _2pc_abort(saga_id: str, user_id: str):
     if not user_id:
-        # Nothing to cancel — publish cancelled event to unblock any waiters
         await db.xadd(STREAM_OUTBOX, {
-            "saga_id": saga_id, "event": "cancelled", "reason": "no_user",
+            "saga_id": saga_id, "event": "aborted", "reason": "no_user",
         }, maxlen=10000, approximate=True)
         return
     keys = [
         f"user:{user_id}",
-        f"reservation:{saga_id}:{user_id}",
+        f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
         STREAM_OUTBOX,
-        f"reservation_amount:{saga_id}:{user_id}",
     ]
-    await db.fcall("payment_cancel", len(keys), *keys, saga_id)
+    await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id)
+
+
+async def _saga_execute(saga_id: str, user_id: str, amount: int):
+    keys = [
+        f"user:{user_id}",
+        STREAM_OUTBOX,
+        f"saga:{saga_id}:payment:status",
+        f"saga:{saga_id}:payment:amounts",
+    ]
+    args = [str(amount), saga_id, user_id]
+    await db.fcall("payment_saga_execute", len(keys), *keys, *args)
+
+
+async def _saga_compensate(saga_id: str, user_id: str):
+    if not user_id:
+        await db.xadd(STREAM_OUTBOX, {
+            "saga_id": saga_id, "event": "compensated", "reason": "no_user",
+        }, maxlen=10000, approximate=True)
+        return
+    keys = [
+        f"user:{user_id}",
+        STREAM_OUTBOX,
+        f"saga:{saga_id}:payment:status",
+        f"saga:{saga_id}:payment:amounts",
+    ]
+    await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id)
 
 
 # ============================================================================

@@ -29,7 +29,7 @@ class LatencyHistogram:
 
         Returns a conservative 5000ms default before any data is collected.
         """
-        total = self._total + self._overflow
+        total = self._total
         if total == 0:
             return 5000.0
         target = total * (p / 100.0)

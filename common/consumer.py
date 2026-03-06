@@ -25,13 +25,14 @@ async def _process_and_ack(
     consumer_group: str,
     sem: asyncio.Semaphore,
 ):
-    """Process one command and ACK — runs as a concurrent task."""
+    """Process one command and ACK on success — runs as a concurrent task."""
     try:
         await handle_command(fields)
+        await db.xack(stream, consumer_group, msg_id)
     except Exception as e:
         log.error("Error processing message", msg_id=msg_id, error=str(e))
+        # Leave in PEL — DLQ sweep will handle after max retries
     finally:
-        await db.xack(stream, consumer_group, msg_id)
         sem.release()
 
 
@@ -57,7 +58,7 @@ async def consumer_loop(
             messages = await db.xreadgroup(
                 consumer_group, consumer_name,
                 {stream: ">"},
-                count=50, block=0,
+                count=50, block=100,
             )
 
             if not messages:
@@ -107,6 +108,30 @@ async def _sweep_dlq(
                 log.warning("Moved to DLQ", msg_id=msg_id, stream=stream)
     except Exception as e:
         log.error("DLQ sweep error", error=str(e))
+
+
+async def dlq_reprocessor_loop(
+    db: aioredis.Redis,
+    dlq_stream: str,
+    target_stream: str,
+    interval: float = 60.0,
+):
+    """Periodically re-insert DLQ messages into the main stream for retry."""
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            messages = await db.xrange(dlq_stream, count=10)
+            for msg_id, fields in messages:
+                clean = {k: v for k, v in fields.items()
+                         if k not in ("original_stream", "original_id", "reason")}
+                if clean:
+                    await db.xadd(target_stream, clean, maxlen=10000, approximate=True)
+                await db.xdel(dlq_stream, msg_id)
+                log.info("Reprocessed DLQ message", msg_id=msg_id, target=target_stream)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("DLQ reprocessor error", error=str(e))
 
 
 async def dlq_sweep_loop(

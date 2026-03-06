@@ -3,125 +3,166 @@
 -- ============================================================================
 -- Payment Service Lua Function Library
 -- ============================================================================
--- Provides atomic operations for credit management:
---   Transaction operations: try_reserve, confirm, cancel
---   Direct API operations: subtract_direct, add_direct
+-- 2PC operations: payment_2pc_prepare, payment_2pc_commit, payment_2pc_abort
+-- Saga operations: payment_saga_execute, payment_saga_compensate
+-- Direct API operations: payment_subtract_direct, payment_add_direct
 -- ============================================================================
 
--- Reserve credit for a transaction
--- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
--- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
--- ARGV[1] = amount, ARGV[2] = saga_id, ARGV[3] = user_id, ARGV[4] = ttl
-local function payment_try_reserve(KEYS, ARGV)
-    local skip_outbox = ARGV[5]  -- optional, "1" to skip
-    local status = redis.call('GET', KEYS[3])
-    if status == 'reserved' then
-        if skip_outbox ~= "1" then
-            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                'saga_id', ARGV[2], 'event', 'reserved')
-        end
-        return 1
-    end
+-- 2PC Prepare: Validate + deduct credit atomically
+--
+-- KEYS[1] = user:{user_id}
+-- KEYS[2] = lock:2pc:{saga_id}:{user_id}
+-- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[4] = payment-outbox
+-- ARGV: amount, saga_id, user_id, lock_ttl, skip_outbox
+local function payment_2pc_prepare(KEYS, ARGV)
+    local amount = tonumber(ARGV[1])
+    local saga_id = ARGV[2]
+    local lock_ttl = tonumber(ARGV[4])
+    local skip_outbox = ARGV[5]
 
+    -- Idempotency
+    local status = redis.call('GET', KEYS[3])
+    if status == 'prepared' then return 1 end
+
+    -- Validate
     local available = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))
-    if not available then
-        if skip_outbox ~= "1" then
-            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                'saga_id', ARGV[2], 'event', 'failed', 'reason', 'user_not_found')
-        end
+    if not available or available < amount then
         return 0
     end
 
+    -- Deduct credit and store amount in lock key (for abort recovery)
+    redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
+    redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
+
+    redis.call('SETEX', KEYS[3], 86400, 'prepared')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'prepared')
+    end
+    return 1
+end
+
+-- 2PC Commit: Finalize (deduction already happened in prepare)
+--
+-- KEYS[1] = user:{user_id}
+-- KEYS[2] = lock:2pc:{saga_id}:{user_id}
+-- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[4] = payment-outbox
+-- ARGV: saga_id, skip_outbox
+local function payment_2pc_commit(KEYS, ARGV)
+    local saga_id = ARGV[1]
+    local skip_outbox = ARGV[2]
+
+    -- Idempotency
+    local status = redis.call('GET', KEYS[3])
+    if status == 'committed' then return 1 end
+
+    -- Delete lock key (amount already deducted in prepare)
+    redis.call('DEL', KEYS[2])
+
+    redis.call('SETEX', KEYS[3], 86400, 'committed')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'committed')
+    end
+    return 1
+end
+
+-- 2PC Abort: Restore credit from lock key (undo prepare deduction)
+--
+-- KEYS[1] = user:{user_id}
+-- KEYS[2] = lock:2pc:{saga_id}:{user_id}
+-- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[4] = payment-outbox
+-- ARGV: saga_id, skip_outbox
+local function payment_2pc_abort(KEYS, ARGV)
+    local saga_id = ARGV[1]
+    local skip_outbox = ARGV[2]
+
+    -- Idempotency
+    local status = redis.call('GET', KEYS[3])
+    if status == 'aborted' then return 1 end
+
+    -- Restore credit from lock key (reverse the prepare deduction)
+    local amount = redis.call('GET', KEYS[2])
+    if amount then
+        redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
+    end
+    redis.call('DEL', KEYS[2])
+
+    redis.call('SETEX', KEYS[3], 86400, 'aborted')
+    if skip_outbox ~= "1" then
+        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'aborted')
+    end
+    return 1
+end
+
+-- Saga Execute: Direct deduction (no locks, no held_credit)
+--
+-- KEYS[1] = user:{user_id}
+-- KEYS[2] = payment-outbox
+-- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[4] = saga:{saga_id}:payment:amounts
+-- ARGV: amount, saga_id, user_id, skip_outbox
+local function payment_saga_execute(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
-    if available < amount then
-        if skip_outbox ~= "1" then
-            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                'saga_id', ARGV[2], 'event', 'failed', 'reason', 'insufficient_credit')
-        end
+    local saga_id = ARGV[2]
+    local user_id = ARGV[3]
+    local skip_outbox = ARGV[4]
+
+    -- Idempotency
+    local status = redis.call('GET', KEYS[3])
+    if status == 'executed' then return 1 end
+
+    -- Validate
+    local available = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))
+    if not available or available < amount then
         return 0
     end
 
     redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
-    redis.call('HINCRBY', KEYS[1], 'held_credit', amount)
-    redis.call('SET', KEYS[2], tostring(amount))
-    redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4]))
-    -- Fallback amount key survives short reservation TTL (24h)
-    redis.call('SETEX', KEYS[5], 86400, tostring(amount))
-    redis.call('SETEX', KEYS[3], 86400, 'reserved')
+    redis.call('HSET', KEYS[4], user_id, tostring(amount))
+    redis.call('EXPIRE', KEYS[4], 86400)
+
+    redis.call('SETEX', KEYS[3], 86400, 'executed')
     if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[2], 'event', 'reserved', 'amount', ARGV[1])
+        redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'executed')
     end
     return 1
 end
 
--- Confirm reserved credit (finalize payment)
--- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
--- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
--- ARGV[1] = saga_id
-local function payment_confirm(KEYS, ARGV)
-    local skip_outbox = ARGV[2]  -- optional, "1" to skip
-    local status = redis.call('GET', KEYS[3])
-    if status == 'confirmed' then
-        if skip_outbox ~= "1" then
-            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                'saga_id', ARGV[1], 'event', 'confirmed')
-        end
-        return 1
-    end
-    local amount = redis.call('GET', KEYS[2])
-    if not amount then
-        -- Reservation key expired (TTL) — try fallback amount key (24h TTL)
-        amount = redis.call('GET', KEYS[5])
-        if not amount then
-            -- Both keys gone — truly unrecoverable
-            if skip_outbox ~= "1" then
-                redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                    'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
-            end
-            return -1
-        end
-    end
-    redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
-    redis.call('DEL', KEYS[2])
-    redis.call('DEL', KEYS[5])
-    redis.call('SETEX', KEYS[3], 86400, 'confirmed')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[1], 'event', 'confirmed')
-    end
-    return 1
-end
+-- Saga Compensate: Restore credit from stored amounts
+--
+-- KEYS[1] = user:{user_id}
+-- KEYS[2] = payment-outbox
+-- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[4] = saga:{saga_id}:payment:amounts
+-- ARGV: saga_id, skip_outbox
+local function payment_saga_compensate(KEYS, ARGV)
+    local saga_id = ARGV[1]
+    local skip_outbox = ARGV[2]
 
--- Cancel reserved credit (restore to available)
--- KEYS[1] = user:{user_id}, KEYS[2] = reservation:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status, KEYS[4] = payment-outbox
--- KEYS[5] = reservation_amount:{saga_id}:{user_id} (24h fallback)
--- ARGV[1] = saga_id
-local function payment_cancel(KEYS, ARGV)
-    local skip_outbox = ARGV[2]  -- optional, "1" to skip
+    -- Idempotency
     local status = redis.call('GET', KEYS[3])
-    if status == 'cancelled' then return 1 end
-    local amount = redis.call('GET', KEYS[2])
-    if amount then
-        redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
-        redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
-        redis.call('DEL', KEYS[2])
-    else
-        -- Reservation key expired (TTL) — try fallback amount key
-        amount = redis.call('GET', KEYS[5])
+    if status == 'compensated' then return 1 end
+
+    -- Restore credit from stored amounts
+    local all_amounts = redis.call('HGETALL', KEYS[4])
+    for j = 1, #all_amounts, 2 do
+        local amount = tonumber(all_amounts[j + 1])
         if amount then
-            redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
-            redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
+            redis.call('HINCRBY', KEYS[1], 'available_credit', amount)
         end
     end
-    redis.call('DEL', KEYS[5])
-    redis.call('SETEX', KEYS[3], 86400, 'cancelled')
+
+    redis.call('DEL', KEYS[4])
+    redis.call('SETEX', KEYS[3], 86400, 'compensated')
     if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', ARGV[1], 'event', 'cancelled')
+        redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
+            'saga_id', saga_id, 'event', 'compensated')
     end
     return 1
 end
@@ -154,8 +195,10 @@ local function add_direct(KEYS, ARGV)
     return redis.call('HINCRBY', KEYS[1], 'available_credit', amount)
 end
 
-redis.register_function('payment_try_reserve', payment_try_reserve)
-redis.register_function('payment_confirm', payment_confirm)
-redis.register_function('payment_cancel', payment_cancel)
+redis.register_function('payment_2pc_prepare', payment_2pc_prepare)
+redis.register_function('payment_2pc_commit', payment_2pc_commit)
+redis.register_function('payment_2pc_abort', payment_2pc_abort)
+redis.register_function('payment_saga_execute', payment_saga_execute)
+redis.register_function('payment_saga_compensate', payment_saga_compensate)
 redis.register_function('payment_subtract_direct', subtract_direct)
 redis.register_function('payment_add_direct', add_direct)

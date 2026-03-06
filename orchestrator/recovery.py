@@ -11,7 +11,6 @@ from orchestrator.executor import OutboxReader, STEP_TIMEOUT
 
 logger = structlog.get_logger("orchestrator.recovery")
 
-MAX_RETRIES = 5
 IDLE_THRESHOLD_MS = 15000  # 15 seconds
 
 RECONCILIATION_INTERVAL = 60   # seconds
@@ -22,10 +21,10 @@ class RecoveryWorker:
     """Handles crash recovery for the orchestrator (leader-only background tasks).
 
     On leadership acquisition:
-    1. Scan WAL for incomplete sagas and resume/abort
+    1. Scan WAL for incomplete sagas and resume/abort/compensate
     2. Periodically XAUTOCLAIM stuck consumer-group messages
     3. Periodically verify data invariants (reconciliation) via injectable callback
-    4. Periodically abort orphaned sagas > ORPHAN_SAGA_TIMEOUT
+    4. Periodically handle orphaned sagas > ORPHAN_SAGA_TIMEOUT
 
     Checkout processing no longer runs here — both order instances execute
     sagas directly (active-active). This worker is maintenance-only.
@@ -65,32 +64,38 @@ class RecoveryWorker:
         logger.info("Recovering saga", saga_id=saga_id, last_step=last_step)
 
         if last_step == "STARTED":
-            # Never reached prepare — saga context is in WAL data, abort
+            # Nothing happened yet — mark failed
             await self.wal.log(saga_id, "FAILED")
 
         elif last_step == "PREPARING":
-            # 2PC: sent prepares but didn't collect all votes — abort all
+            # 2PC: sent prepares but crashed before commit/abort decision
+            # Safe default: abort (release locks, no mutations were applied)
             await self._abort_all(saga_id, data)
 
-        elif last_step == "TRYING":
-            # Saga: sent try_reserve to all services in parallel — outcome unknown, abort all
-            # Lua cancel is idempotent: safe even if reservation was never made
+        elif last_step == "COMMITTING":
+            # 2PC: commit decision made, MUST complete (irrevocable)
+            # NEVER fall back to abort — that would cause data loss
+            await self._commit_all(saga_id, data)
+
+        elif last_step == "ABORTING":
+            # 2PC: abort decision made, release locks (idempotent)
             await self._abort_all(saga_id, data)
 
-        elif last_step in ("COMMITTING", "CONFIRMING"):
-            # Was in commit phase — retry confirms (all Lua ops are idempotent)
-            await self._confirm_all(saga_id, data)
+        elif last_step == "EXECUTING":
+            # Saga: was executing steps sequentially, crashed mid-way
+            # We don't know which steps completed, compensate ALL (idempotent)
+            await self._compensate_all(saga_id, data)
 
-        elif last_step in ("ABORTING", "COMPENSATING"):
-            # Was in abort phase — retry cancels (idempotent)
-            await self._abort_all(saga_id, data)
+        elif last_step == "COMPENSATING":
+            # Saga: was compensating, retry compensation
+            await self._compensate_all(saga_id, data)
 
         else:
-            logger.warning("Unknown WAL state for saga", saga_id=saga_id, last_step=last_step)
+            logger.warning("Unknown WAL state", saga_id=saga_id, last_step=last_step)
             await self.wal.log(saga_id, "FAILED")
 
-    async def _send_to_all(self, action: str, saga_id: str, data: dict, final_state: str):
-        """Send ``action`` to all services via their command streams, then log ``final_state``.
+    async def _send_action_to_all(self, action: str, saga_id: str, data: dict):
+        """Send ``action`` to all services via direct executors or command streams.
 
         Uses payload builders from the transaction definition when available;
         falls back to a bare ``{saga_id, action}`` command for unknown transactions.
@@ -101,88 +106,132 @@ class RecoveryWorker:
                 db = self.service_dbs.get(step.service)
                 if not db:
                     continue
-                stream = f"{step.service}-commands"
-                cmd = {"saga_id": saga_id, "action": action}
-                if step.payload_builder:
-                    cmd.update(step.payload_builder(saga_id, action, data))
-                await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                try:
+                    if step.direct_executor:
+                        await step.direct_executor(saga_id, action, data, db)
+                    else:
+                        stream = f"{step.service}-commands"
+                        cmd = {"saga_id": saga_id, "action": action}
+                        if step.payload_builder:
+                            cmd.update(step.payload_builder(saga_id, action, data))
+                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                except Exception as e:
+                    logger.warning("send_action_to_all error", service=step.service,
+                                   action=action, saga_id=saga_id, error=str(e))
         else:
-            # Fallback: send bare action to all known services
             for service, db in self.service_dbs.items():
                 stream = f"{service}-commands"
                 await db.xadd(stream, {"saga_id": saga_id, "action": action},
                               maxlen=10000, approximate=True)
-        await self.wal.log(saga_id, final_state)
 
     async def _abort_all(self, saga_id: str, data: dict):
-        """Send cancel to all services and log FAILED."""
-        await self._send_to_all("cancel", saga_id, data, "FAILED")
+        """Send abort to all services and log FAILED."""
+        await self._send_action_to_all("abort", saga_id, data)
+        await self.wal.log(saga_id, "FAILED")
 
-    async def _confirm_all(self, saga_id: str, data: dict):
-        """Send confirm to all services with response-aware retry logic.
-
-        Uses direct executors when available (bypasses streams).
-        Waits for each service to respond with 'confirmed'. Retries
-        'confirm_failed' responses up to MAX_RETRIES. If any service still
-        fails after retries, sends cancel to all and logs FAILED.
-        """
+    async def _commit_all(self, saga_id: str, data: dict):
+        """Commit all services with infinite retry. Never abort a committed transaction."""
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if not tx_def:
-            await self._send_to_all("confirm", saga_id, data, "COMPLETED")
+            await self._send_action_to_all("commit", saga_id, data)
+            await self.wal.log(saga_id, "COMPLETED")
             return
 
-        for attempt in range(MAX_RETRIES + 1):
-            all_confirmed = True
-            failed_services = []
+        backoff = 0.5
+        max_backoff = 60.0
+        pending_steps = list(tx_def.steps)
 
-            for step in tx_def.steps:
-                db = self.service_dbs.get(step.service)
-                if not db:
-                    continue
-
+        while pending_steps:
+            still_pending = []
+            for step in pending_steps:
                 try:
                     if step.direct_executor:
-                        # Direct FCALL — no stream hop
-                        result = await step.direct_executor(saga_id, "confirm", data, db)
+                        result = await step.direct_executor(saga_id, "commit", data,
+                                                            self.service_dbs[step.service])
                     else:
-                        # Stream path with outbox waiter
+                        db = self.service_dbs.get(step.service)
+                        if not db:
+                            continue
                         stream = f"{step.service}-commands"
-                        cmd = {"saga_id": saga_id, "action": "confirm"}
+                        cmd = {"saga_id": saga_id, "action": "commit"}
                         if step.payload_builder:
-                            cmd.update(step.payload_builder(saga_id, "confirm", data))
+                            cmd.update(step.payload_builder(saga_id, "commit", data))
                         await db.xadd(stream, cmd, maxlen=10000, approximate=True)
                         fut = self.outbox_reader.create_waiter(saga_id, step.service)
                         result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                except asyncio.TimeoutError:
-                    all_confirmed = False
-                    failed_services.append(step.service)
-                    continue
                 except Exception as e:
-                    logger.warning("Recovery confirm error", service=step.service,
+                    logger.warning("Recovery commit error", service=step.service,
                                    saga_id=saga_id, error=str(e))
-                    all_confirmed = False
-                    failed_services.append(step.service)
+                    still_pending.append(step)
                     continue
 
-                if isinstance(result, dict) and result.get("event") == "confirmed":
-                    pass  # good
+                if isinstance(result, dict) and result.get("event") == "committed":
+                    pass  # success
                 else:
-                    all_confirmed = False
-                    failed_services.append(step.service)
+                    still_pending.append(step)
 
-            if all_confirmed:
-                await self.wal.log(saga_id, "COMPLETED")
-                return
+            pending_steps = still_pending
+            if pending_steps:
+                logger.warning("Recovery commit retry", saga_id=saga_id,
+                               pending=[s.name for s in pending_steps],
+                               backoff=backoff)
+                await asyncio.sleep(min(backoff, max_backoff))
+                backoff *= 2
 
-            if attempt < MAX_RETRIES:
-                logger.warning("Recovery confirm retry",
-                               saga_id=saga_id, attempt=attempt + 1,
-                               failed_services=failed_services)
-                await asyncio.sleep(0.5 * (2 ** attempt))
-            else:
-                logger.error("Recovery confirm failed after retries, cancelling",
-                             saga_id=saga_id, failed_services=failed_services)
-                await self._abort_all(saga_id, data)
+        await self.wal.log(saga_id, "COMPLETED")
+
+    async def _compensate_all(self, saga_id: str, data: dict):
+        """Compensate completed saga steps in reverse order with infinite retry."""
+        tx_def = self.definitions.get(data.get("tx_name", ""))
+        if not tx_def:
+            await self._send_action_to_all("compensate", saga_id, data)
+            await self.wal.log(saga_id, "FAILED")
+            return
+
+        # Determine which steps to compensate
+        completed_names = data.get("completed_steps")
+        if completed_names:
+            steps_to_compensate = [s for s in tx_def.steps if s.name in completed_names]
+        else:
+            # Unknown which completed — compensate all (idempotent)
+            steps_to_compensate = list(tx_def.steps)
+
+        # Compensate in reverse order, infinite retry per step
+        for step in reversed(steps_to_compensate):
+            backoff = 0.5
+            max_backoff = 60.0
+            while True:
+                try:
+                    if step.direct_executor:
+                        result = await step.direct_executor(saga_id, "compensate", data,
+                                                            self.service_dbs[step.service])
+                    else:
+                        db = self.service_dbs.get(step.service)
+                        if not db:
+                            break
+                        stream = f"{step.service}-commands"
+                        cmd = {"saga_id": saga_id, "action": "compensate"}
+                        if step.payload_builder:
+                            cmd.update(step.payload_builder(saga_id, "compensate", data))
+                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                except Exception as e:
+                    logger.warning("Recovery compensate error", service=step.service,
+                                   saga_id=saga_id, error=str(e))
+                    await asyncio.sleep(min(backoff, max_backoff))
+                    backoff *= 2
+                    continue
+
+                if isinstance(result, dict) and result.get("event") == "compensated":
+                    break  # this step done
+                else:
+                    logger.warning("Recovery compensate retry", step=step.name,
+                                   saga_id=saga_id, result=result)
+                    await asyncio.sleep(min(backoff, max_backoff))
+                    backoff *= 2
+
+        await self.wal.log(saga_id, "FAILED")
 
     async def start_claim_worker(self):
         """Start periodic XAUTOCLAIM worker for stuck messages."""
@@ -260,7 +309,7 @@ class RecoveryWorker:
                 await result
 
     async def _abort_orphaned_sagas(self):
-        """Find and abort sagas stuck for longer than ORPHAN_SAGA_TIMEOUT."""
+        """Find and handle sagas stuck for longer than ORPHAN_SAGA_TIMEOUT."""
         incomplete = await self.wal.get_incomplete_sagas()
         now = time.time()
         for saga_id, state in incomplete.items():
@@ -269,5 +318,10 @@ class RecoveryWorker:
             age = now - created_at if created_at else 0
 
             if age > ORPHAN_SAGA_TIMEOUT:
-                logger.warning("Aborting orphaned saga", saga_id=saga_id, age_seconds=age)
-                await self._abort_all(saga_id, data)
+                last_step = state.get("last_step", "")
+                if last_step == "COMMITTING":
+                    logger.warning("Completing orphaned committed saga", saga_id=saga_id)
+                    await self._commit_all(saga_id, data)
+                else:
+                    logger.warning("Aborting orphaned saga", saga_id=saga_id, age_seconds=age)
+                    await self._abort_all(saga_id, data)

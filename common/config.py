@@ -5,6 +5,7 @@ import structlog
 
 import redis.asyncio as aioredis
 from redis.asyncio.sentinel import Sentinel
+from redis.exceptions import ConnectionError, TimeoutError
 
 logger = structlog.get_logger(__name__)
 
@@ -50,6 +51,16 @@ def create_redis_connection(
         prefix: Env var prefix for direct connection fallback.
         **kwargs: Extra kwargs passed to Redis client (e.g., decode_responses).
     """
+    # Default timeout/retry kwargs
+    default_kwargs = {
+        "socket_timeout": 5,
+        "socket_connect_timeout": 5,
+        "health_check_interval": 30,
+        "retry_on_error": [ConnectionError, TimeoutError],
+    }
+    # Merge with caller's kwargs (caller can override)
+    merged = {**default_kwargs, **kwargs}
+
     sentinel_hosts = get_sentinel_hosts()
 
     if sentinel_hosts:
@@ -60,7 +71,7 @@ def create_redis_connection(
         if not sentinel_service_name:
             # Fall back to direct connection
             config = get_redis_config(prefix)
-            return aioredis.Redis(**config, max_connections=512, **kwargs)
+            return aioredis.Redis(**config, max_connections=512, **merged)
 
         password = os.environ.get(f"{prefix}REDIS_PASSWORD", "redis")
         sentinel = Sentinel(
@@ -71,13 +82,13 @@ def create_redis_connection(
             password=password,
             db=int(os.environ.get(f"{prefix}REDIS_DB", 0)),
             max_connections=512,
-            **kwargs,
+            **merged,
         )
         return sentinel.master_for(sentinel_service_name)
 
     # Direct connection fallback
     config = get_redis_config(prefix)
-    return aioredis.Redis(**config, max_connections=512, **kwargs)
+    return aioredis.Redis(**config, max_connections=512, **merged)
 
 
 def create_replica_connection(
@@ -91,6 +102,16 @@ def create_replica_connection(
     to the master if no replica is available (transparent failover).
     Falls back to master connection if Sentinel is not configured.
     """
+    # Default timeout/retry kwargs
+    default_kwargs = {
+        "socket_timeout": 5,
+        "socket_connect_timeout": 5,
+        "health_check_interval": 30,
+        "retry_on_error": [ConnectionError, TimeoutError],
+    }
+    # Merge with caller's kwargs (caller can override)
+    merged = {**default_kwargs, **kwargs}
+
     sentinel_hosts = get_sentinel_hosts()
 
     if sentinel_hosts:
@@ -106,12 +127,12 @@ def create_replica_connection(
                 password=password,
                 db=int(os.environ.get(f"{prefix}REDIS_DB", 0)),
                 max_connections=512,
-                **kwargs,
+                **merged,
             )
             return sentinel.slave_for(sentinel_service_name)
 
     # No Sentinel or no service name — fall back to master
-    return create_redis_connection(prefix=prefix, **kwargs)
+    return create_redis_connection(prefix=prefix, **merged)
 
 
 async def wait_for_redis(db: aioredis.Redis, name: str = "Redis",

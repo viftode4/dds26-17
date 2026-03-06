@@ -34,7 +34,7 @@ class WALEngine:
         if data:
             entry["data"] = json.dumps(data)
 
-        async with self.db.pipeline(transaction=False) as pipe:
+        async with self.db.pipeline(transaction=True) as pipe:
             pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
             if step in self.TERMINAL_STATES:
                 pipe.srem(self.ACTIVE_SET, saga_id)

@@ -134,14 +134,11 @@ class Orchestrator:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
 
-        # WAL: log transaction start — fire-and-forget because no side effects
-        # have occurred yet. If we crash before any reservations, there is nothing
-        # to recover. Recovery will simply not find this saga in the WAL.
-        asyncio.create_task(self.wal.log(saga_id, "STARTED", {
+        await self.wal.log(saga_id, "STARTED", {
             "protocol": protocol,
             "tx_name": tx_name,
-            **context,  # includes items — required for recovery cancel/confirm
-        }))
+            **context,
+        })
 
         # Execute and measure latency
         start = time.monotonic()
@@ -233,7 +230,7 @@ class Orchestrator:
                 messages = await db.xreadgroup(
                     OUTBOX_CONSUMER_GROUP, consumer_name,
                     {stream: ">"},
-                    count=50, block=0,
+                    count=50, block=100,
                 )
                 if not messages:
                     continue

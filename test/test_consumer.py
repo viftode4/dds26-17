@@ -1,4 +1,4 @@
-"""Tests for common.consumer (consumer_loop, dlq_sweep) and direct executors + Step.build_command."""
+"""Tests for common.consumer (consumer_loop, dlq_sweep) and direct executors."""
 from __future__ import annotations
 
 import asyncio
@@ -22,18 +22,18 @@ from orchestrator.definition import Step
 class TestProcessAndAck:
 
     @pytest.mark.asyncio
-    async def test_handler_exception_still_acks(self):
-        """If handler raises, the message is still XACK'd (no re-delivery)."""
+    async def test_handler_exception_does_not_ack(self):
+        """If handler raises, the message is NOT XACK'd (stays in PEL for DLQ)."""
         db = AsyncMock()
         sem = asyncio.Semaphore(10)
         await sem.acquire()  # pre-acquire to simulate the loop doing it
 
         handler = AsyncMock(side_effect=RuntimeError("boom"))
         await _process_and_ack(
-            "1-0", {"action": "try_reserve"},
+            "1-0", {"action": "prepare"},
             handler, db, "stock-commands", "stock-workers", sem,
         )
-        db.xack.assert_awaited_once_with("stock-commands", "stock-workers", "1-0")
+        db.xack.assert_not_awaited()
         # Semaphore should be released even on error
         assert sem._value == 10
 
@@ -103,7 +103,7 @@ class TestDLQSweep:
         db.xpending_range = AsyncMock(return_value=[
             {"message_id": "1-0", "times_delivered": 6},
         ])
-        db.xrange = AsyncMock(return_value=[("1-0", {"action": "try_reserve", "saga_id": "s1"})])
+        db.xrange = AsyncMock(return_value=[("1-0", {"action": "prepare", "saga_id": "s1"})])
         db.xadd = AsyncMock()
         db.xack = AsyncMock()
 
@@ -161,54 +161,70 @@ from order.app import stock_direct_executor, payment_direct_executor
 class TestStockDirectExecutor:
 
     @pytest.mark.asyncio
-    async def test_try_reserve_success(self):
+    async def test_prepare_success(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=1)
-        ctx = {"items": [("item1", 2), ("item2", 1)], "_reservation_ttl": 60}
-        result = await stock_direct_executor("saga-1", "try_reserve", ctx, db)
-        assert result == {"event": "reserved"}
+        ctx = {"items": [("item1", 2), ("item2", 1)]}
+        result = await stock_direct_executor("saga-1", "prepare", ctx, db)
+        assert result == {"event": "prepared"}
         db.fcall.assert_awaited_once()
-        assert db.fcall.call_args[0][0] == "stock_try_reserve_batch"
+        assert db.fcall.call_args[0][0] == "stock_2pc_prepare"
 
     @pytest.mark.asyncio
-    async def test_try_reserve_failure(self):
-        db = AsyncMock()
-        db.fcall = AsyncMock(return_value=0)
-        ctx = {"items": [("item1", 2)], "_reservation_ttl": 60}
-        result = await stock_direct_executor("saga-1", "try_reserve", ctx, db)
-        assert result == {"event": "failed", "reason": "insufficient_stock"}
-
-    @pytest.mark.asyncio
-    async def test_confirm_success(self):
-        db = AsyncMock()
-        db.fcall = AsyncMock(return_value=1)
-        ctx = {"items": [("item1", 2)]}
-        result = await stock_direct_executor("saga-1", "confirm", ctx, db)
-        assert result == {"event": "confirmed"}
-
-    @pytest.mark.asyncio
-    async def test_confirm_failure(self):
+    async def test_prepare_failure(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=0)
         ctx = {"items": [("item1", 2)]}
-        result = await stock_direct_executor("saga-1", "confirm", ctx, db)
-        assert result == {"event": "confirm_failed", "reason": "reservation_expired"}
+        result = await stock_direct_executor("saga-1", "prepare", ctx, db)
+        assert result["event"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_cancel(self):
+    async def test_commit_success(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=1)
         ctx = {"items": [("item1", 2)]}
-        result = await stock_direct_executor("saga-1", "cancel", ctx, db)
-        assert result == {"event": "cancelled"}
+        result = await stock_direct_executor("saga-1", "commit", ctx, db)
+        assert result == {"event": "committed"}
+
+    @pytest.mark.asyncio
+    async def test_commit_lock_expired(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=-1)
+        ctx = {"items": [("item1", 2)]}
+        result = await stock_direct_executor("saga-1", "commit", ctx, db)
+        assert result == {"event": "commit_failed", "reason": "lock_expired"}
+
+    @pytest.mark.asyncio
+    async def test_abort(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"items": [("item1", 2)]}
+        result = await stock_direct_executor("saga-1", "abort", ctx, db)
+        assert result == {"event": "aborted"}
+
+    @pytest.mark.asyncio
+    async def test_execute_success(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"items": [("item1", 2)]}
+        result = await stock_direct_executor("saga-1", "execute", ctx, db)
+        assert result == {"event": "executed"}
+        assert db.fcall.call_args[0][0] == "stock_saga_execute"
+
+    @pytest.mark.asyncio
+    async def test_compensate(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"items": [("item1", 2)]}
+        result = await stock_direct_executor("saga-1", "compensate", ctx, db)
+        assert result == {"event": "compensated"}
 
     @pytest.mark.asyncio
     async def test_empty_items_no_crash(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=1)
-        ctx = {"items": [], "_reservation_ttl": 60}
-        result = await stock_direct_executor("saga-1", "try_reserve", ctx, db)
-        # Should still call fcall (Lua handles empty batch)
+        ctx = {"items": []}
+        result = await stock_direct_executor("saga-1", "prepare", ctx, db)
         db.fcall.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -223,52 +239,76 @@ class TestStockDirectExecutor:
 class TestPaymentDirectExecutor:
 
     @pytest.mark.asyncio
-    async def test_try_reserve_success(self):
-        db = AsyncMock()
-        db.fcall = AsyncMock(return_value=1)
-        ctx = {"user_id": "u1", "total_cost": 100, "_reservation_ttl": 60}
-        result = await payment_direct_executor("saga-1", "try_reserve", ctx, db)
-        assert result == {"event": "reserved"}
-
-    @pytest.mark.asyncio
-    async def test_try_reserve_failure(self):
-        db = AsyncMock()
-        db.fcall = AsyncMock(return_value=0)
-        ctx = {"user_id": "u1", "total_cost": 100, "_reservation_ttl": 60}
-        result = await payment_direct_executor("saga-1", "try_reserve", ctx, db)
-        assert result == {"event": "failed", "reason": "insufficient_credit"}
-
-    @pytest.mark.asyncio
-    async def test_confirm_success(self):
+    async def test_prepare_success(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=1)
         ctx = {"user_id": "u1", "total_cost": 100}
-        result = await payment_direct_executor("saga-1", "confirm", ctx, db)
-        assert result == {"event": "confirmed"}
+        result = await payment_direct_executor("saga-1", "prepare", ctx, db)
+        assert result == {"event": "prepared"}
 
     @pytest.mark.asyncio
-    async def test_confirm_failure(self):
+    async def test_prepare_failure(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=0)
         ctx = {"user_id": "u1", "total_cost": 100}
-        result = await payment_direct_executor("saga-1", "confirm", ctx, db)
-        assert result == {"event": "confirm_failed", "reason": "reservation_expired"}
+        result = await payment_direct_executor("saga-1", "prepare", ctx, db)
+        assert result["event"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_cancel_with_user_id(self):
+    async def test_commit_success(self):
         db = AsyncMock()
         db.fcall = AsyncMock(return_value=1)
         ctx = {"user_id": "u1", "total_cost": 100}
-        result = await payment_direct_executor("saga-1", "cancel", ctx, db)
-        assert result == {"event": "cancelled"}
+        result = await payment_direct_executor("saga-1", "commit", ctx, db)
+        assert result == {"event": "committed"}
+
+    @pytest.mark.asyncio
+    async def test_commit_lock_expired(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=-1)
+        ctx = {"user_id": "u1", "total_cost": 100}
+        result = await payment_direct_executor("saga-1", "commit", ctx, db)
+        assert result == {"event": "commit_failed", "reason": "lock_expired"}
+
+    @pytest.mark.asyncio
+    async def test_abort_with_user_id(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"user_id": "u1", "total_cost": 100}
+        result = await payment_direct_executor("saga-1", "abort", ctx, db)
+        assert result == {"event": "aborted"}
         db.fcall.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_cancel_without_user_id(self):
+    async def test_abort_without_user_id(self):
         db = AsyncMock()
         ctx = {"user_id": "", "total_cost": 100}
-        result = await payment_direct_executor("saga-1", "cancel", ctx, db)
-        assert result == {"event": "cancelled"}
+        result = await payment_direct_executor("saga-1", "abort", ctx, db)
+        assert result == {"event": "aborted"}
+        db.fcall.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_success(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"user_id": "u1", "total_cost": 100}
+        result = await payment_direct_executor("saga-1", "execute", ctx, db)
+        assert result == {"event": "executed"}
+
+    @pytest.mark.asyncio
+    async def test_compensate_with_user_id(self):
+        db = AsyncMock()
+        db.fcall = AsyncMock(return_value=1)
+        ctx = {"user_id": "u1", "total_cost": 100}
+        result = await payment_direct_executor("saga-1", "compensate", ctx, db)
+        assert result == {"event": "compensated"}
+
+    @pytest.mark.asyncio
+    async def test_compensate_without_user_id(self):
+        db = AsyncMock()
+        ctx = {"user_id": "", "total_cost": 100}
+        result = await payment_direct_executor("saga-1", "compensate", ctx, db)
+        assert result == {"event": "compensated"}
         db.fcall.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -278,33 +318,3 @@ class TestPaymentDirectExecutor:
         result = await payment_direct_executor("saga-1", "rollback", ctx, db)
         assert result["event"] == "failed"
         assert "unknown_action:rollback" in result["reason"]
-
-
-# ---------------------------------------------------------------------------
-# Part C: Step.build_command
-# ---------------------------------------------------------------------------
-
-class TestStepBuildCommand:
-
-    def test_default_action(self):
-        step = Step("stock", "stock", "try_reserve", "cancel", "confirm")
-        cmd = step.build_command("saga-1")
-        assert cmd == {"saga_id": "saga-1", "action": "try_reserve"}
-
-    def test_action_override(self):
-        step = Step("stock", "stock", "try_reserve", "cancel", "confirm")
-        cmd = step.build_command("saga-1", action_override="cancel")
-        assert cmd["action"] == "cancel"
-
-    def test_extra_fields(self):
-        step = Step("stock", "stock", "try_reserve", "cancel", "confirm")
-        cmd = step.build_command("saga-1", items="[1,2]", ttl="60")
-        assert cmd["items"] == "[1,2]"
-        assert cmd["ttl"] == "60"
-
-    def test_payload_builder_not_called(self):
-        """build_command does NOT invoke payload_builder — that's the executor's job."""
-        builder = MagicMock()
-        step = Step("stock", "stock", "try_reserve", "cancel", "confirm", payload_builder=builder)
-        step.build_command("saga-1")
-        builder.assert_not_called()

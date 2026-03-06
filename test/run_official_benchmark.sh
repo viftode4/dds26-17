@@ -102,12 +102,16 @@ echo "    Done"
 echo ""
 echo ">>> Starting $WORKERS Locust workers..."
 WORKER_PIDS=()
+
+# Must cd into stress-test dir because locustfile imports init_orders which uses ../urls.json
+STRESS_DIR="$(cd "$BENCH_DIR/stress-test" && pwd)"
+
 for i in $(seq 1 $WORKERS); do
-    python -m locust \
-        -f "$BENCH_DIR/stress-test/locustfile.py" \
+    (cd "$STRESS_DIR" && python -m locust \
+        -f locustfile.py \
         --worker \
         --master-host=127.0.0.1 \
-        > /tmp/official_worker_${i}.log 2>&1 &
+        > /tmp/official_worker_${i}.log 2>&1) &
     WORKER_PIDS+=($!)
 done
 sleep 2
@@ -123,8 +127,8 @@ CSV_PREFIX="$RESULTS_DIR/official_${TIMESTAMP}_u${USERS}"
 
 echo ""
 echo ">>> Running $USERS users for ${DURATION}s..."
-python -m locust \
-    -f "$BENCH_DIR/stress-test/locustfile.py" \
+(cd "$STRESS_DIR" && python -m locust \
+    -f locustfile.py \
     --master \
     --host "$GATEWAY" \
     --headless \
@@ -134,7 +138,7 @@ python -m locust \
     --expect-workers "$WORKERS" \
     --csv "$CSV_PREFIX" \
     --only-summary \
-    2>&1
+    2>&1)
 
 for pid in "${WORKER_PIDS[@]}"; do
     kill "$pid" 2>/dev/null || true

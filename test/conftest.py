@@ -103,10 +103,8 @@ def _payment_payload(saga_id: str, action: str, ctx: dict) -> dict:
 @pytest.fixture
 def checkout_steps() -> list[Step]:
     return [
-        Step(name="stock", service="stock", action="try_reserve",
-             compensate="cancel", confirm="confirm", payload_builder=_stock_payload),
-        Step(name="payment", service="payment", action="try_reserve",
-             compensate="cancel", confirm="confirm", payload_builder=_payment_payload),
+        Step(name="stock", service="stock", payload_builder=_stock_payload),
+        Step(name="payment", service="payment", payload_builder=_payment_payload),
     ]
 
 

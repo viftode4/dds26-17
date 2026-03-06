@@ -24,6 +24,7 @@ from orchestrator import (
 
 
 DB_ERROR_STR = "DB error"
+LOCK_TTL = 30  # seconds for 2PC locks
 
 
 log = get_logger("order")
@@ -72,38 +73,48 @@ async def stock_direct_executor(
     items = context.get("items", [])
     n = len(items)
 
-    if action == "try_reserve":
-        ttl = context.get("_reservation_ttl", 60)
+    if action == "prepare":
         keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
-        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
         keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        args = [saga_id, str(ttl)]
+        args = [saga_id, str(LOCK_TTL)]
         for iid, qty in items:
             args += [str(iid), str(qty)]
-        args.append("1")  # skip_outbox — result returned in-process
-        result = await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
-        if result == 1:
-            return {"event": "reserved"}
-        return {"event": "failed", "reason": "insufficient_stock"}
+        args.append("1")  # skip_outbox
+        result = await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+        return {"event": "prepared"} if result == 1 else {"event": "failed", "reason": "insufficient_stock_or_locked"}
 
-    elif action == "confirm":
+    elif action == "commit":
         keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
-        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
         keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        result = await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n), "1")
+        result = await db.fcall("stock_2pc_commit", len(keys), *keys, saga_id, str(n), "1")
         if result == 1:
-            return {"event": "confirmed"}
-        return {"event": "confirm_failed", "reason": "reservation_expired"}
+            return {"event": "committed"}
+        return {"event": "commit_failed", "reason": "lock_expired"}
 
-    elif action == "cancel":
+    elif action == "abort":
         keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"reservation:{saga_id}:{iid}" for iid, _ in items]
-        keys += [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
+        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
         keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n), "1")
-        return {"event": "cancelled"}
+        await db.fcall("stock_2pc_abort", len(keys), *keys, saga_id, str(n), "1")
+        return {"event": "aborted"}
+
+    elif action == "execute":
+        keys = [f"item:{iid}" for iid, _ in items]
+        keys += ["stock-outbox", f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+        args = [saga_id]
+        for iid, qty in items:
+            args += [str(iid), str(qty)]
+        args.append("1")  # skip_outbox
+        result = await db.fcall("stock_saga_execute", len(keys), *keys, *args)
+        return {"event": "executed"} if result == 1 else {"event": "failed", "reason": "insufficient_stock"}
+
+    elif action == "compensate":
+        keys = [f"item:{iid}" for iid, _ in items]
+        keys += ["stock-outbox", f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+        result = await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n), "1")
+        return {"event": "compensated"}
 
     return {"event": "failed", "reason": f"unknown_action:{action}"}
 
@@ -114,47 +125,64 @@ async def payment_direct_executor(
     """Call payment Lua functions directly — eliminates 2 stream hops."""
     user_id = context.get("user_id", "")
     amount = context.get("total_cost", 0)
-    ttl = context.get("_reservation_ttl", 60)
 
-    if action == "try_reserve":
+    if action == "prepare":
         keys = [
             f"user:{user_id}",
-            f"reservation:{saga_id}:{user_id}",
+            f"lock:2pc:{saga_id}:{user_id}",
             f"saga:{saga_id}:payment:status",
             "payment-outbox",
-            f"reservation_amount:{saga_id}:{user_id}",
         ]
-        args = [str(amount), saga_id, user_id, str(ttl), "1"]  # skip_outbox
-        result = await db.fcall("payment_try_reserve", len(keys), *keys, *args)
-        if result == 1:
-            return {"event": "reserved"}
-        return {"event": "failed", "reason": "insufficient_credit"}
+        args = [str(amount), saga_id, user_id, str(LOCK_TTL), "1"]
+        result = await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
+        return {"event": "prepared"} if result == 1 else {"event": "failed", "reason": "insufficient_credit_or_locked"}
 
-    elif action == "confirm":
+    elif action == "commit":
         keys = [
             f"user:{user_id}",
-            f"reservation:{saga_id}:{user_id}",
+            f"lock:2pc:{saga_id}:{user_id}",
             f"saga:{saga_id}:payment:status",
             "payment-outbox",
-            f"reservation_amount:{saga_id}:{user_id}",
         ]
-        result = await db.fcall("payment_confirm", len(keys), *keys, saga_id, "1")
+        result = await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, "1")
         if result == 1:
-            return {"event": "confirmed"}
-        return {"event": "confirm_failed", "reason": "reservation_expired"}
+            return {"event": "committed"}
+        return {"event": "commit_failed", "reason": "lock_expired"}
 
-    elif action == "cancel":
+    elif action == "abort":
         if not user_id:
-            return {"event": "cancelled"}
+            return {"event": "aborted"}
         keys = [
             f"user:{user_id}",
-            f"reservation:{saga_id}:{user_id}",
+            f"lock:2pc:{saga_id}:{user_id}",
             f"saga:{saga_id}:payment:status",
             "payment-outbox",
-            f"reservation_amount:{saga_id}:{user_id}",
         ]
-        await db.fcall("payment_cancel", len(keys), *keys, saga_id, "1")
-        return {"event": "cancelled"}
+        await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id, "1")
+        return {"event": "aborted"}
+
+    elif action == "execute":
+        keys = [
+            f"user:{user_id}",
+            "payment-outbox",
+            f"saga:{saga_id}:payment:status",
+            f"saga:{saga_id}:payment:amounts",
+        ]
+        args = [str(amount), saga_id, user_id, "1"]
+        result = await db.fcall("payment_saga_execute", len(keys), *keys, *args)
+        return {"event": "executed"} if result == 1 else {"event": "failed", "reason": "insufficient_credit"}
+
+    elif action == "compensate":
+        if not user_id:
+            return {"event": "compensated"}
+        keys = [
+            f"user:{user_id}",
+            "payment-outbox",
+            f"saga:{saga_id}:payment:status",
+            f"saga:{saga_id}:payment:amounts",
+        ]
+        await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id, "1")
+        return {"event": "compensated"}
 
     return {"event": "failed", "reason": f"unknown_action:{action}"}
 
@@ -169,18 +197,12 @@ checkout_tx = TransactionDefinition(
         Step(
             name="reserve_stock",
             service="stock",
-            action="try_reserve",
-            compensate="cancel",
-            confirm="confirm",
             payload_builder=stock_payload,
             direct_executor=stock_direct_executor,
         ),
         Step(
             name="reserve_payment",
             service="payment",
-            action="try_reserve",
-            compensate="cancel",
-            confirm="confirm",
             payload_builder=payment_payload,
             direct_executor=payment_direct_executor,
         ),
@@ -498,7 +520,7 @@ async def checkout(request: Request):
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
     keys = [f"order:{order_id}", f"order:{order_id}:items", idempotency_key]
-    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "3600")
+    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "120")
     found, entry_flat_json, items_json, acquired_int = raw[0], raw[1], raw[2], raw[3]
     if not found:
         raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -569,7 +591,7 @@ async def checkout(request: Request):
     # 6. Persist result — awaited so order state is consistent before responding
     if result.get("status") == "success":
         final_value = json.dumps({"status": "success", "saga_id": saga_id})
-        async with db.pipeline(transaction=False) as pipe:
+        async with db.pipeline(transaction=True) as pipe:
             pipe.set(idempotency_key, final_value, ex=86400)
             pipe.hset(f"order:{order_id}", "paid", "true")
             await pipe.execute()
