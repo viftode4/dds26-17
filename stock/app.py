@@ -30,11 +30,12 @@ log = get_logger("stock")
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
 _consumer_task: asyncio.Task | None = None
+_dlq_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, _consumer_task
+    global db, db_read, _consumer_task, _dlq_task
     setup_logging("stock-service")
 
     db = create_redis_connection(prefix="", decode_responses=True)
@@ -65,17 +66,18 @@ async def lifespan(app):
     _consumer_task = asyncio.create_task(
         consumer_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, CONSUMER_NAME, handle_command)
     )
-    asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
+    _dlq_task = asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
     log.info("Stock service started", consumer=CONSUMER_NAME)
 
     yield
 
-    if _consumer_task:
-        _consumer_task.cancel()
-        try:
-            await _consumer_task
-        except asyncio.CancelledError:
-            pass
+    for task in (_consumer_task, _dlq_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     if db_read:
         await db_read.aclose()
     if db:

@@ -125,8 +125,54 @@ class RecoveryWorker:
                               maxlen=10000, approximate=True)
 
     async def _abort_all(self, saga_id: str, data: dict):
-        """Send abort to all services and log FAILED."""
-        await self._send_action_to_all("abort", saga_id, data)
+        """Abort all services with infinite retry, then log FAILED."""
+        tx_def = self.definitions.get(data.get("tx_name", ""))
+        if not tx_def:
+            await self._send_action_to_all("abort", saga_id, data)
+            await self.wal.log(saga_id, "FAILED")
+            return
+
+        backoff = 0.5
+        max_backoff = 60.0
+        pending_steps = list(tx_def.steps)
+
+        while pending_steps:
+            still_pending = []
+            for step in pending_steps:
+                try:
+                    if step.direct_executor:
+                        result = await step.direct_executor(saga_id, "abort", data,
+                                                            self.service_dbs[step.service])
+                    else:
+                        db = self.service_dbs.get(step.service)
+                        if not db:
+                            continue
+                        stream = f"{step.service}-commands"
+                        cmd = {"saga_id": saga_id, "action": "abort"}
+                        if step.payload_builder:
+                            cmd.update(step.payload_builder(saga_id, "abort", data))
+                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                except Exception as e:
+                    logger.warning("Recovery abort error", service=step.service,
+                                   saga_id=saga_id, error=str(e))
+                    still_pending.append(step)
+                    continue
+
+                if isinstance(result, dict) and result.get("event") == "aborted":
+                    pass  # success
+                else:
+                    still_pending.append(step)
+
+            pending_steps = still_pending
+            if pending_steps:
+                logger.warning("Recovery abort retry", saga_id=saga_id,
+                               pending=[s.name for s in pending_steps],
+                               backoff=backoff)
+                await asyncio.sleep(min(backoff, max_backoff))
+                backoff *= 2
+
         await self.wal.log(saga_id, "FAILED")
 
     async def _commit_all(self, saga_id: str, data: dict):

@@ -218,7 +218,7 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
     """Verify data invariants across stock and payment services.
 
     Checks:
-    1. No negative balances (available_stock, reserved_stock, credits)
+    1. No negative balances (available_stock, available_credit)
     2. Orphan reservations: reservation keys whose saga is no longer active
     """
     stock_db = service_dbs.get("stock")
@@ -230,11 +230,10 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
             for key in keys:
                 data = await stock_db.hgetall(key)
                 avail = int(data.get("available_stock", 0))
-                reserved = int(data.get("reserved_stock", 0))
-                if avail < 0 or reserved < 0:
+                if avail < 0:
                     log.critical(
                         "INVARIANT VIOLATION: stock",
-                        key=key, available_stock=avail, reserved_stock=reserved,
+                        key=key, available_stock=avail,
                     )
             if cursor == "0" or cursor == 0:
                 break
@@ -270,11 +269,10 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
             for key in keys:
                 data = await payment_db.hgetall(key)
                 avail = int(data.get("available_credit", 0))
-                held = int(data.get("held_credit", 0))
-                if avail < 0 or held < 0:
+                if avail < 0:
                     log.critical(
                         "INVARIANT VIOLATION: payment",
-                        key=key, available_credit=avail, held_credit=held,
+                        key=key, available_credit=avail,
                     )
             if cursor == "0" or cursor == 0:
                 break

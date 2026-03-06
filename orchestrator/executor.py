@@ -238,9 +238,9 @@ class TwoPCExecutor(_BaseExecutor):
             await self.wal.log(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
-            # Phase 2b: ABORT (release locks)
+            # Phase 2b: ABORT (release locks) — verified retry like commit
             await self.wal.log(saga_id, "ABORTING", context)
-            await self._broadcast("abort", saga_id, tx_def.steps, context)
+            await self._verified_action("abort", "aborted", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
             reason = "insufficient_resources"
             for _, vote in votes:

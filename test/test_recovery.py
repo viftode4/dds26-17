@@ -75,10 +75,16 @@ class _XaddResponseHook:
         async def _hooked(stream, fields, *args, **kwargs):
             hook.call_log.append((service, stream, dict(fields)))
             result = await original_xadd(stream, fields, *args, **kwargs)
-            if fields.get("action") == "commit" and service in hook._queues and hook._queues[service]:
+            action = fields.get("action", "")
+            queue_key = f"{action}:{service}"
+            if queue_key in hook._queues and hook._queues[queue_key]:
+                resp = hook._queues[queue_key].pop(0)
+                async def _resolve_later(svc=service, r=resp):
+                    await asyncio.sleep(0.02)
+                    hook.outbox_reader.resolve(hook.saga_id, svc, r)
+                asyncio.get_event_loop().create_task(_resolve_later())
+            elif action in ("commit", "abort") and service in hook._queues and hook._queues[service]:
                 resp = hook._queues[service].pop(0)
-                # Schedule resolution as a background task so the caller can
-                # create_waiter() before we resolve it.
                 async def _resolve_later(svc=service, r=resp):
                     await asyncio.sleep(0.02)
                     hook.outbox_reader.resolve(hook.saga_id, svc, r)
@@ -116,19 +122,22 @@ async def test_recover_started(mock_sleep):
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
 async def test_recover_preparing_aborts(mock_sleep):
-    """WAL='PREPARING' -> abort to all services, FAILED."""
+    """WAL='PREPARING' -> abort to all services with verified retry, FAILED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-prep", "PREPARING", {"tx_name": "checkout"})
     outbox = OutboxReader()
     tx_def = TransactionDefinition("checkout", _make_steps())
 
+    hook = _XaddResponseHook(outbox, "saga-prep", {
+        "abort:stock": [{"event": "aborted"}],
+        "abort:payment": [{"event": "aborted"}],
+    }, service_dbs)
+
     worker = RecoveryWorker(wal, service_dbs, outbox, definitions={"checkout": tx_def})
     await worker.recover_incomplete_sagas()
 
-    stock_calls = service_dbs["stock"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "abort" for c in stock_calls)
-    payment_calls = service_dbs["payment"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "abort" for c in payment_calls)
+    assert len(hook.abort_calls("stock")) >= 1
+    assert len(hook.abort_calls("payment")) >= 1
     assert wal.log.call_args_list[-1].args == ("saga-prep", "FAILED")
 
 
@@ -201,17 +210,21 @@ async def test_recover_committing_retries_until_success(mock_sleep):
 @pytest.mark.asyncio
 @patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
 async def test_recover_aborting(mock_sleep):
-    """WAL='ABORTING' -> abort to all services, FAILED."""
+    """WAL='ABORTING' -> abort to all services with verified retry, FAILED."""
     service_dbs = {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
     wal = _wal_with_saga("saga-abort", "ABORTING", {"tx_name": "checkout"})
     outbox = OutboxReader()
     tx_def = TransactionDefinition("checkout", _make_steps())
 
+    hook = _XaddResponseHook(outbox, "saga-abort", {
+        "abort:stock": [{"event": "aborted"}],
+        "abort:payment": [{"event": "aborted"}],
+    }, service_dbs)
+
     worker = RecoveryWorker(wal, service_dbs, outbox, definitions={"checkout": tx_def})
     await worker.recover_incomplete_sagas()
 
-    stock_calls = service_dbs["stock"].xadd.call_args_list
-    assert any(c.args[1].get("action") == "abort" for c in stock_calls)
+    assert len(hook.abort_calls("stock")) >= 1
     assert wal.log.call_args_list[-1].args == ("saga-abort", "FAILED")
 
 
