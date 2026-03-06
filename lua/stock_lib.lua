@@ -112,13 +112,17 @@ local function confirm_batch(KEYS, ARGV)
         local fallback_key = KEYS[2 * n_items + i]
         local amount = redis.call('GET', reservation_key)
         if not amount then
-            -- Reservation expired (TTL) — permanent failure
-            if skip_outbox ~= "1" then
-                redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-                    'saga_id', saga_id, 'event', 'confirm_failed',
-                    'reason', 'reservation_expired')
+            -- Reservation key expired (TTL) — try fallback amount key (24h TTL)
+            amount = redis.call('GET', fallback_key)
+            if not amount then
+                -- Both keys gone — truly unrecoverable
+                if skip_outbox ~= "1" then
+                    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+                        'saga_id', saga_id, 'event', 'confirm_failed',
+                        'reason', 'reservation_expired')
+                end
+                return -1
             end
-            return -1
         end
         redis.call('HINCRBY', item_key, 'reserved_stock', -tonumber(amount))
         redis.call('DEL', reservation_key)

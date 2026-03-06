@@ -73,11 +73,16 @@ local function payment_confirm(KEYS, ARGV)
     end
     local amount = redis.call('GET', KEYS[2])
     if not amount then
-        if skip_outbox ~= "1" then
-            redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-                'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
+        -- Reservation key expired (TTL) — try fallback amount key (24h TTL)
+        amount = redis.call('GET', KEYS[5])
+        if not amount then
+            -- Both keys gone — truly unrecoverable
+            if skip_outbox ~= "1" then
+                redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+                    'saga_id', ARGV[1], 'event', 'confirm_failed', 'reason', 'reservation_expired')
+            end
+            return -1
         end
-        return -1
     end
     redis.call('HINCRBY', KEYS[1], 'held_credit', -tonumber(amount))
     redis.call('DEL', KEYS[2])

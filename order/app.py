@@ -193,9 +193,15 @@ checkout_tx = TransactionDefinition(
 # ---------------------------------------------------------------------------
 
 async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
-    """Verify data invariants across stock and payment services."""
+    """Verify data invariants across stock and payment services.
+
+    Checks:
+    1. No negative balances (available_stock, reserved_stock, credits)
+    2. Orphan reservations: reservation keys whose saga is no longer active
+    """
     stock_db = service_dbs.get("stock")
     if stock_db:
+        # Check 1: negative balance invariant
         cursor = "0"
         while True:
             cursor, keys = await stock_db.scan(cursor=cursor, match="item:*", count=100)
@@ -208,6 +214,29 @@ async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
                         "INVARIANT VIOLATION: stock",
                         key=key, available_stock=avail, reserved_stock=reserved,
                     )
+            if cursor == "0" or cursor == 0:
+                break
+
+        # Check 2: orphan reservation keys (saga completed but reservation lingers)
+        cursor = "0"
+        while True:
+            cursor, keys = await stock_db.scan(
+                cursor=cursor, match="saga:*:stock:status", count=100
+            )
+            for key in keys:
+                # Extract saga_id from key pattern saga:{saga_id}:stock:status
+                parts = key.split(":")
+                if len(parts) >= 4:
+                    saga_id = parts[1]
+                    # Check if saga is still active in WAL
+                    active = await db.sismember("active_sagas", saga_id)
+                    if not active:
+                        status_val = await stock_db.get(key)
+                        if status_val and status_val not in ("confirmed", "cancelled"):
+                            log.warning(
+                                "Orphan stock reservation",
+                                saga_id=saga_id, status=status_val,
+                            )
             if cursor == "0" or cursor == 0:
                 break
 
@@ -494,7 +523,7 @@ async def checkout(request: Request):
     # 2. Pre-check: already paid? (release idempotency claim if we grabbed it)
     if entry["paid"] == "true":
         if acquired:
-            asyncio.create_task(db.delete(idempotency_key))
+            await db.delete(idempotency_key)
         raise HTTPException(400, detail="Order already paid")
 
     # 3. Aggregate items
@@ -505,7 +534,7 @@ async def checkout(request: Request):
 
     if not aggregated_items:
         if acquired:
-            asyncio.create_task(db.delete(idempotency_key))
+            await db.delete(idempotency_key)
         raise HTTPException(400, detail="Order has no items")
 
     if not acquired:
@@ -537,22 +566,19 @@ async def checkout(request: Request):
     }
     result = await orchestrator.execute("checkout", context, saga_id_override=saga_id)
 
-    # 6. Cache result and update order — fire-and-forget (saga already committed,
-    #    writes are best-effort bookkeeping; recovery handles the edge case)
+    # 6. Persist result — awaited so order state is consistent before responding
     if result.get("status") == "success":
-        async def _commit_bookkeeping():
-            final_value = json.dumps({"status": "success", "saga_id": saga_id})
-            async with db.pipeline(transaction=False) as pipe:
-                pipe.set(idempotency_key, final_value, ex=86400)
-                pipe.hset(f"order:{order_id}", "paid", "true")
-                await pipe.execute()
-        asyncio.create_task(_commit_bookkeeping())
+        final_value = json.dumps({"status": "success", "saga_id": saga_id})
+        async with db.pipeline(transaction=False) as pipe:
+            pipe.set(idempotency_key, final_value, ex=86400)
+            pipe.hset(f"order:{order_id}", "paid", "true")
+            await pipe.execute()
         log.info("Checkout successful", order_id=order_id, saga_id=saga_id,
                  protocol=result.get("protocol"))
         return PlainTextResponse("Checkout successful")
     else:
         # Delete idempotency key — allow client to retry after fixing conditions
-        asyncio.create_task(db.delete(idempotency_key))
+        await db.delete(idempotency_key)
         error = result.get("error", "unknown")
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         raise HTTPException(400, detail=f"Checkout failed: {error}")

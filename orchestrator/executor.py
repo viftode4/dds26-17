@@ -16,8 +16,7 @@ CONFIRM_MAX_RETRIES = 3
 class CircuitBreaker:
     """Per-service circuit breaker — fail-fast when a service is degraded.
 
-    States: closed (normal) → open (failing fast) → half-open (probing).
-    Prevents cascading timeouts under partial failure scenarios.
+    States: closed (normal) -> open (failing fast) -> half-open (probing).
     """
 
     def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0):
@@ -60,7 +59,6 @@ class OutboxReader:
         self._waiters: dict[str, asyncio.Future] = {}
 
     def create_waiter(self, saga_id: str, service: str) -> asyncio.Future:
-        """Create a future that resolves when the outbox event for this step arrives."""
         key = f"{saga_id}:{service}"
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
@@ -68,14 +66,20 @@ class OutboxReader:
         return fut
 
     def resolve(self, saga_id: str, service: str, event_data: dict):
-        """Resolve a waiting future with the event data."""
         key = f"{saga_id}:{service}"
         fut = self._waiters.pop(key, None)
         if fut and not fut.done():
             fut.set_result(event_data)
 
     def cancel_all(self, saga_id: str):
-        """Cancel all pending futures for a saga (cleanup on abort)."""
+        to_remove = [k for k in self._waiters if k.startswith(f"{saga_id}:")]
+        for key in to_remove:
+            fut = self._waiters.pop(key, None)
+            if fut and not fut.done():
+                fut.cancel()
+
+    def cleanup(self, saga_id: str):
+        """Remove stale waiters for a completed saga (prevents memory leak)."""
         to_remove = [k for k in self._waiters if k.startswith(f"{saga_id}:")]
         for key in to_remove:
             fut = self._waiters.pop(key, None)
@@ -83,29 +87,8 @@ class OutboxReader:
                 fut.cancel()
 
 
-async def _waitaof(dbs: list[aioredis.Redis]):
-    """Issue WAITAOF on each db in parallel — best-effort AOF durability check.
-
-    10ms budget: fast enough to not dominate latency, still catches the common
-    case where the AOF buffer was just flushed. Falls back to appendfsync everysec
-    guarantee if the budget expires. Non-fatal on any error.
-    """
-    async def _one(db):
-        try:
-            await db.execute_command("WAITAOF", 1, 0, 10)
-        except Exception:
-            pass
-
-    await asyncio.gather(*[_one(db) for db in dbs])
-
-
 class _BaseExecutor:
-    """Shared infrastructure for TwoPCExecutor and SagaExecutor.
-
-    Holds the common service connections, outbox reader, WAL engine,
-    circuit breakers, and metrics — plus the generic helpers used by both
-    protocol executors: _send_command, _retry_confirm, _broadcast, _inject_ttl.
-    """
+    """Shared infrastructure for TwoPCExecutor and SagaExecutor."""
 
     def __init__(self, service_dbs: dict[str, aioredis.Redis],
                  outbox_reader: OutboxReader, wal: WALEngine,
@@ -117,12 +100,18 @@ class _BaseExecutor:
         self.circuit_breakers = circuit_breakers or {}
         self.metrics = metrics
 
-    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
-        """Send a command to a service's command stream — fully generic.
+    def _check_circuit_breakers(self, steps: list[Step], saga_id: str) -> str | None:
+        """Check all circuit breakers. Returns error string or None."""
+        for step in steps:
+            cb = self.circuit_breakers.get(step.service)
+            if cb and cb.is_open():
+                logger.warning("Circuit breaker open — fast fail",
+                               service=step.service, saga_id=saga_id)
+                return f"service_{step.service}_unavailable"
+        return None
 
-        Stream name derived by convention: ``{service}-commands``.
-        Domain-specific payload fields injected via ``step.payload_builder``.
-        """
+    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
+        """Send a command to a service's command stream."""
         service = step.service
         db = self.service_dbs[service]
         stream = f"{service}-commands"
@@ -131,86 +120,87 @@ class _BaseExecutor:
             cmd.update(step.payload_builder(saga_id, action, context))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)
 
-    async def _retry_confirm(self, step: Step, saga_id: str, context: dict,
-                              retries: int = CONFIRM_MAX_RETRIES) -> dict | None:
-        """Forward recovery: retry confirm before giving up (reservation_expired is transient).
+    async def _try_step_direct(self, step: Step, saga_id: str, action: str,
+                                context: dict) -> dict:
+        """Execute a single step via direct executor. Returns result dict."""
+        try:
+            return await step.direct_executor(
+                saga_id, action, context, self.service_dbs[step.service]
+            )
+        except Exception as e:
+            return {"event": "failed", "reason": str(e)}
 
-        Uses exponential backoff: 0.5s, 1s, 2s between attempts.
-        Returns the result dict on success, or None if all retries exhausted.
-        """
-        for attempt in range(retries):
-            fut = self.outbox_reader.create_waiter(saga_id, step.service)
-            await self._send_command(step, saga_id, "confirm", context)
-            try:
-                result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                if result.get("event") != "confirm_failed":
-                    return result
-            except asyncio.TimeoutError:
-                pass
-            await asyncio.sleep(0.5 * (2 ** attempt))  # 0.5s, 1s, 2s
-        return None  # exhausted retries
+    async def _try_step_stream(self, step: Step, saga_id: str, action: str,
+                                context: dict) -> dict:
+        """Execute a single step via stream command + outbox waiter."""
+        fut = self.outbox_reader.create_waiter(saga_id, step.service)
+        await self._send_command(step, saga_id, action, context)
+        try:
+            return await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+        except asyncio.TimeoutError:
+            return {"event": "failed", "reason": "timeout"}
 
-    async def _direct_broadcast(
-        self, action: str, saga_id: str, steps: list[Step], context: dict
-    ) -> list[tuple[Step, dict | BaseException]]:
-        """Call ``direct_executor`` on each step in parallel — bypasses streams."""
-        results = await asyncio.gather(*[
-            step.direct_executor(saga_id, action, context, self.service_dbs[step.service])
-            for step in steps
-        ], return_exceptions=True)
-        return list(zip(steps, results))
+    async def _try_step(self, step: Step, saga_id: str, action: str,
+                         context: dict) -> dict:
+        """Execute a single step via best available method."""
+        if step.direct_executor:
+            return await self._try_step_direct(step, saga_id, action, context)
+        return await self._try_step_stream(step, saga_id, action, context)
 
     async def _broadcast(
         self, action: str, saga_id: str, steps: list[Step], context: dict
-    ) -> list[tuple[Step, dict | BaseException]]:
-        """Send ``action`` to all steps in parallel and collect outbox responses.
-
-        Returns ``(step, result)`` pairs where *result* is the event dict on
-        success, or a ``BaseException`` (e.g. ``TimeoutError``) if the step
-        didn't respond within ``STEP_TIMEOUT``.
-
-        When all steps have a ``direct_executor``, bypasses streams entirely
-        for a ~20-30ms latency saving per checkout.
-        """
-        if all(step.direct_executor for step in steps):
-            return await self._direct_broadcast(action, saga_id, steps, context)
-        pairs = [
-            (step, self.outbox_reader.create_waiter(saga_id, step.service))
+    ) -> list[tuple[Step, dict]]:
+        """Send action to all steps in parallel and collect responses."""
+        results = await asyncio.gather(*[
+            self._try_step(step, saga_id, action, context)
             for step in steps
-        ]
-        await asyncio.gather(*[
-            self._send_command(step, saga_id, action, context)
-            for step, _ in pairs
-        ])
-        raw = await asyncio.gather(
-            *[asyncio.wait_for(fut, timeout=STEP_TIMEOUT) for _, fut in pairs],
-            return_exceptions=True,
-        )
-        return [(step, result) for (step, _), result in zip(pairs, raw)]
+        ], return_exceptions=True)
+        out = []
+        for step, result in zip(steps, results):
+            if isinstance(result, BaseException):
+                out.append((step, {"event": "failed", "reason": str(result)}))
+            else:
+                out.append((step, result))
+        return out
 
-    async def _fire_and_forget(
-        self, action: str, saga_id: str, steps: list[Step], context: dict
+    async def _retry_confirm_step(self, step: Step, saga_id: str, context: dict,
+                                   retries: int = CONFIRM_MAX_RETRIES) -> bool:
+        """Retry a single step's confirm with exponential backoff.
+
+        Returns True if confirm eventually succeeded, False if exhausted.
+        """
+        for attempt in range(retries):
+            result = await self._try_step(step, saga_id, "confirm", context)
+            if isinstance(result, dict) and result.get("event") == "confirmed":
+                return True
+            logger.warning("Confirm retry", step=step.name, saga_id=saga_id,
+                           attempt=attempt + 1, result=result)
+            await asyncio.sleep(0.5 * (2 ** attempt))
+        logger.error("Confirm exhausted retries", step=step.name, saga_id=saga_id)
+        return False
+
+    async def _verified_confirm(
+        self, saga_id: str, steps: list[Step], context: dict
     ) -> None:
-        """Send ``action`` to all steps in parallel — do NOT wait for responses.
+        """Confirm all steps with verification and retry on failure.
 
-        Used for the presumed-commit optimisation: once every participant has
-        reserved successfully, the confirms are guaranteed to succeed (Lua is
-        idempotent, TTL >> confirm latency). The WAL stays in CONFIRMING so
-        the recovery worker will complete any that don't land.
-
-        When all steps have a ``direct_executor``, fires them directly as
-        background tasks (still fire-and-forget semantics).
+        Sends confirms in parallel, then retries any that failed.
         """
-        if all(step.direct_executor for step in steps):
-            for step in steps:
-                asyncio.create_task(
-                    step.direct_executor(saga_id, action, context, self.service_dbs[step.service])
-                )
-            return
-        await asyncio.gather(*[
-            self._send_command(step, saga_id, action, context)
-            for step in steps
-        ])
+        results = await self._broadcast("confirm", saga_id, steps, context)
+        for step, result in results:
+            if isinstance(result, dict) and result.get("event") == "confirmed":
+                cb = self.circuit_breakers.get(step.service)
+                if cb:
+                    cb.record_success()
+            else:
+                # Retry this step
+                success = await self._retry_confirm_step(step, saga_id, context)
+                cb = self.circuit_breakers.get(step.service)
+                if cb:
+                    if success:
+                        cb.record_success()
+                    else:
+                        cb.record_failure()
 
     def _inject_ttl(self, context: dict) -> None:
         """Compute adaptive reservation TTL from p99 latency and store in context."""
@@ -221,49 +211,46 @@ class _BaseExecutor:
 class TwoPCExecutor(_BaseExecutor):
     """Two-Phase Commit executor.
 
-    Phase 1: Send prepare to ALL participants in parallel, collect votes.
-    Phase 2a (all commit): Confirm all in parallel.
-    Phase 2b (any abort): Cancel all in parallel.
+    Phase 1: Parallel prepare — send try_reserve to ALL participants, collect votes.
+    Phase 2a (all reserved): Verified confirm all in parallel.
+    Phase 2b (any failed): Cancel all in parallel.
+
+    Differs from Saga in that ALL participants are queried in parallel before
+    any decision is made. Optimal for low-contention workloads where most
+    transactions succeed.
     """
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
-        """Execute the full 2PC protocol."""
-        # Check circuit breakers before committing any resources
-        for step in tx_def.steps:
-            cb = self.circuit_breakers.get(step.service)
-            if cb and cb.is_open():
-                logger.warning("Circuit breaker open — fast fail", service=step.service, saga_id=saga_id)
-                await self.wal.log(saga_id, "FAILED")
-                return {"status": "failed", "error": f"service_{step.service}_unavailable"}
+        # Check circuit breakers before any work
+        err = self._check_circuit_breakers(tx_def.steps, saga_id)
+        if err:
+            await self.wal.log(saga_id, "FAILED")
+            return {"status": "failed", "error": err}
 
-        asyncio.create_task(self.wal.log(saga_id, "PREPARING"))
         self._inject_ttl(context)
 
-        # Phase 1: prepare all participants in parallel, collect votes
-        votes: list[tuple[Step, dict]] = []
-        for step, result in await self._broadcast("try_reserve", saga_id, tx_def.steps, context):
-            if isinstance(result, Exception):
-                self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
-                votes.append((step, {"event": "failed", "reason": "timeout"}))
-            else:
-                votes.append((step, result))
+        # WAL: durable BEFORE sending any reservations
+        await self.wal.log(saga_id, "PREPARING")
+
+        # Phase 1: parallel prepare — all participants vote simultaneously
+        votes = await self._broadcast("try_reserve", saga_id, tx_def.steps, context)
+
+        # Record circuit breaker outcomes
+        for step, result in votes:
+            cb = self.circuit_breakers.get(step.service)
+            if cb and result.get("event") == "failed" and result.get("reason") == "timeout":
+                cb.record_failure()
 
         all_reserved = all(v[1].get("event") == "reserved" for v in votes)
 
         if all_reserved:
-            # Phase 2: COMMIT — presumed commit optimisation.
-            # All participants reserved → confirms are guaranteed to succeed
-            # (Lua idempotent, TTL >> confirm latency). Fire confirms without
-            # waiting for responses. WAL stays COMMITTING so recovery worker
-            # will complete any stragglers.
-            asyncio.create_task(self.wal.log(saga_id, "COMMITTING"))
-            await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
-            for step in tx_def.steps:
-                self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
+            # Phase 2a: COMMIT — WAL durable BEFORE confirming
+            await self.wal.log(saga_id, "COMMITTING")
+            await self._verified_confirm(saga_id, tx_def.steps, context)
             return {"status": "success"}
         else:
-            # Phase 2: ABORT — cancel all in parallel
+            # Phase 2b: ABORT — cancel all (idempotent, fire-and-forget WAL ok)
             asyncio.create_task(self.wal.log(saga_id, "ABORTING"))
             await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
@@ -276,57 +263,60 @@ class TwoPCExecutor(_BaseExecutor):
 
 
 class SagaExecutor(_BaseExecutor):
-    """Saga + TCC protocol executor.
+    """Saga + TCC executor with sequential try and early abort.
 
-    Parallel try: send try_reserve to all services simultaneously, collect votes.
-    On all-reserved: confirm all in parallel.
-    On any failure: compensate all in parallel (Lua cancel is idempotent).
+    Sequential try: reserve steps one by one, abort immediately on first
+    failure. Under high contention this avoids wasting resources on steps
+    that would need to be cancelled anyway.
 
-    WAL states: TRYING → CONFIRMING/COMPENSATING → COMPLETED/FAILED
+    Differs from 2PC in the failure profile: Saga aborts faster (fails on
+    first step) but has higher happy-path latency (sequential vs parallel).
+    The adaptive protocol selector uses this: 2PC for low contention,
+    Saga for high contention.
     """
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
                       context: dict) -> dict:
-        """Execute the full Saga+TCC protocol with parallel try phase."""
-        # Check all circuit breakers upfront
-        for step in tx_def.steps:
-            cb = self.circuit_breakers.get(step.service)
-            if cb and cb.is_open():
-                logger.warning("Circuit breaker open — fast fail", service=step.service, saga_id=saga_id)
-                await self.wal.log(saga_id, "FAILED")
-                return {"status": "failed", "error": f"service_{step.service}_unavailable"}
+        # Check circuit breakers before any work
+        err = self._check_circuit_breakers(tx_def.steps, saga_id)
+        if err:
+            await self.wal.log(saga_id, "FAILED")
+            return {"status": "failed", "error": err}
 
         self._inject_ttl(context)
 
-        # Try phase: send all try_reserve in parallel, collect votes
-        asyncio.create_task(self.wal.log(saga_id, "TRYING"))
-        votes: list[tuple[Step, dict]] = []
-        for step, result in await self._broadcast("try_reserve", saga_id, tx_def.steps, context):
-            if isinstance(result, Exception):
-                self.circuit_breakers.get(step.service, CircuitBreaker()).record_failure()
-                votes.append((step, {"event": "failed", "reason": "timeout"}))
+        # WAL: durable BEFORE sending any reservations
+        await self.wal.log(saga_id, "TRYING")
+
+        # Sequential try: reserve one step at a time, abort early on failure
+        reserved_steps: list[Step] = []
+        failure_reason = ""
+
+        for step in tx_def.steps:
+            result = await self._try_step(step, saga_id, "try_reserve", context)
+
+            if result.get("event") == "reserved":
+                reserved_steps.append(step)
+                cb = self.circuit_breakers.get(step.service)
+                if cb:
+                    cb.record_success()
             else:
-                votes.append((step, result))
+                # Record failure for circuit breaker
+                if result.get("reason") == "timeout":
+                    cb = self.circuit_breakers.get(step.service)
+                    if cb:
+                        cb.record_failure()
+                failure_reason = result.get("reason", "insufficient_resources")
+                break  # Early abort — don't try remaining steps
 
-        all_reserved = all(v[1].get("event") == "reserved" for v in votes)
-
-        if not all_reserved:
-            # Compensate ALL participants — Lua cancel is idempotent for un-reserved items
+        if len(reserved_steps) < len(tx_def.steps):
+            # Compensate: cancel ALL steps (cancel is idempotent for unreserved)
             asyncio.create_task(self.wal.log(saga_id, "COMPENSATING"))
             await self._broadcast("cancel", saga_id, tx_def.steps, context)
             await self.wal.log(saga_id, "FAILED")
-            reason = "insufficient_resources"
-            for _, vote in votes:
-                if vote.get("event") == "failed":
-                    reason = vote.get("reason", reason)
-                    break
-            return {"status": "failed", "error": reason}
+            return {"status": "failed", "error": failure_reason}
 
-        # All reserved — presumed commit: fire confirms, don't wait for responses.
-        # Lua confirm is idempotent, TTL >> confirm latency. WAL stays
-        # CONFIRMING so recovery worker completes any stragglers.
-        asyncio.create_task(self.wal.log(saga_id, "CONFIRMING"))
-        await self._fire_and_forget("confirm", saga_id, tx_def.steps, context)
-        for step in tx_def.steps:
-            self.circuit_breakers.get(step.service, CircuitBreaker()).record_success()
+        # All reserved — WAL durable BEFORE confirming
+        await self.wal.log(saga_id, "CONFIRMING")
+        await self._verified_confirm(saga_id, tx_def.steps, context)
         return {"status": "success"}

@@ -121,47 +121,54 @@ class RecoveryWorker:
     async def _confirm_all(self, saga_id: str, data: dict):
         """Send confirm to all services with response-aware retry logic.
 
+        Uses direct executors when available (bypasses streams).
         Waits for each service to respond with 'confirmed'. Retries
         'confirm_failed' responses up to MAX_RETRIES. If any service still
         fails after retries, sends cancel to all and logs FAILED.
         """
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if not tx_def:
-            # No definition — fall back to fire-and-forget (best effort)
             await self._send_to_all("confirm", saga_id, data, "COMPLETED")
             return
 
         for attempt in range(MAX_RETRIES + 1):
-            # Send confirm to all steps and create outbox waiters
-            waiters = {}
+            all_confirmed = True
+            failed_services = []
+
             for step in tx_def.steps:
                 db = self.service_dbs.get(step.service)
                 if not db:
                     continue
-                stream = f"{step.service}-commands"
-                cmd = {"saga_id": saga_id, "action": "confirm"}
-                if step.payload_builder:
-                    cmd.update(step.payload_builder(saga_id, "confirm", data))
-                await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                waiters[step.service] = self.outbox_reader.create_waiter(saga_id, step.service)
 
-            # Collect responses
-            all_confirmed = True
-            failed_services = []
-            for service, fut in waiters.items():
                 try:
-                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
-                    if isinstance(result, dict) and result.get("event") == "confirm_failed":
-                        all_confirmed = False
-                        failed_services.append(service)
-                    elif isinstance(result, dict) and result.get("event") == "confirmed":
-                        pass  # good
+                    if step.direct_executor:
+                        # Direct FCALL — no stream hop
+                        result = await step.direct_executor(saga_id, "confirm", data, db)
                     else:
-                        all_confirmed = False
-                        failed_services.append(service)
+                        # Stream path with outbox waiter
+                        stream = f"{step.service}-commands"
+                        cmd = {"saga_id": saga_id, "action": "confirm"}
+                        if step.payload_builder:
+                            cmd.update(step.payload_builder(saga_id, "confirm", data))
+                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
                 except asyncio.TimeoutError:
                     all_confirmed = False
-                    failed_services.append(service)
+                    failed_services.append(step.service)
+                    continue
+                except Exception as e:
+                    logger.warning("Recovery confirm error", service=step.service,
+                                   saga_id=saga_id, error=str(e))
+                    all_confirmed = False
+                    failed_services.append(step.service)
+                    continue
+
+                if isinstance(result, dict) and result.get("event") == "confirmed":
+                    pass  # good
+                else:
+                    all_confirmed = False
+                    failed_services.append(step.service)
 
             if all_confirmed:
                 await self.wal.log(saga_id, "COMPLETED")
@@ -258,12 +265,8 @@ class RecoveryWorker:
         now = time.time()
         for saga_id, state in incomplete.items():
             data = state.get("data", {}) or {}
-            msg_id = state.get("msg_id", "0-0")
-            try:
-                ts_ms = int(msg_id.split("-")[0])
-                age = now - (ts_ms / 1000.0)
-            except (ValueError, IndexError):
-                age = 0
+            created_at = state.get("created_at", 0)
+            age = now - created_at if created_at else 0
 
             if age > ORPHAN_SAGA_TIMEOUT:
                 logger.warning("Aborting orphaned saga", saga_id=saga_id, age_seconds=age)

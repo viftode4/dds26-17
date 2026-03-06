@@ -22,6 +22,9 @@ logger = structlog.get_logger("orchestrator.core")
 OUTBOX_CONSUMER_GROUP = f"orchestrator-{socket.gethostname()}-{os.getpid()}"
 
 
+MAX_CONCURRENT_CHECKOUTS = 200
+
+
 class Orchestrator:
     """Hybrid 2PC/Saga orchestrator with adaptive protocol selection.
 
@@ -46,6 +49,10 @@ class Orchestrator:
         self.wal = WALEngine(order_db)
         self.metrics = MetricsCollector()
         self.outbox_reader = OutboxReader()
+
+        # Backpressure: cap concurrent in-flight checkouts to prevent
+        # cascading contention on shared Redis keys under load
+        self._checkout_sem = asyncio.Semaphore(MAX_CONCURRENT_CHECKOUTS)
 
         # Shared circuit breakers — one per downstream service
         self.circuit_breakers = {
@@ -111,11 +118,19 @@ class Orchestrator:
         This is called in-process from the HTTP handler — no stream hop,
         no pub/sub round-trip on the happy path. Both order instances can
         call this concurrently for different sagas.
+
+        Backpressure: bounded by _checkout_sem to prevent cascading
+        contention under extreme load.
         """
         tx_def = self.definitions.get(tx_name)
         if not tx_def:
             return {"status": "failed", "error": f"Unknown transaction: {tx_name}"}
 
+        async with self._checkout_sem:
+            return await self._execute_inner(tx_def, tx_name, context, saga_id_override)
+
+    async def _execute_inner(self, tx_def: TransactionDefinition, tx_name: str,
+                              context: dict, saga_id_override: str | None) -> dict:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
 
@@ -130,10 +145,15 @@ class Orchestrator:
 
         # Execute and measure latency
         start = time.monotonic()
-        if protocol == "2pc":
-            result = await self.two_pc.execute(tx_def, saga_id, context)
-        else:
-            result = await self.saga.execute(tx_def, saga_id, context)
+        try:
+            if protocol == "2pc":
+                result = await self.two_pc.execute(tx_def, saga_id, context)
+            else:
+                result = await self.saga.execute(tx_def, saga_id, context)
+        finally:
+            # Clean up any stale outbox waiters for this saga
+            self.outbox_reader.cleanup(saga_id)
+
         duration = time.monotonic() - start
 
         self.metrics.record(

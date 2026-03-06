@@ -2,6 +2,11 @@
 
 Pattern: launch executor.execute() in an asyncio.Task, then resolve
 OutboxReader futures from the test to simulate service responses.
+
+Architecture (post-fix):
+- 2PC: parallel prepare → verified confirm (not fire-and-forget)
+- Saga: sequential try (early abort) → verified confirm
+- WAL writes awaited before side effects (PREPARING, TRYING, COMMITTING, CONFIRMING)
 """
 from __future__ import annotations
 
@@ -37,15 +42,6 @@ def _make_executor(cls, service_dbs, outbox_reader, mock_wal, circuit_breakers, 
     )
 
 
-def _resolve_after(outbox_reader: OutboxReader, saga_id: str, service: str,
-                    event_data: dict, delay: float = 0.01):
-    """Schedule a future resolution after a tiny delay (simulates service response)."""
-    async def _go():
-        await asyncio.sleep(delay)
-        outbox_reader.resolve(saga_id, service, event_data)
-    asyncio.get_event_loop().create_task(_go())
-
-
 class _ResponseSequencer:
     """Drives outbox resolution for multi-phase protocols.
 
@@ -58,7 +54,6 @@ class _ResponseSequencer:
         self.outbox_reader = outbox_reader
         self.saga_id = saga_id
         self._queues: dict[str, list[dict]] = {svc: list(resps) for svc, resps in responses.items()}
-        # call_log: [(service, stream, fields), ...]
         self.call_log: list[tuple[str, str, dict]] = []
 
         for svc, db in service_dbs.items():
@@ -77,11 +72,10 @@ class _ResponseSequencer:
             return result
         return _hooked_xadd
 
-    def cancel_calls(self, service: str | None = None) -> list[tuple[str, str, dict]]:
-        """Return all xadd calls that sent a 'cancel' action."""
+    def action_calls(self, action: str, service: str | None = None) -> list[tuple[str, str, dict]]:
         return [
             (svc, stream, fields) for svc, stream, fields in self.call_log
-            if fields.get("action") == "cancel" and (service is None or svc == service)
+            if fields.get("action") == action and (service is None or svc == service)
         ]
 
 
@@ -94,27 +88,26 @@ class TestTwoPCExecutor:
     @pytest.mark.asyncio
     async def test_2pc_happy_path(self, service_dbs, outbox_reader, mock_wal,
                                    circuit_breakers, metrics, checkout_tx):
-        """Both services reserve → presumed commit (confirms fire-and-forget)."""
+        """Both services reserve → verified confirms → success."""
         executor = _make_executor(TwoPCExecutor, service_dbs, outbox_reader,
                                   mock_wal, circuit_breakers, metrics)
         saga_id = "2pc-happy"
         ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
 
         seq = _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
-            "stock": [{"event": "reserved"}],
-            "payment": [{"event": "reserved"}],
+            "stock": [{"event": "reserved"}, {"event": "confirmed"}],
+            "payment": [{"event": "reserved"}, {"event": "confirmed"}],
         })
 
         result = await executor.execute(checkout_tx, saga_id, ctx)
 
         assert result["status"] == "success"
-        # WAL progression: PREPARING → COMMITTING (no COMPLETED — recovery completes it)
+        # WAL progression: PREPARING → COMMITTING (both awaited)
         wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
                      if call.args[0] == saga_id]
         assert wal_steps == ["PREPARING", "COMMITTING"]
-        # Verify confirms were sent (fire-and-forget)
-        confirm_calls = [(s, st, f) for s, st, f in seq.call_log if f.get("action") == "confirm"]
-        assert len(confirm_calls) >= 2, "Confirm must be sent to both services"
+        # Confirms were sent and verified
+        assert len(seq.action_calls("confirm")) == 2
 
     @pytest.mark.asyncio
     async def test_2pc_reserve_fails(self, service_dbs, outbox_reader, mock_wal,
@@ -140,27 +133,25 @@ class TestTwoPCExecutor:
         assert wal_steps == ["PREPARING", "ABORTING", "FAILED"]
 
     @pytest.mark.asyncio
-    async def test_2pc_presumed_commit_sends_confirms(self, service_dbs, outbox_reader,
-                                                       mock_wal, circuit_breakers, metrics,
-                                                       checkout_tx):
-        """Presumed commit: reserves succeed → confirms sent fire-and-forget → success."""
+    async def test_2pc_verified_confirms(self, service_dbs, outbox_reader,
+                                          mock_wal, circuit_breakers, metrics,
+                                          checkout_tx):
+        """Reserves succeed → confirms sent and verified → success."""
         executor = _make_executor(TwoPCExecutor, service_dbs, outbox_reader,
                                   mock_wal, circuit_breakers, metrics)
-        saga_id = "2pc-presumed"
+        saga_id = "2pc-verified"
         ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
 
         seq = _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
-            "stock": [{"event": "reserved"}],
-            "payment": [{"event": "reserved"}],
+            "stock": [{"event": "reserved"}, {"event": "confirmed"}],
+            "payment": [{"event": "reserved"}, {"event": "confirmed"}],
         })
 
         result = await executor.execute(checkout_tx, saga_id, ctx)
 
         assert result["status"] == "success"
-        # Confirms sent to both services (fire-and-forget)
-        confirm_calls = [(s, st, f) for s, st, f in seq.call_log if f.get("action") == "confirm"]
+        confirm_calls = seq.action_calls("confirm")
         assert len(confirm_calls) == 2
-        # WAL stays COMMITTING — recovery worker completes it
         wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
                      if call.args[0] == saga_id]
         assert wal_steps == ["PREPARING", "COMMITTING"]
@@ -183,10 +174,8 @@ class TestTwoPCExecutor:
 
         assert result["status"] == "failed"
         assert "unavailable" in result["error"]
-        # No commands should have been sent
         service_dbs["stock"].xadd.assert_not_called()
         service_dbs["payment"].xadd.assert_not_called()
-        # WAL should show FAILED
         mock_wal.log.assert_called_with(saga_id, "FAILED")
 
 
@@ -199,35 +188,60 @@ class TestSagaExecutor:
     @pytest.mark.asyncio
     async def test_saga_happy_path(self, service_dbs, outbox_reader, mock_wal,
                                     circuit_breakers, metrics, checkout_tx):
-        """Both services reserve → presumed commit (confirms fire-and-forget)."""
+        """Sequential try: stock then payment → verified confirms → success."""
         executor = _make_executor(SagaExecutor, service_dbs, outbox_reader,
                                   mock_wal, circuit_breakers, metrics)
         saga_id = "saga-happy"
         ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
 
         seq = _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
-            "stock": [{"event": "reserved"}],
-            "payment": [{"event": "reserved"}],
+            "stock": [{"event": "reserved"}, {"event": "confirmed"}],
+            "payment": [{"event": "reserved"}, {"event": "confirmed"}],
         })
 
         result = await executor.execute(checkout_tx, saga_id, ctx)
 
         assert result["status"] == "success"
-        # WAL: TRYING → CONFIRMING (no COMPLETED — recovery completes it)
+        # WAL: TRYING → CONFIRMING (both awaited)
         wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
                      if call.args[0] == saga_id]
         assert wal_steps == ["TRYING", "CONFIRMING"]
-        # Confirms sent to both services (fire-and-forget)
-        confirm_calls = [(s, st, f) for s, st, f in seq.call_log if f.get("action") == "confirm"]
-        assert len(confirm_calls) == 2
+        assert len(seq.action_calls("confirm")) == 2
 
     @pytest.mark.asyncio
-    async def test_saga_reserve_fails(self, service_dbs, outbox_reader, mock_wal,
-                                       circuit_breakers, metrics, checkout_tx):
-        """Payment returns 'failed' → compensate all, FAILED."""
+    async def test_saga_early_abort_on_first_failure(self, service_dbs, outbox_reader,
+                                                      mock_wal, circuit_breakers, metrics,
+                                                      checkout_tx):
+        """Stock fails → payment never tried (early abort), cancel all, FAILED."""
         executor = _make_executor(SagaExecutor, service_dbs, outbox_reader,
                                   mock_wal, circuit_breakers, metrics)
-        saga_id = "saga-fail"
+        saga_id = "saga-early"
+        ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
+
+        seq = _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
+            "stock": [{"event": "failed", "reason": "insufficient_stock"},
+                      {"event": "cancelled"}],
+            "payment": [{"event": "cancelled"}],
+        })
+
+        result = await executor.execute(checkout_tx, saga_id, ctx)
+
+        assert result["status"] == "failed"
+        assert "insufficient_stock" in result["error"]
+        # Payment should NOT have received a try_reserve (early abort)
+        payment_reserves = seq.action_calls("try_reserve", "payment")
+        assert len(payment_reserves) == 0
+        wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
+                     if call.args[0] == saga_id]
+        assert wal_steps == ["TRYING", "COMPENSATING", "FAILED"]
+
+    @pytest.mark.asyncio
+    async def test_saga_second_step_fails(self, service_dbs, outbox_reader, mock_wal,
+                                           circuit_breakers, metrics, checkout_tx):
+        """Stock reserves, payment fails → compensate all, FAILED."""
+        executor = _make_executor(SagaExecutor, service_dbs, outbox_reader,
+                                  mock_wal, circuit_breakers, metrics)
+        saga_id = "saga-fail2"
         ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
 
         _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
@@ -239,32 +253,30 @@ class TestSagaExecutor:
         result = await executor.execute(checkout_tx, saga_id, ctx)
 
         assert result["status"] == "failed"
+        assert "insufficient_credit" in result["error"]
         wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
                      if call.args[0] == saga_id]
         assert wal_steps == ["TRYING", "COMPENSATING", "FAILED"]
 
     @pytest.mark.asyncio
-    async def test_saga_presumed_commit_sends_confirms(self, service_dbs, outbox_reader,
-                                                        mock_wal, circuit_breakers, metrics,
-                                                        checkout_tx):
-        """Presumed commit: reserves succeed → confirms sent fire-and-forget → success."""
+    async def test_saga_verified_confirms(self, service_dbs, outbox_reader,
+                                           mock_wal, circuit_breakers, metrics,
+                                           checkout_tx):
+        """Reserves succeed → confirms sent and verified → success."""
         executor = _make_executor(SagaExecutor, service_dbs, outbox_reader,
                                   mock_wal, circuit_breakers, metrics)
-        saga_id = "saga-presumed"
+        saga_id = "saga-verified"
         ctx = {"items": "[]", "user_id": "u1", "total_cost": "100", "tx_name": "checkout"}
 
         seq = _ResponseSequencer(outbox_reader, service_dbs, saga_id, {
-            "stock": [{"event": "reserved"}],
-            "payment": [{"event": "reserved"}],
+            "stock": [{"event": "reserved"}, {"event": "confirmed"}],
+            "payment": [{"event": "reserved"}, {"event": "confirmed"}],
         })
 
         result = await executor.execute(checkout_tx, saga_id, ctx)
 
         assert result["status"] == "success"
-        # Confirms sent to both services (fire-and-forget)
-        confirm_calls = [(s, st, f) for s, st, f in seq.call_log if f.get("action") == "confirm"]
-        assert len(confirm_calls) == 2
-        # WAL stays CONFIRMING — recovery worker handles completion
+        assert len(seq.action_calls("confirm")) == 2
         wal_steps = [call.args[1] for call in mock_wal.log.call_args_list
                      if call.args[0] == saga_id]
         assert wal_steps == ["TRYING", "CONFIRMING"]
