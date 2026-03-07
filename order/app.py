@@ -345,11 +345,11 @@ async def checkout(request: Request):
     total_cost = int(entry["total_cost"])
     user_id = entry["user_id"]
 
-    # 2. Pre-check: already paid? (release idempotency claim if we grabbed it)
+    # 2. Pre-check: already paid? Idempotent success (not an error)
     if entry["paid"] == "true":
         if acquired:
             await db.delete(idempotency_key)
-        raise HTTPException(400, detail="Order already paid")
+        return PlainTextResponse("Checkout successful")
 
     # 3. Aggregate items
     items_quantities: dict[str, int] = defaultdict(int)
