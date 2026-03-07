@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import random
 import uuid
@@ -7,7 +8,10 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 import redis.asyncio as aioredis
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
@@ -24,7 +28,7 @@ from orchestrator import (
 
 
 DB_ERROR_STR = "DB error"
-LOCK_TTL = 30  # seconds for 2PC locks
+GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://gateway:80")
 
 
 log = get_logger("order")
@@ -35,6 +39,7 @@ orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
 _leader_task: asyncio.Task | None = None
+_http_client: httpx.AsyncClient | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -62,132 +67,6 @@ def payment_payload(saga_id: str, action: str, context: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Direct executors — bypass streams, call Lua FCALL directly on target Redis.
-# Signature: (saga_id, action, context, db) -> {"event": ...}
-# ---------------------------------------------------------------------------
-
-async def stock_direct_executor(
-    saga_id: str, action: str, context: dict, db: aioredis.Redis
-) -> dict:
-    """Call stock Lua functions directly — eliminates 2 stream hops."""
-    items = context.get("items", [])
-    n = len(items)
-
-    if action == "prepare":
-        keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
-        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        args = [saga_id, str(LOCK_TTL)]
-        for iid, qty in items:
-            args += [str(iid), str(qty)]
-        args.append("1")  # skip_outbox
-        result = await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
-        return {"event": "prepared"} if result == 1 else {"event": "failed", "reason": "insufficient_stock_or_locked"}
-
-    elif action == "commit":
-        keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
-        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        result = await db.fcall("stock_2pc_commit", len(keys), *keys, saga_id, str(n), "1")
-        if result == 1:
-            return {"event": "committed"}
-        return {"event": "commit_failed", "reason": "lock_expired"}
-
-    elif action == "abort":
-        keys = [f"item:{iid}" for iid, _ in items]
-        keys += [f"lock:2pc:{saga_id}:{iid}" for iid, _ in items]
-        keys += ["stock-outbox", f"saga:{saga_id}:stock:status"]
-        await db.fcall("stock_2pc_abort", len(keys), *keys, saga_id, str(n), "1")
-        return {"event": "aborted"}
-
-    elif action == "execute":
-        keys = [f"item:{iid}" for iid, _ in items]
-        keys += ["stock-outbox", f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
-        args = [saga_id]
-        for iid, qty in items:
-            args += [str(iid), str(qty)]
-        args.append("1")  # skip_outbox
-        result = await db.fcall("stock_saga_execute", len(keys), *keys, *args)
-        return {"event": "executed"} if result == 1 else {"event": "failed", "reason": "insufficient_stock"}
-
-    elif action == "compensate":
-        keys = [f"item:{iid}" for iid, _ in items]
-        keys += ["stock-outbox", f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
-        result = await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n), "1")
-        return {"event": "compensated"}
-
-    return {"event": "failed", "reason": f"unknown_action:{action}"}
-
-
-async def payment_direct_executor(
-    saga_id: str, action: str, context: dict, db: aioredis.Redis
-) -> dict:
-    """Call payment Lua functions directly — eliminates 2 stream hops."""
-    user_id = context.get("user_id", "")
-    amount = context.get("total_cost", 0)
-
-    if action == "prepare":
-        keys = [
-            f"user:{user_id}",
-            f"lock:2pc:{saga_id}:{user_id}",
-            f"saga:{saga_id}:payment:status",
-            "payment-outbox",
-        ]
-        args = [str(amount), saga_id, user_id, str(LOCK_TTL), "1"]
-        result = await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
-        return {"event": "prepared"} if result == 1 else {"event": "failed", "reason": "insufficient_credit_or_locked"}
-
-    elif action == "commit":
-        keys = [
-            f"user:{user_id}",
-            f"lock:2pc:{saga_id}:{user_id}",
-            f"saga:{saga_id}:payment:status",
-            "payment-outbox",
-        ]
-        result = await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, "1")
-        if result == 1:
-            return {"event": "committed"}
-        return {"event": "commit_failed", "reason": "lock_expired"}
-
-    elif action == "abort":
-        if not user_id:
-            return {"event": "aborted"}
-        keys = [
-            f"user:{user_id}",
-            f"lock:2pc:{saga_id}:{user_id}",
-            f"saga:{saga_id}:payment:status",
-            "payment-outbox",
-        ]
-        await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id, "1")
-        return {"event": "aborted"}
-
-    elif action == "execute":
-        keys = [
-            f"user:{user_id}",
-            "payment-outbox",
-            f"saga:{saga_id}:payment:status",
-            f"saga:{saga_id}:payment:amounts",
-        ]
-        args = [str(amount), saga_id, user_id, "1"]
-        result = await db.fcall("payment_saga_execute", len(keys), *keys, *args)
-        return {"event": "executed"} if result == 1 else {"event": "failed", "reason": "insufficient_credit"}
-
-    elif action == "compensate":
-        if not user_id:
-            return {"event": "compensated"}
-        keys = [
-            f"user:{user_id}",
-            "payment-outbox",
-            f"saga:{saga_id}:payment:status",
-            f"saga:{saga_id}:payment:amounts",
-        ]
-        await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id, "1")
-        return {"event": "compensated"}
-
-    return {"event": "failed", "reason": f"unknown_action:{action}"}
-
-
-# ---------------------------------------------------------------------------
 # Transaction definition — application-specific, uses payload builders above.
 # ---------------------------------------------------------------------------
 
@@ -198,84 +77,14 @@ checkout_tx = TransactionDefinition(
             name="reserve_stock",
             service="stock",
             payload_builder=stock_payload,
-            direct_executor=stock_direct_executor,
         ),
         Step(
             name="reserve_payment",
             service="payment",
             payload_builder=payment_payload,
-            direct_executor=payment_direct_executor,
         ),
     ],
 )
-
-
-# ---------------------------------------------------------------------------
-# Reconciliation callback — domain-specific invariant checks.
-# ---------------------------------------------------------------------------
-
-async def reconcile_invariants(service_dbs: dict[str, aioredis.Redis]):
-    """Verify data invariants across stock and payment services.
-
-    Checks:
-    1. No negative balances (available_stock, available_credit)
-    2. Orphan reservations: reservation keys whose saga is no longer active
-    """
-    stock_db = service_dbs.get("stock")
-    if stock_db:
-        # Check 1: negative balance invariant
-        cursor = "0"
-        while True:
-            cursor, keys = await stock_db.scan(cursor=cursor, match="item:*", count=100)
-            for key in keys:
-                data = await stock_db.hgetall(key)
-                avail = int(data.get("available_stock", 0))
-                if avail < 0:
-                    log.critical(
-                        "INVARIANT VIOLATION: stock",
-                        key=key, available_stock=avail,
-                    )
-            if cursor == "0" or cursor == 0:
-                break
-
-        # Check 2: orphan reservation keys (saga completed but reservation lingers)
-        cursor = "0"
-        while True:
-            cursor, keys = await stock_db.scan(
-                cursor=cursor, match="saga:*:stock:status", count=100
-            )
-            for key in keys:
-                # Extract saga_id from key pattern saga:{saga_id}:stock:status
-                parts = key.split(":")
-                if len(parts) >= 4:
-                    saga_id = parts[1]
-                    # Check if saga is still active in WAL
-                    active = await db.sismember("active_sagas", saga_id)
-                    if not active:
-                        status_val = await stock_db.get(key)
-                        if status_val and status_val not in ("confirmed", "cancelled"):
-                            log.warning(
-                                "Orphan stock reservation",
-                                saga_id=saga_id, status=status_val,
-                            )
-            if cursor == "0" or cursor == 0:
-                break
-
-    payment_db = service_dbs.get("payment")
-    if payment_db:
-        cursor = "0"
-        while True:
-            cursor, keys = await payment_db.scan(cursor=cursor, match="user:*", count=100)
-            for key in keys:
-                data = await payment_db.hgetall(key)
-                avail = int(data.get("available_credit", 0))
-                if avail < 0:
-                    log.critical(
-                        "INVARIANT VIOLATION: payment",
-                        key=key, available_credit=avail,
-                    )
-            if cursor == "0" or cursor == 0:
-                break
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +116,7 @@ async def _leadership_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task
+    global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task, _http_client
 
     setup_logging("order-service")
 
@@ -327,23 +136,17 @@ async def lifespan(app):
         log.error("Failed to load Lua library", error=str(e))
         raise
 
-    # Cross-service Redis connections for orchestrator
+    # Cross-service Redis connections for orchestrator (Redis Streams message broker, not data access)
     stock_db = create_redis_connection(prefix="STOCK_", decode_responses=True)
     payment_db = create_redis_connection(prefix="PAYMENT_", decode_responses=True)
     await wait_for_redis(stock_db, "stock-db")
     await wait_for_redis(payment_db, "payment-db")
 
-    # Load Lua function libraries on stock/payment Redis (eliminates startup race —
-    # order service may call FCALL before stock/payment services have loaded their Lua)
-    stock_lua = (Path(__file__).parent / "lua" / "stock_lib.lua").read_text()
-    payment_lua = (Path(__file__).parent / "lua" / "payment_lib.lua").read_text()
-    await stock_db.function_load(stock_lua, replace=True)
-    await payment_db.function_load(payment_lua, replace=True)
-
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
     await asyncio.gather(*[db.ping() for _ in range(32)])
-    await asyncio.gather(*[stock_db.ping() for _ in range(32)])
-    await asyncio.gather(*[payment_db.ping() for _ in range(32)])
+
+    # Shared HTTP client for inter-service lookups via gateway
+    _http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=5.0)
 
     service_dbs = {"stock": stock_db, "payment": payment_db}
 
@@ -361,7 +164,7 @@ async def lifespan(app):
         service_dbs=service_dbs,
         outbox_reader=orchestrator.outbox_reader,
         definitions=orchestrator.definitions,
-        reconcile_fn=reconcile_invariants,
+        reconcile_fn=None,
     )
 
     _leader_task = asyncio.create_task(_leadership_loop())
@@ -369,6 +172,8 @@ async def lifespan(app):
 
     yield
 
+    if _http_client:
+        await _http_client.aclose()
     if _leader_task:
         _leader_task.cancel()
         try:
@@ -468,9 +273,13 @@ async def add_item(request: Request):
     quantity = int(request.path_params["quantity"])
     if quantity <= 0:
         raise HTTPException(400, detail="Quantity must be positive")
-    item_data = await orchestrator.service_dbs["stock"].hgetall(f"item:{item_id}")
-    if not item_data:
+    try:
+        resp = await _http_client.get(f"/stock/find/{item_id}")
+    except httpx.HTTPError:
+        raise HTTPException(400, detail=DB_ERROR_STR)
+    if resp.status_code != 200:
         raise HTTPException(400, detail=f"Item: {item_id} does not exist!")
+    item_data = resp.json()
     cost_increase = quantity * int(item_data["price"])
 
     items_key = f"order:{order_id}:items"

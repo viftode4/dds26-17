@@ -95,7 +95,7 @@ class RecoveryWorker:
             await self.wal.log(saga_id, "FAILED")
 
     async def _send_action_to_all(self, action: str, saga_id: str, data: dict):
-        """Send ``action`` to all services via direct executors or command streams.
+        """Send ``action`` to all services via command streams.
 
         Uses payload builders from the transaction definition when available;
         falls back to a bare ``{saga_id, action}`` command for unknown transactions.
@@ -107,14 +107,11 @@ class RecoveryWorker:
                 if not db:
                     continue
                 try:
-                    if step.direct_executor:
-                        await step.direct_executor(saga_id, action, data, db)
-                    else:
-                        stream = f"{step.service}-commands"
-                        cmd = {"saga_id": saga_id, "action": action}
-                        if step.payload_builder:
-                            cmd.update(step.payload_builder(saga_id, action, data))
-                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                    stream = f"{step.service}-commands"
+                    cmd = {"saga_id": saga_id, "action": action}
+                    if step.payload_builder:
+                        cmd.update(step.payload_builder(saga_id, action, data))
+                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
                 except Exception as e:
                     logger.warning("send_action_to_all error", service=step.service,
                                    action=action, saga_id=saga_id, error=str(e))
@@ -140,20 +137,16 @@ class RecoveryWorker:
             still_pending = []
             for step in pending_steps:
                 try:
-                    if step.direct_executor:
-                        result = await step.direct_executor(saga_id, "abort", data,
-                                                            self.service_dbs[step.service])
-                    else:
-                        db = self.service_dbs.get(step.service)
-                        if not db:
-                            continue
-                        stream = f"{step.service}-commands"
-                        cmd = {"saga_id": saga_id, "action": "abort"}
-                        if step.payload_builder:
-                            cmd.update(step.payload_builder(saga_id, "abort", data))
-                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                    db = self.service_dbs.get(step.service)
+                    if not db:
+                        continue
+                    stream = f"{step.service}-commands"
+                    cmd = {"saga_id": saga_id, "action": "abort"}
+                    if step.payload_builder:
+                        cmd.update(step.payload_builder(saga_id, "abort", data))
+                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery abort error", service=step.service,
                                    saga_id=saga_id, error=str(e))
@@ -191,20 +184,16 @@ class RecoveryWorker:
             still_pending = []
             for step in pending_steps:
                 try:
-                    if step.direct_executor:
-                        result = await step.direct_executor(saga_id, "commit", data,
-                                                            self.service_dbs[step.service])
-                    else:
-                        db = self.service_dbs.get(step.service)
-                        if not db:
-                            continue
-                        stream = f"{step.service}-commands"
-                        cmd = {"saga_id": saga_id, "action": "commit"}
-                        if step.payload_builder:
-                            cmd.update(step.payload_builder(saga_id, "commit", data))
-                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                    db = self.service_dbs.get(step.service)
+                    if not db:
+                        continue
+                    stream = f"{step.service}-commands"
+                    cmd = {"saga_id": saga_id, "action": "commit"}
+                    if step.payload_builder:
+                        cmd.update(step.payload_builder(saga_id, "commit", data))
+                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery commit error", service=step.service,
                                    saga_id=saga_id, error=str(e))
@@ -248,20 +237,16 @@ class RecoveryWorker:
             max_backoff = 60.0
             while True:
                 try:
-                    if step.direct_executor:
-                        result = await step.direct_executor(saga_id, "compensate", data,
-                                                            self.service_dbs[step.service])
-                    else:
-                        db = self.service_dbs.get(step.service)
-                        if not db:
-                            break
-                        stream = f"{step.service}-commands"
-                        cmd = {"saga_id": saga_id, "action": "compensate"}
-                        if step.payload_builder:
-                            cmd.update(step.payload_builder(saga_id, "compensate", data))
-                        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                        fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                        result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                    db = self.service_dbs.get(step.service)
+                    if not db:
+                        break
+                    stream = f"{step.service}-commands"
+                    cmd = {"saga_id": saga_id, "action": "compensate"}
+                    if step.payload_builder:
+                        cmd.update(step.payload_builder(saga_id, "compensate", data))
+                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
+                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery compensate error", service=step.service,
                                    saga_id=saga_id, error=str(e))

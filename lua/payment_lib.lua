@@ -14,12 +14,11 @@
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
 -- KEYS[4] = payment-outbox
--- ARGV: amount, saga_id, user_id, lock_ttl, skip_outbox
+-- ARGV: amount, saga_id, user_id, lock_ttl
 local function payment_2pc_prepare(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
     local saga_id = ARGV[2]
     local lock_ttl = tonumber(ARGV[4])
-    local skip_outbox = ARGV[5]
 
     -- Idempotency
     local status = redis.call('GET', KEYS[3])
@@ -36,10 +35,8 @@ local function payment_2pc_prepare(KEYS, ARGV)
     redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
 
     redis.call('SETEX', KEYS[3], 86400, 'prepared')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'prepared')
-    end
+    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'prepared')
     return 1
 end
 
@@ -49,10 +46,9 @@ end
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
 -- KEYS[4] = payment-outbox
--- ARGV: saga_id, skip_outbox
+-- ARGV: saga_id
 local function payment_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
-    local skip_outbox = ARGV[2]
 
     -- Idempotency
     local status = redis.call('GET', KEYS[3])
@@ -62,10 +58,8 @@ local function payment_2pc_commit(KEYS, ARGV)
     redis.call('DEL', KEYS[2])
 
     redis.call('SETEX', KEYS[3], 86400, 'committed')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'committed')
-    end
+    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'committed')
     return 1
 end
 
@@ -75,10 +69,9 @@ end
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
 -- KEYS[4] = payment-outbox
--- ARGV: saga_id, skip_outbox
+-- ARGV: saga_id
 local function payment_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
-    local skip_outbox = ARGV[2]
 
     -- Idempotency
     local status = redis.call('GET', KEYS[3])
@@ -92,10 +85,8 @@ local function payment_2pc_abort(KEYS, ARGV)
     redis.call('DEL', KEYS[2])
 
     redis.call('SETEX', KEYS[3], 86400, 'aborted')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'aborted')
-    end
+    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'aborted')
     return 1
 end
 
@@ -105,12 +96,11 @@ end
 -- KEYS[2] = payment-outbox
 -- KEYS[3] = saga:{saga_id}:payment:status
 -- KEYS[4] = saga:{saga_id}:payment:amounts
--- ARGV: amount, saga_id, user_id, skip_outbox
+-- ARGV: amount, saga_id, user_id
 local function payment_saga_execute(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
     local saga_id = ARGV[2]
     local user_id = ARGV[3]
-    local skip_outbox = ARGV[4]
 
     -- Idempotency
     local status = redis.call('GET', KEYS[3])
@@ -127,10 +117,8 @@ local function payment_saga_execute(KEYS, ARGV)
     redis.call('EXPIRE', KEYS[4], 86400)
 
     redis.call('SETEX', KEYS[3], 86400, 'executed')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'executed')
-    end
+    redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'executed')
     return 1
 end
 
@@ -140,10 +128,9 @@ end
 -- KEYS[2] = payment-outbox
 -- KEYS[3] = saga:{saga_id}:payment:status
 -- KEYS[4] = saga:{saga_id}:payment:amounts
--- ARGV: saga_id, skip_outbox
+-- ARGV: saga_id
 local function payment_saga_compensate(KEYS, ARGV)
     local saga_id = ARGV[1]
-    local skip_outbox = ARGV[2]
 
     -- Idempotency
     local status = redis.call('GET', KEYS[3])
@@ -160,10 +147,8 @@ local function payment_saga_compensate(KEYS, ARGV)
 
     redis.call('DEL', KEYS[4])
     redis.call('SETEX', KEYS[3], 86400, 'compensated')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'compensated')
-    end
+    redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'compensated')
     return 1
 end
 

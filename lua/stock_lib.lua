@@ -15,14 +15,13 @@
 --   KEYS[N+1..2N]    = lock:2pc:{saga_id}:{item_id} keys (store amounts for abort)
 --   KEYS[2N+1]       = stock-outbox stream
 --   KEYS[2N+2]       = saga:{saga_id}:stock:status
--- ARGV: saga_id, lock_ttl, (item_id, amount)..., skip_outbox
+-- ARGV: saga_id, lock_ttl, (item_id, amount)...
 local function stock_2pc_prepare(KEYS, ARGV)
     local saga_id = ARGV[1]
     local lock_ttl = tonumber(ARGV[2])
     local n_items = (#KEYS - 2) / 2
     local outbox_key = KEYS[2 * n_items + 1]
     local status_key = KEYS[2 * n_items + 2]
-    local skip_outbox = ARGV[3 + 2 * n_items]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -48,21 +47,18 @@ local function stock_2pc_prepare(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'prepared')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'prepared')
-    end
+    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'prepared')
     return 1
 end
 
 -- 2PC Commit: Finalize (deduction already happened in prepare)
 --
 -- Same KEYS layout as prepare
--- ARGV: saga_id, n_items, skip_outbox
+-- ARGV: saga_id, n_items
 local function stock_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local skip_outbox = ARGV[3]
     local outbox_key = KEYS[2 * n_items + 1]
     local status_key = KEYS[2 * n_items + 2]
 
@@ -76,21 +72,18 @@ local function stock_2pc_commit(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'committed')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'committed')
-    end
+    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'committed')
     return 1
 end
 
 -- 2PC Abort: Restore stock from lock keys (undo prepare deduction)
 --
 -- Same KEYS layout as prepare
--- ARGV: saga_id, n_items, skip_outbox
+-- ARGV: saga_id, n_items
 local function stock_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local skip_outbox = ARGV[3]
     local outbox_key = KEYS[2 * n_items + 1]
     local status_key = KEYS[2 * n_items + 2]
 
@@ -110,10 +103,8 @@ local function stock_2pc_abort(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'aborted')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'aborted')
-    end
+    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'aborted')
     return 1
 end
 
@@ -124,14 +115,13 @@ end
 --   KEYS[N+1]    = stock-outbox stream
 --   KEYS[N+2]    = saga:{saga_id}:stock:status
 --   KEYS[N+3]    = saga:{saga_id}:stock:amounts
--- ARGV: saga_id, (item_id, amount)..., skip_outbox
+-- ARGV: saga_id, (item_id, amount)...
 local function stock_saga_execute(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = #KEYS - 3
     local outbox_key = KEYS[n_items + 1]
     local status_key = KEYS[n_items + 2]
     local amounts_key = KEYS[n_items + 3]
-    local skip_outbox = ARGV[2 + 2 * n_items]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -158,21 +148,18 @@ local function stock_saga_execute(KEYS, ARGV)
 
     redis.call('SETEX', status_key, 86400, 'executed')
     redis.call('EXPIRE', amounts_key, 86400)
-    if skip_outbox ~= "1" then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'executed')
-    end
+    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'executed')
     return 1
 end
 
 -- Saga Compensate: Restore stock from stored amounts
 --
 -- Same KEYS layout as execute
--- ARGV: saga_id, n_items, skip_outbox
+-- ARGV: saga_id, n_items
 local function stock_saga_compensate(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local skip_outbox = ARGV[3]
     local outbox_key = KEYS[n_items + 1]
     local status_key = KEYS[n_items + 2]
     local amounts_key = KEYS[n_items + 3]
@@ -193,10 +180,8 @@ local function stock_saga_compensate(KEYS, ARGV)
 
     redis.call('DEL', amounts_key)
     redis.call('SETEX', status_key, 86400, 'compensated')
-    if skip_outbox ~= "1" then
-        redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-            'saga_id', saga_id, 'event', 'compensated')
-    end
+    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
+        'saga_id', saga_id, 'event', 'compensated')
     return 1
 end
 

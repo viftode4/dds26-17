@@ -71,18 +71,7 @@ class Orchestrator:
         """Start background outbox reader tasks (runs on all instances).
 
         Stream names derived by convention: ``{service}-outbox``.
-        Skipped entirely when all steps in all definitions have direct_executor
-        (no outbox messages produced on the happy path).
         """
-        self._direct_mode = all(
-            step.direct_executor
-            for d in self.definitions.values()
-            for step in d.steps
-        )
-        if self._direct_mode:
-            logger.info("All steps have direct executors — skipping outbox consumers")
-            return
-
         for service in self.service_dbs:
             stream = f"{service}-outbox"
             db = self.service_dbs[service]

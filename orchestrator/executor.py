@@ -129,18 +129,8 @@ class _BaseExecutor:
             cmd.update(step.payload_builder(saga_id, action, context))
         await db.xadd(stream, cmd, maxlen=10000, approximate=True)
 
-    async def _try_step_direct(self, step: Step, saga_id: str, action: str,
-                                context: dict) -> dict:
-        """Execute a single step via direct executor. Returns result dict."""
-        try:
-            return await step.direct_executor(
-                saga_id, action, context, self.service_dbs[step.service]
-            )
-        except Exception as e:
-            return {"event": "failed", "reason": str(e)}
-
-    async def _try_step_stream(self, step: Step, saga_id: str, action: str,
-                                context: dict) -> dict:
+    async def _try_step(self, step: Step, saga_id: str, action: str,
+                         context: dict) -> dict:
         """Execute a single step via stream command + outbox waiter."""
         fut = self.outbox_reader.create_waiter(saga_id, step.service)
         await self._send_command(step, saga_id, action, context)
@@ -148,13 +138,6 @@ class _BaseExecutor:
             return await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
         except asyncio.TimeoutError:
             return {"event": "failed", "reason": "timeout"}
-
-    async def _try_step(self, step: Step, saga_id: str, action: str,
-                         context: dict) -> dict:
-        """Execute a single step via best available method."""
-        if step.direct_executor:
-            return await self._try_step_direct(step, saga_id, action, context)
-        return await self._try_step_stream(step, saga_id, action, context)
 
     async def _broadcast(
         self, action: str, saga_id: str, steps: list[Step], context: dict

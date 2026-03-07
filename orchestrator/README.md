@@ -25,10 +25,8 @@ def payment_payload(saga_id: str, action: str, ctx: dict) -> dict:
             "ttl": str(ctx.get("_reservation_ttl", 60))}
 
 checkout = TransactionDefinition(name="checkout", steps=[
-    Step("reserve_stock",   "stock",   "try_reserve", "cancel", "confirm", stock_payload,
-         direct_executor=stock_direct),    # optional: bypass Redis Streams
-    Step("reserve_payment", "payment", "try_reserve", "cancel", "confirm", payment_payload,
-         direct_executor=payment_direct),  # optional: bypass Redis Streams
+    Step("reserve_stock",   "stock",   stock_payload),
+    Step("reserve_payment", "payment", payment_payload),
 ])
 
 # 2. Create orchestrator and start outbox readers
@@ -42,44 +40,6 @@ result = await orch.execute("checkout", {
 # Success: {"status": "success", "saga_id": "...", "protocol": "2pc"}
 # Failure: {"status": "failed",  "saga_id": "...", "protocol": "saga", "error": "..."}
 ```
-
-## direct_executor
-
-`Step` accepts an optional `direct_executor` keyword argument — a callable that
-executes the step via FCALL instead of publishing to a Redis Stream:
-
-```python
-async def stock_direct_executor(
-    saga_id: str, action: str, context: dict, db: aioredis.Redis
-) -> dict:
-    items = context.get("items", [])
-    n = len(items)
-    keys = (
-        [f"item:{iid}" for iid, _ in items]
-        + [f"reservation:{saga_id}:{iid}" for iid, _ in items]
-        + [f"reservation_amount:{saga_id}:{iid}" for iid, _ in items]
-        + ["stock-outbox", f"saga:{saga_id}:stock:status"]
-    )
-    if action == "try_reserve":
-        ttl = context.get("_reservation_ttl", 60)
-        args = [saga_id, str(ttl)] + [v for pair in items for v in (str(pair[0]), str(pair[1]))] + ["1"]
-        result = await db.fcall("stock_try_reserve_batch", len(keys), *keys, *args)
-        return {"event": "reserved"} if result == 1 else {"event": "failed", "reason": "insufficient_stock"}
-    elif action == "confirm":
-        result = await db.fcall("stock_confirm_batch", len(keys), *keys, saga_id, str(n), "1")
-        return {"event": "confirmed"} if result == 1 else {"event": "confirm_failed", "reason": "reservation_expired"}
-    elif action == "cancel":
-        await db.fcall("stock_cancel_batch", len(keys), *keys, saga_id, str(n), "1")
-        return {"event": "cancelled"}
-    return {"event": "failed", "reason": f"unknown_action:{action}"}
-
-Step("reserve_stock", "stock", "try_reserve", "cancel", "confirm",
-     stock_payload, direct_executor=stock_direct_executor)
-```
-
-When **all** steps in a transaction have a `direct_executor`, the orchestrator
-skips outbox consumers entirely — no streams are read, reducing latency to a
-single round-trip per step.
 
 ## Extensibility
 

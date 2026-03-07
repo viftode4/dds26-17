@@ -43,9 +43,9 @@ services:
         condition: service_started
       order-db-replica:
         condition: service_started
-      stock-db:
+      stock-db:  # for Redis Streams message broker, not data access
         condition: service_started
-      payment-db:
+      payment-db:  # for Redis Streams message broker, not data access
         condition: service_started
       sentinel-1:
         condition: service_started
@@ -83,9 +83,9 @@ services:
         condition: service_started
       order-db-replica:
         condition: service_started
-      stock-db:
+      stock-db:  # for Redis Streams message broker, not data access
         condition: service_started
-      payment-db:
+      payment-db:  # for Redis Streams message broker, not data access
         condition: service_started
       sentinel-1:
         condition: service_started
