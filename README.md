@@ -2,7 +2,7 @@
 
 A high-performance, fault-tolerant microservices checkout system built for the
 TU Delft Distributed Data Systems course (DDS26). Implements hybrid 2PC/Saga
-transaction coordination over Redis Streams with automatic protocol selection,
+transaction coordination over NATS request-reply with automatic protocol selection,
 crash recovery, and horizontal scaling.
 
 ## Architecture
@@ -17,30 +17,29 @@ crash recovery, and horizontal scaling.
        │  Order #1  │        │  Order #2  │   ← active-active, 2PC or Saga
        │ Orchestrator│        │ Orchestrator│
        └──────┬─────┘        └──────┬─────┘
-              │     Redis Streams    │
-     ┌────────┴──────────────────────┴────────┐
-     ▼                  ▼                     ▼
-┌──────────┐     ┌───────────┐         ┌───────────┐
-│ Order DB │     │ Stock ×2  │         │Payment ×2 │
-│master+rep│     │ Lua atoms │         │ Lua atoms │
-└──────────┘     └─────┬─────┘         └─────┬─────┘
-     ↑                 ▼                     ▼
-  Sentinel ×3    ┌───────────┐         ┌───────────┐
-  (failover)     │ Stock DB  │         │Payment DB │
-                 │master+rep │         │master+rep │
-                 └───────────┘         └───────────┘
+              │   NATS request-reply │
+              └──────────┬──────────┘
+     ┌───────────────────┼───────────────────┐
+     ▼                   ▼                   ▼
+┌──────────┐      ┌───────────┐       ┌───────────┐
+│ Order DB │      │ Stock ×2  │       │Payment ×2 │
+│master+rep│      │ Lua atoms │       │ Lua atoms │
+└──────────┘      └─────┬─────┘       └─────┬─────┘
+     ↑                  ▼                   ▼
+  Sentinel ×3     ┌───────────┐       ┌───────────┐
+  (failover)      │ Stock DB  │       │Payment DB │
+                  │master+rep │       │master+rep │
+                  └───────────┘       └───────────┘
 ```
 
-**16 containers total:** 2 order, 2 stock, 2 payment, 3 Redis masters,
-3 Redis replicas, 3 Sentinels, 1 HAProxy gateway.
+**17 containers total:** 2 order, 2 stock, 2 payment, 3 Valkey masters,
+3 Valkey replicas, 3 Sentinels, 1 NATS, 1 HAProxy gateway.
 
 ### Key Features
 
 - **Hybrid 2PC/Saga** with adaptive protocol selection (hysteresis on abort rate)
-- **Direct FCALL bypass** for checkout hot path (skips Redis Streams entirely on fast path)
-- **Concurrent consumer dispatch** with asyncio Semaphore (eliminates head-of-line blocking)
 - **Atomic Lua functions** for stock/payment operations (no race conditions)
-- **Redis Streams** for async inter-service communication (event-driven)
+- **NATS Core request-reply** for inter-service communication (~0.28ms latency)
 - **Write-Ahead Log** for crash recovery (survives any single container kill)
 - **Sentinel HA** with automatic failover (~5s recovery)
 - **Read replicas** for GET endpoints (reduced master load)
@@ -65,7 +64,8 @@ see [`docs/architectural_compliance_report.md`](docs/architectural_compliance_re
 ### Stack
 
 Services run **Starlette** (ASGI framework) with **Granian** as the HTTP server on **Python 3.13**.
-Redis client is `redis.asyncio` with `hiredis`, `decode_responses=True`, `max_connections=512`.
+**NATS** for inter-service messaging. **Valkey 8.1** (Redis-compatible) via `redis.asyncio` with
+`hiredis`, `decode_responses=True`, `max_connections=512`.
 
 ## Prerequisites
 
@@ -108,7 +108,7 @@ pip install -r test/requirements-test.txt
 python -m pytest test/ -v -m "not integration"
 ```
 
-Expected: **78/78 passed**.
+Expected: **55 passed**.
 
 ### 3. Verify consistency
 
@@ -192,7 +192,7 @@ docker compose stop order-service-1
 docker compose start order-service-1
 ```
 
-### Kill a Redis master (triggers Sentinel failover)
+### Kill a Valkey master (triggers Sentinel failover)
 
 ```bash
 docker compose stop stock-db
@@ -222,10 +222,10 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   ├── app.py              # HTTP endpoints + checkout_tx definition
 │   ├── Dockerfile
 │   └── requirements.txt
-├── stock/                  # Stock service (stream consumer)
+├── stock/                  # Stock service (NATS subscriber)
 │   ├── app.py
 │   └── ...
-├── payment/                # Payment service (stream consumer)
+├── payment/                # Payment service (NATS subscriber)
 │   ├── app.py
 │   └── ...
 ├── orchestrator/           # Reusable 2PC/Saga orchestrator package
@@ -233,28 +233,28 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   ├── pyproject.toml      # pip install -e orchestrator/
 │   ├── core.py             # Main orchestrator class
 │   ├── executor.py         # TwoPCExecutor + SagaExecutor
-│   ├── recovery.py         # RecoveryWorker (XAUTOCLAIM, reconciliation)
+│   ├── recovery.py         # RecoveryWorker (WAL scan, reconciliation)
 │   ├── leader.py           # Leader election (SET NX + TTL)
 │   ├── wal.py              # Write-ahead log
+│   ├── transport.py        # Transport protocol (messaging abstraction)
 │   ├── definition.py       # Step + TransactionDefinition
 │   └── metrics.py          # Latency histograms + abort rate
 ├── common/                 # Shared utilities
 │   ├── config.py           # Redis connection factory (Sentinel-aware)
-│   ├── consumer.py         # Stream consumer loop + DLQ sweep
+│   ├── db.py               # Database helpers
+│   ├── nats_transport.py   # NatsTransport + NatsOrchestratorTransport
 │   ├── logging.py          # structlog setup
 │   └── result.py           # Pub/sub wait_for_result
 ├── lua/                    # Atomic Lua function libraries
 │   ├── order_lib.lua
 │   ├── stock_lib.lua
 │   └── payment_lib.lua
-├── test/                   # 78 unit + 11 integration tests
+├── test/                   # 55 unit + 11 integration tests
 │   ├── test_microservices.py
 │   ├── test_circuit_breaker.py
-│   ├── test_consumer.py
 │   ├── test_crash_recovery.py
 │   ├── test_executor.py
 │   ├── test_orchestrator_core.py
-│   ├── test_outbox_reader.py
 │   ├── test_recovery.py
 │   ├── test_sentinel_failover.py
 │   ├── test_stress.py
@@ -264,15 +264,16 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   └── utils.py
 ├── docs/
 │   ├── plans/2026-02-15-system-design.md   # Design document
+│   ├── architectural_compliance_report.md  # Compliance analysis
 │   ├── benchmark_chart.py                  # Chart generator
 │   └── stress_test_results.png             # Benchmark results
+├── tla/                    # TLA+ formal specification (CheckoutProtocol.tla)
 ├── env/                    # Redis connection env vars
-├── docker-compose.yml      # Full 16-container deployment
+├── docker-compose.yml      # Full 17-container deployment
 ├── haproxy.cfg             # HAProxy reverse proxy config
 ├── sentinel.conf           # Redis Sentinel configuration
 ├── sentinel-entrypoint.sh  # Sentinel startup script
 ├── requirements.txt        # Python dependencies (top-level)
-├── tla/                    # TLA+ formal specification (CheckoutProtocol.tla)
 ├── contributions.txt       # Team contributions
 └── README.md               # This file
 ```
@@ -311,25 +312,21 @@ All endpoints are available via the gateway at `http://localhost:8000`.
 
 ## Performance Results
 
-Benchmarked on Docker Desktop (run r8 — direct FCALL + skip_outbox + merged Lua):
+Benchmarked on Docker Desktop with NATS request-reply transport:
 
-**100 concurrent users:**
-
-| Metric | Value |
-|--------|-------|
-| Throughput | 573 req/s |
-| Checkout p50 | 10 ms |
-| Checkout p99 | 91 ms |
-| Consistency | 0 inconsistencies |
-
-**200 concurrent users:**
+**10,000 concurrent users (checkout-only, 120s, 1000/s ramp):**
 
 | Metric | Value |
 |--------|-------|
-| Throughput | 759 req/s |
-| Checkout p50 | 67 ms |
-| Checkout p99 | 210 ms |
+| Total requests | 72,184 |
+| Throughput | 585 req/s |
+| Failures | 0% |
+| Checkout p50 | 2s |
+| Checkout p95 | 4.9s |
+| Checkout p99 | 23s |
 | Consistency | 0 inconsistencies |
+
+**Fault tolerance:** 0% failures during container kills (stock-service, NATS).
 
 ## Logs
 

@@ -997,3 +997,5 @@ TLC should report "Model checking completed. No error has been found." with all 
 [16] Valkey Project. "Valkey 8.1 Release." https://valkey.io — Redis-compatible, open-source, multithreaded IO for improved throughput.
 
 [17] Python asyncio. "Synchronization Primitives — Semaphore." https://docs.python.org/3/library/asyncio-sync.html — asyncio.Semaphore bounds concurrent coroutines. Used to cap in-flight checkouts (MAX_CONCURRENT_CHECKOUTS=200).
+
+[18] TLA+ formal specification of the checkout protocol: [`tla/CheckoutProtocol.tla`](../tla/CheckoutProtocol.tla) — Models the hybrid 2PC/Saga protocol state machine, verifying safety (no double-spend, no stock loss) and liveness (all transactions eventually complete or compensate) under crash and network partition scenarios.

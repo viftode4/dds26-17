@@ -20,7 +20,7 @@ local function payment_2pc_prepare(KEYS, ARGV)
     local lock_ttl = tonumber(ARGV[4])
 
     -- Idempotency
-    local status = redis.call('GET', KEYS[3])
+    local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'prepared' then return 1 end
 
     -- Validate
@@ -29,11 +29,15 @@ local function payment_2pc_prepare(KEYS, ARGV)
         return 0
     end
 
-    -- Deduct credit and store amount in lock key (for abort recovery)
+    -- Deduct credit and store amount durably
     redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
+    -- Lock key guards against duplicate prepares (short TTL is fine)
     redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
+    -- Store amount in status hash (survives lock TTL expiry, 24h TTL)
+    redis.call('HSET', KEYS[3], 'amount', tostring(amount))
 
-    redis.call('SETEX', KEYS[3], 86400, 'prepared')
+    redis.call('HSET', KEYS[3], 'status', 'prepared')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 
@@ -47,13 +51,14 @@ local function payment_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
 
     -- Idempotency
-    local status = redis.call('GET', KEYS[3])
+    local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'committed' then return 1 end
 
     -- Delete lock key (amount already deducted in prepare)
     redis.call('DEL', KEYS[2])
 
-    redis.call('SETEX', KEYS[3], 86400, 'committed')
+    redis.call('HSET', KEYS[3], 'status', 'committed')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 
@@ -67,17 +72,18 @@ local function payment_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
 
     -- Idempotency
-    local status = redis.call('GET', KEYS[3])
+    local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'aborted' then return 1 end
 
-    -- Restore credit from lock key (reverse the prepare deduction)
-    local amount = redis.call('GET', KEYS[2])
+    -- Restore credit from status hash (survives lock TTL expiry)
+    local amount = redis.call('HGET', KEYS[3], 'amount')
     if amount then
         redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
     end
     redis.call('DEL', KEYS[2])
 
-    redis.call('SETEX', KEYS[3], 86400, 'aborted')
+    redis.call('HSET', KEYS[3], 'status', 'aborted')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 

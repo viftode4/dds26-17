@@ -22,7 +22,7 @@ local function stock_2pc_prepare(KEYS, ARGV)
     local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
-    local status = redis.call('GET', status_key)
+    local status = redis.call('HGET', status_key, 'status')
     if status == 'prepared' then return 1 end
 
     -- Validate ALL items have sufficient available_stock
@@ -35,16 +35,21 @@ local function stock_2pc_prepare(KEYS, ARGV)
         end
     end
 
-    -- Deduct stock and store amounts in lock keys (for abort recovery)
+    -- Deduct stock and store amounts durably
     for i = 1, n_items do
         local item_key = KEYS[i]
         local lock_key = KEYS[n_items + i]
+        local item_id = ARGV[1 + i * 2]
         local amount = tonumber(ARGV[2 + i * 2])
         redis.call('HINCRBY', item_key, 'available_stock', -amount)
+        -- Lock key guards against duplicate prepares (short TTL is fine)
         redis.call('SETEX', lock_key, lock_ttl, tostring(amount))
+        -- Store amount in status hash (survives lock TTL expiry, 24h TTL)
+        redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
     end
 
-    redis.call('SETEX', status_key, 86400, 'prepared')
+    redis.call('HSET', status_key, 'status', 'prepared')
+    redis.call('EXPIRE', status_key, 86400)
     return 1
 end
 
@@ -58,7 +63,7 @@ local function stock_2pc_commit(KEYS, ARGV)
     local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
-    local status = redis.call('GET', status_key)
+    local status = redis.call('HGET', status_key, 'status')
     if status == 'committed' then return 1 end
 
     -- Delete all lock keys (amounts already deducted in prepare)
@@ -66,35 +71,38 @@ local function stock_2pc_commit(KEYS, ARGV)
         redis.call('DEL', KEYS[n_items + i])
     end
 
-    redis.call('SETEX', status_key, 86400, 'committed')
+    redis.call('HSET', status_key, 'status', 'committed')
+    redis.call('EXPIRE', status_key, 86400)
     return 1
 end
 
--- 2PC Abort: Restore stock from lock keys (undo prepare deduction)
+-- 2PC Abort: Restore stock from status hash (undo prepare deduction)
 --
 -- Same KEYS layout as prepare
--- ARGV: saga_id, n_items
+-- ARGV: saga_id, n_items, item_id_1, item_id_2, ...
 local function stock_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
     local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
-    local status = redis.call('GET', status_key)
+    local status = redis.call('HGET', status_key, 'status')
     if status == 'aborted' then return 1 end
 
-    -- Restore stock from lock keys (reverse the prepare deduction)
+    -- Restore stock from status hash (survives lock TTL expiry)
     for i = 1, n_items do
         local item_key = KEYS[i]
         local lock_key = KEYS[n_items + i]
-        local amount = redis.call('GET', lock_key)
+        local item_id = ARGV[2 + i]
+        local amount = redis.call('HGET', status_key, 'amount:' .. item_id)
         if amount then
             redis.call('HINCRBY', item_key, 'available_stock', tonumber(amount))
         end
         redis.call('DEL', lock_key)
     end
 
-    redis.call('SETEX', status_key, 86400, 'aborted')
+    redis.call('HSET', status_key, 'status', 'aborted')
+    redis.call('EXPIRE', status_key, 86400)
     return 1
 end
 

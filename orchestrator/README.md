@@ -1,6 +1,6 @@
 # wdm-orchestrator
 
-A hybrid 2PC/Saga transaction orchestrator for Redis Streams-based microservices.
+A hybrid 2PC/Saga transaction orchestrator with a pluggable Transport abstraction.
 It coordinates distributed transactions across any number of services with
 automatic protocol selection, crash recovery, circuit breaking, and adaptive
 reservation TTLs — without knowing anything about the services it orchestrates.
@@ -29,17 +29,39 @@ checkout = TransactionDefinition(name="checkout", steps=[
     Step("reserve_payment", "payment", payment_payload),
 ])
 
-# 2. Create orchestrator and start outbox readers
-orch = Orchestrator(order_db, {"stock": stock_db, "payment": payment_db}, [checkout])
+# 2. Create a transport (e.g., NATS)
+from common.nats_transport import NatsOrchestratorTransport
+transport = NatsOrchestratorTransport(nats_client)
+
+# 3. Create orchestrator and execute
+orch = Orchestrator(order_db, transport, [checkout])
 await orch.start()
 
-# 3. Execute a transaction
 result = await orch.execute("checkout", {
     "order_id": "abc", "user_id": "u1", "items": [("item1", 2)], "total_cost": 500
 })
 # Success: {"status": "success", "saga_id": "...", "protocol": "2pc"}
 # Failure: {"status": "failed",  "saga_id": "...", "protocol": "saga", "error": "..."}
 ```
+
+## Transport Protocol
+
+The orchestrator communicates with services through a `Transport` abstraction
+(`orchestrator/transport.py`):
+
+```python
+class Transport(Protocol):
+    async def send_and_wait(self, service: str, action: str,
+                            payload: dict, timeout: float) -> dict: ...
+```
+
+The default implementation uses **NATS Core request-reply**:
+- Subject scheme: `svc.{service}.{action}` (e.g., `svc.stock.prepare`)
+- Queue groups: `{service}-workers` for load balancing across replicas
+- ~0.28ms per-hop latency (vs ~100ms with polling-based approaches)
+
+Any transport that implements `send_and_wait` can be used — the orchestrator is
+fully transport-agnostic.
 
 ## Extensibility
 
@@ -53,26 +75,25 @@ def warehouse_payload(saga_id: str, action: str, ctx: dict) -> dict:
     return {"items": json.dumps(ctx["items"]), "warehouse_id": ctx["warehouse_id"]}
 
 extended_checkout = TransactionDefinition(name="extended_checkout", steps=[
-    Step("reserve_stock",     "stock",     "try_reserve", "cancel", "confirm", stock_payload),
-    Step("reserve_payment",   "payment",   "try_reserve", "cancel", "confirm", payment_payload),
-    Step("reserve_warehouse", "warehouse", "try_reserve", "cancel", "confirm", warehouse_payload),
+    Step("reserve_stock",     "stock",     stock_payload),
+    Step("reserve_payment",   "payment",   payment_payload),
+    Step("reserve_warehouse", "warehouse", warehouse_payload),
 ])
 ```
 
-Each participating service must follow the stream convention:
-- Read commands from `{service}-commands` (Redis Stream, consumer group `{service}-workers`)
-- Write results to `{service}-outbox` (Redis Stream, fields include `saga_id` and `event`)
-
-Convention-based naming means zero configuration for stream routing.
+Each participating service must subscribe to NATS subjects matching
+`svc.{service}.*` and reply with a dict containing an `event` field
+(e.g., `{"event": "prepared"}`, `{"event": "committed"}`).
 
 ## Exports
 
 ```python
 from orchestrator import (
     Orchestrator, TransactionDefinition, Step,
-    TwoPCExecutor, SagaExecutor, OutboxReader,
+    TwoPCExecutor, SagaExecutor,
     CircuitBreaker, WALEngine, RecoveryWorker,
     LeaderElection, MetricsCollector, LatencyHistogram,
+    Transport,
 )
 ```
 
@@ -87,23 +108,19 @@ from orchestrator import (
                           │  └────┬────┘ └────┬────┘ │
                           │       │           │       │
                           │  ┌────▼───────────▼────┐  │
-                          │  │   _send_command()    │  │  ← generic, uses payload_builder
+                          │  │  transport.send_and  │  │  ← generic, uses payload_builder
+                          │  │     _wait()          │  │
                           │  └────────┬────────────┘  │
                           └───────────┼────────────────┘
                                       │
+                           NATS request-reply
+                        svc.{service}.{action}
+                                      │
                         ┌─────────────┴─────────────┐
                         ▼                           ▼
-               stock-commands              payment-commands
-                        │                           │
-               ┌────────▼────────┐        ┌────────▼────────┐
-               │  Stock Service   │        │ Payment Service  │
-               └────────┬────────┘        └────────┬────────┘
-                        │                           │
-               stock-outbox                payment-outbox
-                        │                           │
-                        └─────────────┬─────────────┘
-                                      ▼
-                              OutboxReader (Futures)
+               Stock Service ×2             Payment Service ×2
+               (queue group:                (queue group:
+                stock-workers)              payment-workers)
 ```
 
 ## Features
@@ -119,9 +136,9 @@ from orchestrator import (
 - **Adaptive reservation TTL**: TTL = f(p99 latency) — automatically adjusts
   to current system load: `max(30, min(120, int(p99_ms / 1000 * 3) + 10))`,
   clamped to 30–120 seconds
-- **Exactly-once outbox delivery**: XREADGROUP + XACK consumer groups prevent
-  duplicate or lost events
-- **AOF durability**: Redis AOF persistence ensures committed data survives restarts
+- **Transport-agnostic**: Any messaging system implementing the `Transport`
+  protocol can be used (NATS, Redis Streams, gRPC, etc.)
+- **AOF durability**: Valkey AOF persistence ensures committed data survives restarts
 
 ## Recovery
 
@@ -132,8 +149,7 @@ from orchestrator import RecoveryWorker, LeaderElection
 
 recovery = RecoveryWorker(
     wal=orch.wal,
-    service_dbs=service_dbs,
-    outbox_reader=orch.outbox_reader,
+    transport=transport,
     definitions=orch.definitions,          # for payload_builder during recovery
     reconcile_fn=my_reconciliation_check,  # optional domain-specific callback
 )
@@ -141,7 +157,6 @@ recovery = RecoveryWorker(
 leader = LeaderElection(order_db)
 if await leader.acquire():
     await recovery.recover_incomplete_sagas()
-    await recovery.start_claim_worker()        # XAUTOCLAIM stuck messages
     await recovery.start_reconciliation()      # periodic invariant checks
 
 # Teardown
@@ -153,17 +168,16 @@ await leader.stop()      # cancels TTL refresh task
 `LeaderElection` API: `acquire()`, `release()`, `stop()`, `wait_for_leadership()`,
 `is_leader` (property).
 
-The `reconcile_fn` callback receives `service_dbs` and runs application-specific
-invariant checks (e.g., "no stock value is negative"). The orchestrator schedules
-it; the application defines what to check.
+The `reconcile_fn` callback runs application-specific invariant checks
+(e.g., "no stock value is negative"). The orchestrator schedules it;
+the application defines what to check.
 
-WAL terminal states: `COMPLETED`, `FAILED`, `ABANDONED`.
+WAL terminal states: `COMPLETED`, `FAILED`.
 
 Timing constants:
 
 | Constant | Value | Description |
 |----------|-------|-------------|
-| `IDLE_THRESHOLD_MS` | `15000` | ms before XAUTOCLAIM reclaims a pending message |
 | `RECONCILIATION_INTERVAL` | `60` s | Seconds between reconciliation runs |
 | `ORPHAN_SAGA_TIMEOUT` | `120` s | Seconds before an orphaned saga is aborted |
 
@@ -177,14 +191,13 @@ Timing constants:
 | `MetricsCollector(window_size=)` | `100` | Sliding window for abort rate |
 | `STEP_TIMEOUT` | `10.0s` | Per-step response timeout |
 | `CONFIRM_MAX_RETRIES` | `3` | Forward recovery attempts |
-| `MAX_RETRIES` (recovery) | `5` | Recovery retry attempts for incomplete sagas |
 | `WALEngine.MAX_LEN` | `50000` | Max WAL stream entries (trimmed on append) |
-| `IDLE_THRESHOLD_MS` | `15000` | ms before XAUTOCLAIM reclaims messages |
 | `RECONCILIATION_INTERVAL` | `60` | Seconds between reconciliation runs |
 | `ORPHAN_SAGA_TIMEOUT` | `120` | Seconds before orphaned sagas are aborted |
 
 ## Dependencies
 
 - `python>=3.11`
-- `redis[hiredis]>=5.0` — Redis client with C parser
+- `redis[hiredis]>=5.0` — Redis/Valkey client with C parser
 - `structlog>=23.0` — Structured logging
+- NATS server (injected via Transport, not a package dependency)

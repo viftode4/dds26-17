@@ -252,8 +252,8 @@ async def find_order(request: Request):
         raise HTTPException(400, detail=f"Order: {order_id} not found!")
     items = []
     for raw in raw_items:
-        item_id, quantity = raw.split(":", 1)
-        items.append((item_id, int(quantity)))
+        item_id, _quantity = raw.split(":", 1)
+        items.append(item_id)
     return JSONResponse({
         "order_id": order_id,
         "paid": entry["paid"] == "true",

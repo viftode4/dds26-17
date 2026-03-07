@@ -140,7 +140,10 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [f"saga:{saga_id}:stock:status"]
-    await db.fcall("stock_2pc_abort", len(keys), *keys, saga_id, str(n))
+    args = [saga_id, str(n)]
+    for item_id, _ in items:
+        args.append(item_id)
+    await db.fcall("stock_2pc_abort", len(keys), *keys, *args)
 
 
 async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:

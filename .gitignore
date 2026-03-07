@@ -50,6 +50,9 @@ tla/tla2tools.jar
 tla/states/
 tla/*_TTrace_*
 
+# Benchmark results
+*.csv
+
 # Serena
 .serena/
 .grepai/

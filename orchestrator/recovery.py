@@ -57,11 +57,7 @@ class RecoveryWorker:
         """Resume a single saga based on its last WAL state."""
         logger.info("Recovering saga", saga_id=saga_id, last_step=last_step)
 
-        if last_step == "STARTED":
-            # Nothing happened yet — mark failed
-            await self.wal.log(saga_id, "FAILED")
-
-        elif last_step == "PREPARING":
+        if last_step == "PREPARING":
             # 2PC: sent prepares but crashed before commit/abort decision
             # Safe default: abort (release locks, no mutations were applied)
             await self._abort_all(saga_id, data)
