@@ -44,6 +44,22 @@ class WALEngine:
                 pipe.hset(f"saga_state:{saga_id}", mapping=entry)
             await pipe.execute()
 
+    async def log_terminal(self, saga_id: str, step: str, data: dict | None = None):
+        """Log a terminal state with non-transactional pipeline (faster, no MULTI/EXEC)."""
+        entry = {
+            "saga_id": saga_id,
+            "step": step,
+            "timestamp": str(time.time()),
+        }
+        if data:
+            entry["data"] = json.dumps(data)
+
+        async with self.db.pipeline(transaction=False) as pipe:
+            pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
+            pipe.srem(self.ACTIVE_SET, saga_id)
+            pipe.delete(f"saga_state:{saga_id}")
+            await pipe.execute()
+
     async def get_incomplete_sagas(self) -> dict[str, dict]:
         """Find all sagas not in a terminal state.
 

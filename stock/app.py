@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import socket
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,28 +13,22 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
-from common.consumer import consumer_loop, dlq_sweep_loop
+from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
 
 
 DB_ERROR_STR = "DB error"
-STREAM_COMMANDS = "stock-commands"
-STREAM_OUTBOX = "stock-outbox"
-CONSUMER_GROUP = "stock-workers"
-CONSUMER_NAME = f"worker-{socket.gethostname()}-{os.getpid()}"
-DLQ_STREAM = f"dead-letter:{STREAM_COMMANDS}"
 
 log = get_logger("stock")
 
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
-_consumer_task: asyncio.Task | None = None
-_dlq_task: asyncio.Task | None = None
+_nats_transport: NatsTransport | None = None
 
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, _consumer_task, _dlq_task
+    global db, db_read, _nats_transport
     setup_logging("stock-service")
 
     db = create_redis_connection(prefix="", decode_responses=True)
@@ -56,35 +49,22 @@ async def lifespan(app):
         log.error("Failed to load Lua library", error=str(e))
         raise
 
-    # Create consumer group (idempotent — safe for multiple instances)
-    try:
-        await db.xgroup_create(STREAM_COMMANDS, CONSUMER_GROUP, id="0", mkstream=True)
-    except aioredis.ResponseError as e:
-        if "BUSYGROUP" not in str(e):
-            raise
-
-    _consumer_task = asyncio.create_task(
-        consumer_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, CONSUMER_NAME, handle_command)
-    )
-    _dlq_task = asyncio.create_task(dlq_sweep_loop(db, STREAM_COMMANDS, CONSUMER_GROUP, DLQ_STREAM))
-    log.info("Stock service started", consumer=CONSUMER_NAME)
+    _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
+    await _nats_transport.connect()
+    await _nats_transport.subscribe("svc.stock.*", "stock-workers", handle_nats_message)
+    log.info("Stock service started")
 
     yield
 
-    for task in (_consumer_task, _dlq_task):
-        if task:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+    if _nats_transport:
+        await _nats_transport.close()
     if db_read:
         await db_read.aclose()
     if db:
         await db.aclose()
 
 
-async def handle_command(fields: dict):
+async def handle_command(fields: dict) -> str:
     """Dispatch a command to the appropriate Lua function."""
     action = fields.get("action", "")
     saga_id = fields.get("saga_id", "")
@@ -92,21 +72,42 @@ async def handle_command(fields: dict):
     if action == "prepare":
         items = _parse_items(fields)
         ttl = int(fields.get("ttl", "30"))
-        await _2pc_prepare(saga_id, items, ttl)
+        result = await _2pc_prepare(saga_id, items, ttl)
+        return "prepared" if result == 1 else "failed"
     elif action == "commit":
         items = _parse_items(fields)
         await _2pc_commit(saga_id, items)
+        return "committed"
     elif action == "abort":
         items = _parse_items(fields)
         await _2pc_abort(saga_id, items)
+        return "aborted"
     elif action == "execute":
         items = _parse_items(fields)
-        await _saga_execute(saga_id, items)
+        result = await _saga_execute(saga_id, items)
+        return "executed" if result == 1 else "failed"
     elif action == "compensate":
         items = _parse_items(fields)
         await _saga_compensate(saga_id, items)
+        return "compensated"
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
+        return "failed"
+
+
+async def handle_nats_message(msg):
+    fields = json.loads(msg.data.decode())
+    saga_id = fields.get("saga_id", "")
+    try:
+        event = await handle_command(fields)
+        if event == "failed":
+            response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
+        else:
+            response = {"saga_id": saga_id, "event": event}
+    except Exception as e:
+        log.error("NATS handler error", error=str(e), saga_id=saga_id)
+        response = {"saga_id": saga_id, "event": "failed", "reason": str(e)}
+    await msg.respond(json.dumps(response).encode())
 
 
 def _parse_items(fields: dict) -> list[tuple[str, int]]:
@@ -116,22 +117,21 @@ def _parse_items(fields: dict) -> list[tuple[str, int]]:
     return [(str(item_id), int(qty)) for item_id, qty in json.loads(items_raw)]
 
 
-async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30):
-    n = len(items)
+async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30) -> int:
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
+    keys += [f"saga:{saga_id}:stock:status"]
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+    return await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
 
 
 async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
+    keys += [f"saga:{saga_id}:stock:status"]
     await db.fcall("stock_2pc_commit", len(keys), *keys, saga_id, str(n))
 
 
@@ -139,24 +139,23 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status"]
+    keys += [f"saga:{saga_id}:stock:status"]
     await db.fcall("stock_2pc_abort", len(keys), *keys, saga_id, str(n))
 
 
-async def _saga_execute(saga_id: str, items: list[tuple[str, int]]):
-    n = len(items)
+async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
     keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+    keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
     args = [saga_id]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    await db.fcall("stock_saga_execute", len(keys), *keys, *args)
+    return await db.fcall("stock_saga_execute", len(keys), *keys, *args)
 
 
 async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [STREAM_OUTBOX, f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
+    keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
     await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n))
 
 

@@ -13,15 +13,13 @@
 -- KEYS layout (for N items):
 --   KEYS[1..N]       = item:{item_id} hashes
 --   KEYS[N+1..2N]    = lock:2pc:{saga_id}:{item_id} keys (store amounts for abort)
---   KEYS[2N+1]       = stock-outbox stream
---   KEYS[2N+2]       = saga:{saga_id}:stock:status
+--   KEYS[2N+1]       = saga:{saga_id}:stock:status
 -- ARGV: saga_id, lock_ttl, (item_id, amount)...
 local function stock_2pc_prepare(KEYS, ARGV)
     local saga_id = ARGV[1]
     local lock_ttl = tonumber(ARGV[2])
-    local n_items = (#KEYS - 2) / 2
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local n_items = (#KEYS - 1) / 2
+    local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -47,8 +45,6 @@ local function stock_2pc_prepare(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'prepared')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'prepared')
     return 1
 end
 
@@ -59,8 +55,7 @@ end
 local function stock_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -72,8 +67,6 @@ local function stock_2pc_commit(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'committed')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'committed')
     return 1
 end
 
@@ -84,8 +77,7 @@ end
 local function stock_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local outbox_key = KEYS[2 * n_items + 1]
-    local status_key = KEYS[2 * n_items + 2]
+    local status_key = KEYS[2 * n_items + 1]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -103,8 +95,6 @@ local function stock_2pc_abort(KEYS, ARGV)
     end
 
     redis.call('SETEX', status_key, 86400, 'aborted')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'aborted')
     return 1
 end
 
@@ -112,16 +102,14 @@ end
 --
 -- KEYS layout (for N items):
 --   KEYS[1..N]   = item:{item_id} hashes
---   KEYS[N+1]    = stock-outbox stream
---   KEYS[N+2]    = saga:{saga_id}:stock:status
---   KEYS[N+3]    = saga:{saga_id}:stock:amounts
+--   KEYS[N+1]    = saga:{saga_id}:stock:status
+--   KEYS[N+2]    = saga:{saga_id}:stock:amounts
 -- ARGV: saga_id, (item_id, amount)...
 local function stock_saga_execute(KEYS, ARGV)
     local saga_id = ARGV[1]
-    local n_items = #KEYS - 3
-    local outbox_key = KEYS[n_items + 1]
-    local status_key = KEYS[n_items + 2]
-    local amounts_key = KEYS[n_items + 3]
+    local n_items = #KEYS - 2
+    local status_key = KEYS[n_items + 1]
+    local amounts_key = KEYS[n_items + 2]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -148,8 +136,6 @@ local function stock_saga_execute(KEYS, ARGV)
 
     redis.call('SETEX', status_key, 86400, 'executed')
     redis.call('EXPIRE', amounts_key, 86400)
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'executed')
     return 1
 end
 
@@ -160,9 +146,8 @@ end
 local function stock_saga_compensate(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
-    local outbox_key = KEYS[n_items + 1]
-    local status_key = KEYS[n_items + 2]
-    local amounts_key = KEYS[n_items + 3]
+    local status_key = KEYS[n_items + 1]
+    local amounts_key = KEYS[n_items + 2]
 
     -- Idempotency
     local status = redis.call('GET', status_key)
@@ -180,8 +165,6 @@ local function stock_saga_compensate(KEYS, ARGV)
 
     redis.call('DEL', amounts_key)
     redis.call('SETEX', status_key, 86400, 'compensated')
-    redis.call('XADD', outbox_key, 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'compensated')
     return 1
 end
 

@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis
+from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
 from orchestrator import (
@@ -40,6 +41,7 @@ leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
 _leader_task: asyncio.Task | None = None
 _http_client: httpx.AsyncClient | None = None
+_nats_transport: NatsTransport | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +101,6 @@ async def _leadership_loop():
             if acquired:
                 log.info("This instance is now the LEADER (background maintenance)")
                 await recovery_worker.recover_incomplete_sagas()
-                await recovery_worker.start_claim_worker()
                 await recovery_worker.start_reconciliation()
                 while leader_election.is_leader:
                     await asyncio.sleep(1)
@@ -116,7 +117,7 @@ async def _leadership_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task, _http_client
+    global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task, _http_client, _nats_transport
 
     setup_logging("order-service")
 
@@ -136,23 +137,20 @@ async def lifespan(app):
         log.error("Failed to load Lua library", error=str(e))
         raise
 
-    # Cross-service Redis connections for orchestrator (Redis Streams message broker, not data access)
-    stock_db = create_redis_connection(prefix="STOCK_", decode_responses=True)
-    payment_db = create_redis_connection(prefix="PAYMENT_", decode_responses=True)
-    await wait_for_redis(stock_db, "stock-db")
-    await wait_for_redis(payment_db, "payment-db")
-
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
     await asyncio.gather(*[db.ping() for _ in range(32)])
 
     # Shared HTTP client for inter-service lookups via gateway
     _http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=5.0)
 
-    service_dbs = {"stock": stock_db, "payment": payment_db}
+    # NATS transport for orchestrator-to-service communication
+    _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
+    await _nats_transport.connect()
+    orch_transport = NatsOrchestratorTransport(_nats_transport)
 
     orchestrator = Orchestrator(
         order_db=db,
-        service_dbs=service_dbs,
+        transport=orch_transport,
         definitions=[checkout_tx],
         protocol="auto",
     )
@@ -161,10 +159,8 @@ async def lifespan(app):
     leader_election = LeaderElection(db)
     recovery_worker = RecoveryWorker(
         wal=orchestrator.wal,
-        service_dbs=service_dbs,
-        outbox_reader=orchestrator.outbox_reader,
+        transport=orch_transport,
         definitions=orchestrator.definitions,
-        reconcile_fn=None,
     )
 
     _leader_task = asyncio.create_task(_leadership_loop())
@@ -186,8 +182,8 @@ async def lifespan(app):
         await recovery_worker.stop()
     if orchestrator:
         await orchestrator.stop()
-        for db_conn in orchestrator.service_dbs.values():
-            await db_conn.aclose()
+    if _nats_transport:
+        await _nats_transport.close()
     if db_read:
         await db_read.aclose()
     if db:

@@ -13,7 +13,6 @@
 -- KEYS[1] = user:{user_id}
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
--- KEYS[4] = payment-outbox
 -- ARGV: amount, saga_id, user_id, lock_ttl
 local function payment_2pc_prepare(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -35,8 +34,6 @@ local function payment_2pc_prepare(KEYS, ARGV)
     redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
 
     redis.call('SETEX', KEYS[3], 86400, 'prepared')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'prepared')
     return 1
 end
 
@@ -45,7 +42,6 @@ end
 -- KEYS[1] = user:{user_id}
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
--- KEYS[4] = payment-outbox
 -- ARGV: saga_id
 local function payment_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
@@ -58,8 +54,6 @@ local function payment_2pc_commit(KEYS, ARGV)
     redis.call('DEL', KEYS[2])
 
     redis.call('SETEX', KEYS[3], 86400, 'committed')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'committed')
     return 1
 end
 
@@ -68,7 +62,6 @@ end
 -- KEYS[1] = user:{user_id}
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
--- KEYS[4] = payment-outbox
 -- ARGV: saga_id
 local function payment_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
@@ -85,17 +78,14 @@ local function payment_2pc_abort(KEYS, ARGV)
     redis.call('DEL', KEYS[2])
 
     redis.call('SETEX', KEYS[3], 86400, 'aborted')
-    redis.call('XADD', KEYS[4], 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'aborted')
     return 1
 end
 
 -- Saga Execute: Direct deduction (no locks, no held_credit)
 --
 -- KEYS[1] = user:{user_id}
--- KEYS[2] = payment-outbox
--- KEYS[3] = saga:{saga_id}:payment:status
--- KEYS[4] = saga:{saga_id}:payment:amounts
+-- KEYS[2] = saga:{saga_id}:payment:status
+-- KEYS[3] = saga:{saga_id}:payment:amounts
 -- ARGV: amount, saga_id, user_id
 local function payment_saga_execute(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -103,7 +93,7 @@ local function payment_saga_execute(KEYS, ARGV)
     local user_id = ARGV[3]
 
     -- Idempotency
-    local status = redis.call('GET', KEYS[3])
+    local status = redis.call('GET', KEYS[2])
     if status == 'executed' then return 1 end
 
     -- Validate
@@ -113,31 +103,28 @@ local function payment_saga_execute(KEYS, ARGV)
     end
 
     redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
-    redis.call('HSET', KEYS[4], user_id, tostring(amount))
-    redis.call('EXPIRE', KEYS[4], 86400)
+    redis.call('HSET', KEYS[3], user_id, tostring(amount))
+    redis.call('EXPIRE', KEYS[3], 86400)
 
-    redis.call('SETEX', KEYS[3], 86400, 'executed')
-    redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'executed')
+    redis.call('SETEX', KEYS[2], 86400, 'executed')
     return 1
 end
 
 -- Saga Compensate: Restore credit from stored amounts
 --
 -- KEYS[1] = user:{user_id}
--- KEYS[2] = payment-outbox
--- KEYS[3] = saga:{saga_id}:payment:status
--- KEYS[4] = saga:{saga_id}:payment:amounts
+-- KEYS[2] = saga:{saga_id}:payment:status
+-- KEYS[3] = saga:{saga_id}:payment:amounts
 -- ARGV: saga_id
 local function payment_saga_compensate(KEYS, ARGV)
     local saga_id = ARGV[1]
 
     -- Idempotency
-    local status = redis.call('GET', KEYS[3])
+    local status = redis.call('GET', KEYS[2])
     if status == 'compensated' then return 1 end
 
     -- Restore credit from stored amounts
-    local all_amounts = redis.call('HGETALL', KEYS[4])
+    local all_amounts = redis.call('HGETALL', KEYS[3])
     for j = 1, #all_amounts, 2 do
         local amount = tonumber(all_amounts[j + 1])
         if amount then
@@ -145,10 +132,8 @@ local function payment_saga_compensate(KEYS, ARGV)
         end
     end
 
-    redis.call('DEL', KEYS[4])
-    redis.call('SETEX', KEYS[3], 86400, 'compensated')
-    redis.call('XADD', KEYS[2], 'MAXLEN', '~', '10000', '*',
-        'saga_id', saga_id, 'event', 'compensated')
+    redis.call('DEL', KEYS[3])
+    redis.call('SETEX', KEYS[2], 86400, 'compensated')
     return 1
 end
 

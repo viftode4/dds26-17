@@ -2,12 +2,10 @@ import asyncio
 import time
 from typing import Callable
 
-import redis.asyncio as aioredis
-
 import structlog
 from orchestrator.definition import TransactionDefinition
 from orchestrator.wal import WALEngine
-from orchestrator.executor import OutboxReader, STEP_TIMEOUT
+from orchestrator.executor import STEP_TIMEOUT
 
 logger = structlog.get_logger("orchestrator.recovery")
 
@@ -22,24 +20,20 @@ class RecoveryWorker:
 
     On leadership acquisition:
     1. Scan WAL for incomplete sagas and resume/abort/compensate
-    2. Periodically XAUTOCLAIM stuck consumer-group messages
-    3. Periodically verify data invariants (reconciliation) via injectable callback
-    4. Periodically handle orphaned sagas > ORPHAN_SAGA_TIMEOUT
+    2. Periodically verify data invariants (reconciliation) via injectable callback
+    3. Periodically handle orphaned sagas > ORPHAN_SAGA_TIMEOUT
 
     Checkout processing no longer runs here — both order instances execute
     sagas directly (active-active). This worker is maintenance-only.
     """
 
-    def __init__(self, wal: WALEngine, service_dbs: dict[str, aioredis.Redis],
-                 outbox_reader: OutboxReader,
+    def __init__(self, wal: WALEngine, transport,
                  definitions: dict[str, TransactionDefinition] | None = None,
                  reconcile_fn: Callable[..., object] | None = None):
         self.wal = wal
-        self.service_dbs = service_dbs
-        self.outbox_reader = outbox_reader
+        self.transport = transport
         self.definitions = definitions or {}
         self.reconcile_fn = reconcile_fn
-        self._claim_task: asyncio.Task | None = None
         self._reconciliation_task: asyncio.Task | None = None
 
     async def recover_incomplete_sagas(self):
@@ -95,31 +89,17 @@ class RecoveryWorker:
             await self.wal.log(saga_id, "FAILED")
 
     async def _send_action_to_all(self, action: str, saga_id: str, data: dict):
-        """Send ``action`` to all services via command streams.
-
-        Uses payload builders from the transaction definition when available;
-        falls back to a bare ``{saga_id, action}`` command for unknown transactions.
-        """
+        """Send ``action`` to all services via transport."""
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if tx_def:
             for step in tx_def.steps:
-                db = self.service_dbs.get(step.service)
-                if not db:
-                    continue
+                payload = {"saga_id": saga_id, "action": action}
+                if step.payload_builder:
+                    payload.update(step.payload_builder(saga_id, action, data))
                 try:
-                    stream = f"{step.service}-commands"
-                    cmd = {"saga_id": saga_id, "action": action}
-                    if step.payload_builder:
-                        cmd.update(step.payload_builder(saga_id, action, data))
-                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
+                    await self.transport.send_and_wait(step.service, action, payload, STEP_TIMEOUT)
                 except Exception as e:
-                    logger.warning("send_action_to_all error", service=step.service,
-                                   action=action, saga_id=saga_id, error=str(e))
-        else:
-            for service, db in self.service_dbs.items():
-                stream = f"{service}-commands"
-                await db.xadd(stream, {"saga_id": saga_id, "action": action},
-                              maxlen=10000, approximate=True)
+                    logger.warning("send_action_to_all error", service=step.service, error=str(e))
 
     async def _abort_all(self, saga_id: str, data: dict):
         """Abort all services with infinite retry, then log FAILED."""
@@ -137,16 +117,10 @@ class RecoveryWorker:
             still_pending = []
             for step in pending_steps:
                 try:
-                    db = self.service_dbs.get(step.service)
-                    if not db:
-                        continue
-                    stream = f"{step.service}-commands"
-                    cmd = {"saga_id": saga_id, "action": "abort"}
+                    payload = {"saga_id": saga_id, "action": "abort"}
                     if step.payload_builder:
-                        cmd.update(step.payload_builder(saga_id, "abort", data))
-                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                        payload.update(step.payload_builder(saga_id, "abort", data))
+                    result = await self.transport.send_and_wait(step.service, "abort", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery abort error", service=step.service,
                                    saga_id=saga_id, error=str(e))
@@ -184,16 +158,10 @@ class RecoveryWorker:
             still_pending = []
             for step in pending_steps:
                 try:
-                    db = self.service_dbs.get(step.service)
-                    if not db:
-                        continue
-                    stream = f"{step.service}-commands"
-                    cmd = {"saga_id": saga_id, "action": "commit"}
+                    payload = {"saga_id": saga_id, "action": "commit"}
                     if step.payload_builder:
-                        cmd.update(step.payload_builder(saga_id, "commit", data))
-                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                        payload.update(step.payload_builder(saga_id, "commit", data))
+                    result = await self.transport.send_and_wait(step.service, "commit", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery commit error", service=step.service,
                                    saga_id=saga_id, error=str(e))
@@ -237,16 +205,10 @@ class RecoveryWorker:
             max_backoff = 60.0
             while True:
                 try:
-                    db = self.service_dbs.get(step.service)
-                    if not db:
-                        break
-                    stream = f"{step.service}-commands"
-                    cmd = {"saga_id": saga_id, "action": "compensate"}
+                    payload = {"saga_id": saga_id, "action": "compensate"}
                     if step.payload_builder:
-                        cmd.update(step.payload_builder(saga_id, "compensate", data))
-                    await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-                    fut = self.outbox_reader.create_waiter(saga_id, step.service)
-                    result = await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+                        payload.update(step.payload_builder(saga_id, "compensate", data))
+                    result = await self.transport.send_and_wait(step.service, "compensate", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery compensate error", service=step.service,
                                    saga_id=saga_id, error=str(e))
@@ -264,10 +226,6 @@ class RecoveryWorker:
 
         await self.wal.log(saga_id, "FAILED")
 
-    async def start_claim_worker(self):
-        """Start periodic XAUTOCLAIM worker for stuck messages."""
-        self._claim_task = asyncio.create_task(self._claim_loop())
-
     async def start_reconciliation(self):
         """Start periodic reconciliation worker (leader only)."""
         if self._reconciliation_task is not None:
@@ -277,47 +235,13 @@ class RecoveryWorker:
 
     async def stop(self):
         """Stop all recovery workers."""
-        for task in (self._claim_task, self._reconciliation_task):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        self._claim_task = None
-        self._reconciliation_task = None
-
-    async def _claim_loop(self):
-        """Periodically reclaim stuck messages in consumer groups.
-
-        Stream/group names derived by convention: ``{service}-commands`` / ``{service}-workers``.
-        """
-        while True:
+        if self._reconciliation_task:
+            self._reconciliation_task.cancel()
             try:
-                await asyncio.sleep(10)
-                for service in self.service_dbs:
-                    db = self.service_dbs[service]
-                    stream = f"{service}-commands"
-                    group = f"{service}-workers"
-                    try:
-                        claimed = await db.xautoclaim(
-                            stream, group, "recovery-worker",
-                            min_idle_time=IDLE_THRESHOLD_MS,
-                            start_id="0-0",
-                        )
-                        if claimed and claimed[1]:
-                            logger.info(
-                                "XAUTOCLAIM reclaimed messages",
-                                count=len(claimed[1]),
-                                stream=stream,
-                            )
-                    except aioredis.ResponseError:
-                        pass  # Consumer group may not exist yet
+                await self._reconciliation_task
             except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.error("XAUTOCLAIM error", error=str(e))
-                await asyncio.sleep(5)
+                pass
+        self._reconciliation_task = None
 
     async def _reconciliation_loop(self):
         """Periodically check data invariants and abort orphaned sagas."""
@@ -335,7 +259,7 @@ class RecoveryWorker:
     async def _reconcile(self):
         """Run application-provided reconciliation callback, if any."""
         if self.reconcile_fn:
-            result = self.reconcile_fn(self.service_dbs)
+            result = self.reconcile_fn()
             if asyncio.iscoroutine(result):
                 await result
 

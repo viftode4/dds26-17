@@ -1,8 +1,6 @@
 import asyncio
 import time
 
-import redis.asyncio as aioredis
-
 import structlog
 from orchestrator.definition import TransactionDefinition, Step
 from orchestrator.wal import WALEngine
@@ -61,50 +59,13 @@ class CircuitBreaker:
         return True
 
 
-class OutboxReader:
-    """Reads outbox stream events and dispatches them to per-saga asyncio Futures."""
-
-    def __init__(self):
-        self._waiters: dict[str, asyncio.Future] = {}
-
-    def create_waiter(self, saga_id: str, service: str) -> asyncio.Future:
-        key = f"{saga_id}:{service}"
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._waiters[key] = fut
-        return fut
-
-    def resolve(self, saga_id: str, service: str, event_data: dict):
-        key = f"{saga_id}:{service}"
-        fut = self._waiters.pop(key, None)
-        if fut and not fut.done():
-            fut.set_result(event_data)
-
-    def cancel_all(self, saga_id: str):
-        to_remove = [k for k in self._waiters if k.startswith(f"{saga_id}:")]
-        for key in to_remove:
-            fut = self._waiters.pop(key, None)
-            if fut and not fut.done():
-                fut.cancel()
-
-    def cleanup(self, saga_id: str):
-        """Remove stale waiters for a completed saga (prevents memory leak)."""
-        to_remove = [k for k in self._waiters if k.startswith(f"{saga_id}:")]
-        for key in to_remove:
-            fut = self._waiters.pop(key, None)
-            if fut and not fut.done():
-                fut.cancel()
-
-
 class _BaseExecutor:
     """Shared infrastructure for TwoPCExecutor and SagaExecutor."""
 
-    def __init__(self, service_dbs: dict[str, aioredis.Redis],
-                 outbox_reader: OutboxReader, wal: WALEngine,
+    def __init__(self, transport, wal: WALEngine,
                  circuit_breakers: dict[str, CircuitBreaker] | None = None,
                  metrics=None):
-        self.service_dbs = service_dbs
-        self.outbox_reader = outbox_reader
+        self.transport = transport
         self.wal = wal
         self.circuit_breakers = circuit_breakers or {}
         self.metrics = metrics
@@ -119,23 +80,14 @@ class _BaseExecutor:
                 return f"service_{step.service}_unavailable"
         return None
 
-    async def _send_command(self, step: Step, saga_id: str, action: str, context: dict):
-        """Send a command to a service's command stream."""
-        service = step.service
-        db = self.service_dbs[service]
-        stream = f"{service}-commands"
-        cmd = {"saga_id": saga_id, "action": action}
-        if step.payload_builder:
-            cmd.update(step.payload_builder(saga_id, action, context))
-        await db.xadd(stream, cmd, maxlen=10000, approximate=True)
-
     async def _try_step(self, step: Step, saga_id: str, action: str,
                          context: dict) -> dict:
-        """Execute a single step via stream command + outbox waiter."""
-        fut = self.outbox_reader.create_waiter(saga_id, step.service)
-        await self._send_command(step, saga_id, action, context)
+        """Execute a single step via transport send_and_wait."""
+        payload = {"saga_id": saga_id}
+        if step.payload_builder:
+            payload.update(step.payload_builder(saga_id, action, context))
         try:
-            return await asyncio.wait_for(fut, timeout=STEP_TIMEOUT)
+            return await self.transport.send_and_wait(step.service, action, payload, STEP_TIMEOUT)
         except asyncio.TimeoutError:
             return {"event": "failed", "reason": "timeout"}
 
@@ -190,14 +142,14 @@ class TwoPCExecutor(_BaseExecutor):
     """Real Two-Phase Commit: prepare (lock, no mutations) -> commit (apply) or abort (release)."""
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
-                      context: dict) -> dict:
+                      context: dict, tx_name: str = "") -> dict:
         err = self._check_circuit_breakers(tx_def.steps, saga_id)
         if err:
-            await self.wal.log(saga_id, "FAILED")
+            await self.wal.log_terminal(saga_id, "FAILED")
             return {"status": "failed", "error": err}
 
         # Phase 1: Prepare
-        await self.wal.log(saga_id, "PREPARING", context)
+        await self.wal.log(saga_id, "PREPARING", {**context, "protocol": "2pc", "tx_name": tx_name})
         votes = await self._broadcast("prepare", saga_id, tx_def.steps, context)
 
         # Record circuit breaker outcomes
@@ -218,13 +170,13 @@ class TwoPCExecutor(_BaseExecutor):
             # Phase 2a: COMMIT (irrevocable)
             await self.wal.log(saga_id, "COMMITTING", context)
             await self._verified_action("commit", "committed", saga_id, tx_def.steps, context)
-            await self.wal.log(saga_id, "COMPLETED")
+            await self.wal.log_terminal(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
             # Phase 2b: ABORT (release locks) — verified retry like commit
             await self.wal.log(saga_id, "ABORTING", context)
             await self._verified_action("abort", "aborted", saga_id, tx_def.steps, context)
-            await self.wal.log(saga_id, "FAILED")
+            await self.wal.log_terminal(saga_id, "FAILED")
             reason = "insufficient_resources"
             for _, vote in votes:
                 if isinstance(vote, dict) and vote.get("event") == "failed":
@@ -237,13 +189,13 @@ class SagaExecutor(_BaseExecutor):
     """Real Saga: execute (direct mutation) -> compensate in reverse on failure."""
 
     async def execute(self, tx_def: TransactionDefinition, saga_id: str,
-                      context: dict) -> dict:
+                      context: dict, tx_name: str = "") -> dict:
         err = self._check_circuit_breakers(tx_def.steps, saga_id)
         if err:
-            await self.wal.log(saga_id, "FAILED")
+            await self.wal.log_terminal(saga_id, "FAILED")
             return {"status": "failed", "error": err}
 
-        await self.wal.log(saga_id, "EXECUTING", context)
+        await self.wal.log(saga_id, "EXECUTING", {**context, "protocol": "saga", "tx_name": tx_name})
 
         # Sequential execute
         completed_steps = []
@@ -265,7 +217,7 @@ class SagaExecutor(_BaseExecutor):
 
         if len(completed_steps) == len(tx_def.steps):
             # All executed — done! No confirm phase needed.
-            await self.wal.log(saga_id, "COMPLETED")
+            await self.wal.log_terminal(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
             # Compensate completed steps in REVERSE order
@@ -273,5 +225,5 @@ class SagaExecutor(_BaseExecutor):
             await self.wal.log(saga_id, "COMPENSATING", comp_context)
             for step in reversed(completed_steps):
                 await self._verified_action("compensate", "compensated", saga_id, [step], context)
-            await self.wal.log(saga_id, "FAILED")
+            await self.wal.log_terminal(saga_id, "FAILED")
             return {"status": "failed", "error": failure_reason}

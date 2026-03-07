@@ -5,17 +5,17 @@
 #
 # Usage:
 #   from orchestrator import Orchestrator, TransactionDefinition, Step
-#   orch = Orchestrator(order_db, service_dbs, [my_tx], protocol="auto")
-#   await orch.start()
+#   orch = Orchestrator(order_db, transport, [my_tx], protocol="auto")
 #   result = await orch.execute("my_tx", context)
 
 from orchestrator.core import Orchestrator
 from orchestrator.definition import TransactionDefinition, Step
-from orchestrator.executor import TwoPCExecutor, SagaExecutor, OutboxReader, CircuitBreaker
+from orchestrator.executor import TwoPCExecutor, SagaExecutor, CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.recovery import RecoveryWorker
 from orchestrator.leader import LeaderElection
 from orchestrator.metrics import MetricsCollector, LatencyHistogram
+from orchestrator.transport import Transport
 
 __all__ = [
     "Orchestrator",
@@ -23,11 +23,11 @@ __all__ = [
     "Step",
     "TwoPCExecutor",
     "SagaExecutor",
-    "OutboxReader",
     "CircuitBreaker",
     "WALEngine",
     "RecoveryWorker",
     "LeaderElection",
     "MetricsCollector",
     "LatencyHistogram",
+    "Transport",
 ]

@@ -1,7 +1,5 @@
 import asyncio
 import json
-import os
-import socket
 import time
 import uuid
 
@@ -9,17 +7,11 @@ import redis.asyncio as aioredis
 
 import structlog
 from orchestrator.definition import TransactionDefinition
-from orchestrator.executor import TwoPCExecutor, SagaExecutor, OutboxReader, CircuitBreaker
+from orchestrator.executor import TwoPCExecutor, SagaExecutor, CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.metrics import MetricsCollector
 
 logger = structlog.get_logger("orchestrator.core")
-
-# Per-worker consumer group: each worker process must see ALL outbox events
-# (broadcast). PID ensures that with `-w 2` each Hypercorn fork gets its own
-# group — otherwise XREADGROUP splits messages between workers and Futures in
-# the wrong process never resolve.
-OUTBOX_CONSUMER_GROUP = f"orchestrator-{socket.gethostname()}-{os.getpid()}"
 
 
 MAX_CONCURRENT_CHECKOUTS = 200
@@ -38,67 +30,39 @@ class Orchestrator:
     """
 
     def __init__(self, order_db: aioredis.Redis,
-                 service_dbs: dict[str, aioredis.Redis],
+                 transport,
                  definitions: list[TransactionDefinition],
                  protocol: str = "auto"):
         self.order_db = order_db
-        self.service_dbs = service_dbs
         self.definitions = {d.name: d for d in definitions}
         self.protocol_mode = protocol  # "auto", "2pc", or "saga"
 
         self.wal = WALEngine(order_db)
         self.metrics = MetricsCollector()
-        self.outbox_reader = OutboxReader()
 
         # Backpressure: cap concurrent in-flight checkouts to prevent
         # cascading contention on shared Redis keys under load
         self._checkout_sem = asyncio.Semaphore(MAX_CONCURRENT_CHECKOUTS)
 
         # Shared circuit breakers — one per downstream service
+        services = {s.service for d in definitions for s in d.steps}
         self.circuit_breakers = {
             service: CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
-            for service in service_dbs
+            for service in services
         }
 
-        self.two_pc = TwoPCExecutor(service_dbs, self.outbox_reader, self.wal,
+        self.two_pc = TwoPCExecutor(transport, self.wal,
                                     self.circuit_breakers, self.metrics)
-        self.saga = SagaExecutor(service_dbs, self.outbox_reader, self.wal,
+        self.saga = SagaExecutor(transport, self.wal,
                                  self.circuit_breakers, self.metrics)
 
-        self._outbox_tasks: list[asyncio.Task] = []
-
     async def start(self):
-        """Start background outbox reader tasks (runs on all instances).
-
-        Stream names derived by convention: ``{service}-outbox``.
-        """
-        for service in self.service_dbs:
-            stream = f"{service}-outbox"
-            db = self.service_dbs[service]
-            # Create consumer group (idempotent). Use id="$" so historical events
-            # with no matching waiters are not replayed on fresh startup.
-            try:
-                await db.xgroup_create(stream, OUTBOX_CONSUMER_GROUP, id="$", mkstream=True)
-                logger.info("Outbox consumer group created", stream=stream)
-            except aioredis.ResponseError as e:
-                if "BUSYGROUP" not in str(e):
-                    raise
-            task = asyncio.create_task(
-                self._outbox_consumer(db, stream, service)
-            )
-            self._outbox_tasks.append(task)
-        logger.info("Orchestrator outbox readers started")
+        """No-op — transport lifecycle managed externally."""
+        pass
 
     async def stop(self):
-        """Stop background tasks."""
-        for task in self._outbox_tasks:
-            task.cancel()
-        for task in self._outbox_tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        self._outbox_tasks.clear()
+        """No-op — transport lifecycle managed externally."""
+        pass
 
     async def execute(self, tx_name: str, context: dict,
                       saga_id_override: str | None = None) -> dict:
@@ -123,22 +87,12 @@ class Orchestrator:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
 
-        await self.wal.log(saga_id, "STARTED", {
-            "protocol": protocol,
-            "tx_name": tx_name,
-            **context,
-        })
-
         # Execute and measure latency
         start = time.monotonic()
-        try:
-            if protocol == "2pc":
-                result = await self.two_pc.execute(tx_def, saga_id, context)
-            else:
-                result = await self.saga.execute(tx_def, saga_id, context)
-        finally:
-            # Clean up any stale outbox waiters for this saga
-            self.outbox_reader.cleanup(saga_id)
+        if protocol == "2pc":
+            result = await self.two_pc.execute(tx_def, saga_id, context, tx_name=tx_name)
+        else:
+            result = await self.saga.execute(tx_def, saga_id, context, tx_name=tx_name)
 
         duration = time.monotonic() - start
 
@@ -184,57 +138,3 @@ class Orchestrator:
             pipe.set(result_key, result_data, ex=60)
             pipe.publish(notify_channel, "done")
             await pipe.execute()
-
-    async def _outbox_consumer(self, db: aioredis.Redis, stream: str, service: str):
-        """Background task reading outbox events via XREADGROUP for exactly-once delivery.
-
-        On startup, XAUTOCLAIM reclaims any stale PEL entries from crashed instances
-        so they are not permanently lost. New messages are read with XREADGROUP using
-        '>' (only undelivered entries). Each message is ACKed after resolving its Future.
-        """
-        consumer_name = f"orchestrator-{uuid.uuid4().hex[:8]}"
-
-        # Reclaim stale pending entries from any crashed previous instance (min idle 5s)
-        try:
-            claimed = await db.xautoclaim(
-                stream, OUTBOX_CONSUMER_GROUP, consumer_name,
-                min_idle_time=5000, start_id="0-0",
-            )
-            pending_entries = claimed[1] if claimed else []
-            for msg_id, fields in (pending_entries or []):
-                if fields:
-                    saga_id = fields.get("saga_id", "")
-                    if saga_id:
-                        self.outbox_reader.resolve(saga_id, service, fields)
-                await db.xack(stream, OUTBOX_CONSUMER_GROUP, msg_id)
-            if pending_entries:
-                logger.info("Reclaimed stale outbox entries", stream=stream,
-                            count=len(pending_entries))
-        except Exception as e:
-            logger.warning("XAUTOCLAIM failed (non-fatal)", stream=stream, error=str(e))
-
-        # Main loop: read new undelivered messages
-        while True:
-            try:
-                messages = await db.xreadgroup(
-                    OUTBOX_CONSUMER_GROUP, consumer_name,
-                    {stream: ">"},
-                    count=50, block=100,
-                )
-                if not messages:
-                    continue
-                ack_ids = []
-                for _stream_name, entries in messages:
-                    for msg_id, fields in entries:
-                        saga_id = fields.get("saga_id", "")
-                        if saga_id:
-                            self.outbox_reader.resolve(saga_id, service, fields)
-                        ack_ids.append(msg_id)
-                # Batch ACK — single round-trip for the whole batch
-                if ack_ids:
-                    await db.xack(stream, OUTBOX_CONSUMER_GROUP, *ack_ids)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logger.error("Outbox consumer error", service=service, error=str(e))
-                await asyncio.sleep(1)
