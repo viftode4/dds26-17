@@ -79,6 +79,10 @@ class NatsTransport:
 class NatsOrchestratorTransport:
     """Implements orchestrator.transport.Transport using NATS request-reply."""
 
+    TRANSIENT_RETRIES = 6       # up to ~15s of retrying (0.5+1+2+4+4+4)
+    INITIAL_BACKOFF = 0.5
+    MAX_BACKOFF = 4.0
+
     def __init__(self, nats_transport: NatsTransport):
         self._transport = nats_transport
 
@@ -86,9 +90,22 @@ class NatsOrchestratorTransport:
                             payload: dict, timeout: float = 10.0) -> dict:
         subject = f"svc.{service}.{action}"
         msg = {**payload, "action": action}
-        try:
-            return await self._transport.request(subject, msg, timeout=timeout)
-        except asyncio.TimeoutError:
-            return {"event": "failed", "reason": "timeout"}
-        except Exception as e:
-            return {"event": "failed", "reason": str(e)}
+        backoff = self.INITIAL_BACKOFF
+        last_error = ""
+        for attempt in range(1, self.TRANSIENT_RETRIES + 1):
+            try:
+                return await self._transport.request(subject, msg, timeout=timeout)
+            except asyncio.TimeoutError:
+                last_error = "timeout"
+            except Exception as e:
+                err = str(e)
+                if "no responders" in err.lower() or "disconnected" in err.lower() or "connection" in err.lower():
+                    last_error = err
+                else:
+                    return {"event": "failed", "reason": err}
+            if attempt < self.TRANSIENT_RETRIES:
+                log.warning("NATS transient error, retrying",
+                            subject=subject, attempt=attempt, error=last_error)
+                await asyncio.sleep(min(backoff, self.MAX_BACKOFF))
+                backoff *= 2
+        return {"event": "failed", "reason": last_error}
