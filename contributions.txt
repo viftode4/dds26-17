@@ -1,2 +1,11 @@
-Vlad: architecture, implementation (2PC + Saga orchestrator, Redis Streams, Lua atomics, Sentinel HA, leader election, WAL crash recovery, idempotency, circuit breakers, observability), documentation, benchmarking.
-[Teammate name]: [contributions here]
+Contributions
+
+Vlad George Iftode:
+Primary architect and developer. Designed and implemented the hybrid 2PC/Saga orchestrator,
+Redis Streams (later NATS) inter-service communication, Lua atomic scripts, WAL-based crash
+recovery, HAProxy gateway, active-active architecture, comprehensive test suite (83 unit +
+6 integration tests), performance optimization pipeline, and benchmarking infrastructure.
+
+Daniel Popovici:
+Contributed to initial microservice implementations, Kubernetes configuration, fault tolerance
+testing (2PC/Saga validation), and 2PC bug fixes.

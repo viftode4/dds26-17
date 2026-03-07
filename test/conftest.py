@@ -10,7 +10,7 @@ import pytest
 import pytest_asyncio
 
 from orchestrator.definition import Step, TransactionDefinition
-from orchestrator.executor import CircuitBreaker, OutboxReader
+from orchestrator.executor import CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.metrics import MetricsCollector
 
@@ -42,9 +42,16 @@ def mock_redis():
     return _make_mock_redis()
 
 
+# ---------------------------------------------------------------------------
+# Mock Transport
+# ---------------------------------------------------------------------------
+
 @pytest.fixture
-def service_dbs():
-    return {"stock": _make_mock_redis(), "payment": _make_mock_redis()}
+def mock_transport():
+    """A mock Transport whose send_and_wait can be configured per test."""
+    transport = AsyncMock()
+    transport.send_and_wait = AsyncMock(return_value={"event": "ok"})
+    return transport
 
 
 # ---------------------------------------------------------------------------
@@ -57,17 +64,9 @@ async def mock_wal(mock_redis):
     wal = WALEngine(mock_redis)
     # Spy on log calls while keeping them cheap
     wal.log = AsyncMock()
+    wal.log_terminal = AsyncMock()
     wal.get_incomplete_sagas = AsyncMock(return_value={})
     return wal
-
-
-# ---------------------------------------------------------------------------
-# OutboxReader
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def outbox_reader():
-    return OutboxReader()
 
 
 # ---------------------------------------------------------------------------

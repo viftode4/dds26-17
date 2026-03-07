@@ -27,14 +27,16 @@ def _make_orchestrator(protocol: str = "auto") -> Orchestrator:
     order_db.pipeline.return_value.__aenter__ = AsyncMock(return_value=pipe_mock)
     order_db.pipeline.return_value.__aexit__ = AsyncMock(return_value=False)
 
-    service_dbs = {"stock": AsyncMock(), "payment": AsyncMock()}
+    transport = AsyncMock()
+    transport.send_and_wait = AsyncMock(return_value={"event": "ok"})
     tx_def = TransactionDefinition("checkout", [
         Step("stock", "stock"),
         Step("payment", "payment"),
     ])
-    orch = Orchestrator(order_db, service_dbs, [tx_def], protocol=protocol)
+    orch = Orchestrator(order_db, transport, [tx_def], protocol=protocol)
     # Replace WAL with a no-op mock so tests don't touch Redis
     orch.wal.log = AsyncMock()
+    orch.wal.log_terminal = AsyncMock()
     orch.wal.get_incomplete_sagas = AsyncMock(return_value={})
     return orch
 
