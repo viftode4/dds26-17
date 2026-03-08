@@ -6,7 +6,7 @@ services:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     ports:
       - "8000:80"
-      - "[::1]:8000:80"
+      # - "[::1]:8000:80"
     depends_on:
       order-service-1:
         condition: service_healthy
