@@ -73,6 +73,8 @@ Services run **Starlette** (ASGI framework) with **Granian** as the HTTP server 
 - Python 3.11+ (for running tests and benchmarks locally)
 - ~4 GB RAM available for Docker
 
+For the Kubernetes deployment, see [Kubernetes Deployment (Minikube)](#kubernetes-deployment-minikube) below.
+
 ## Quick Start
 
 ### 1. Start the system
@@ -134,6 +136,80 @@ To also remove volumes (reset all data):
 ```bash
 docker compose down -v
 ```
+
+## Kubernetes Deployment (Minikube)
+
+A minikube-based deployment is provided as a scalable alternative to docker-compose.
+It mirrors the same architecture but replaces HAProxy with nginx and uses the
+[Bitnami Valkey Helm chart](https://github.com/bitnami/charts/tree/main/bitnami/valkey)
+for Redis with Sentinel.
+
+### Prerequisites
+
+- [minikube](https://minikube.sigs.k8s.io/docs/start/) v1.32+
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [Helm](https://helm.sh/docs/intro/install/) v3
+
+### Deploy
+
+```bash
+./minikube-deploy.sh
+```
+
+The script:
+1. Starts minikube (if not already running) with `--memory=8192 --cpus=8`
+2. Builds all Docker images inside minikube's Docker daemon (so no registry is needed)
+3. Deploys three Valkey clusters (one per service) with Sentinel via Helm
+4. Deploys NATS, the application services, and the nginx gateway into the `distributed-systems` namespace
+
+When complete, the gateway URL is printed:
+
+```
+Gateway: http://<minikube-ip>:30080
+```
+
+Test with:
+
+```bash
+MINIKUBE_IP=$(minikube ip)
+curl http://${MINIKUBE_IP}:30080/orders/health
+curl http://${MINIKUBE_IP}:30080/stock/health
+curl http://${MINIKUBE_IP}:30080/payment/health
+```
+
+### Teardown
+
+```bash
+./minikube-teardown.sh
+```
+
+Removes all application resources, Helm releases, and the `distributed-systems` namespace.
+
+### Monitoring resource usage
+
+Run in a separate terminal while load testing:
+
+```bash
+watch -n2 'minikube ssh "docker stats --no-stream \
+  --format \"table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\" 2>/dev/null \
+  | grep -E \"k8s_(order|stock|payment|nginx|valkey|nats)\" \
+  | grep -v POD | grep distributed-systems"'
+```
+
+`CPUPerc` is relative to one full CPU — `100%` = 1 CPU, `200%` = 2 CPUs. If a
+container is at or near its limit it is being throttled by the CFS scheduler.
+
+### Key differences from docker-compose
+
+| | docker-compose | minikube |
+|---|---|---|
+| Gateway | HAProxy (leastconn) | nginx (round-robin via kube-proxy) |
+| Redis | `valkey/valkey:8.1` direct | Bitnami Valkey 9.x Helm chart |
+| Sentinel | 3 standalone containers | Sidecar per Valkey pod (2 replicas = 3 sentinels) |
+| Shared code | Volume-mounted at runtime | Baked into image at build time |
+| Service discovery | Docker DNS | CoreDNS + kube-proxy |
+| Entry point | `localhost:8000` | `<minikube-ip>:30080` (NodePort) |
+| Namespace | — | `distributed-systems` |
 
 ## Stress Testing / Benchmarking
 
@@ -273,6 +349,16 @@ The WAL ensures the saga is either completed or compensated on recovery.
 ├── haproxy.cfg             # HAProxy reverse proxy config
 ├── sentinel.conf           # Redis Sentinel configuration
 ├── sentinel-entrypoint.sh  # Sentinel startup script
+├── minikube-deploy.sh      # Minikube full deployment script
+├── minikube-teardown.sh    # Minikube teardown script
+├── k8s/                    # Kubernetes manifests
+│   ├── order-app.yaml
+│   ├── stock-app.yaml
+│   ├── payment-app.yaml
+│   ├── gateway.yaml        # nginx ConfigMap + Service (NodePort 30080) + Deployment
+│   └── nats.yaml
+├── helm-config/
+│   └── redis-helm-values.yaml  # Bitnami Valkey chart values (sentinel, resources)
 ├── requirements.txt        # Python dependencies (top-level)
 ├── contributions.txt       # Team contributions
 └── README.md               # This file
