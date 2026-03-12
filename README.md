@@ -46,7 +46,7 @@ crash recovery, and horizontal scaling.
 - **Circuit breakers** per service (fail-fast under degradation)
 - **Idempotent checkout** (exactly-once via SET NX keys)
 - **Forward recovery** (retry confirms with exponential backoff before compensating)
-- **Adaptive reservation TTL** = f(p99 latency)
+- **Reservation TTL** = 60s (prevents resource leaks)
 
 ### Orchestrator Package
 
