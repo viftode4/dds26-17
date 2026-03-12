@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: stock-service
+  name: payment-service
 spec:
   type: ClusterIP
   selector:
-    app: stock
+    app: payment
   ports:
     - port: 5000
       name: http
@@ -14,20 +14,20 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: stock-deployment
+  name: payment-deployment
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: stock
+      app: payment
   template:
     metadata:
       labels:
-        app: stock
+        app: payment
     spec:
       containers:
-        - name: stock
-          image: stock:latest
+        - name: payment
+          image: payment:latest
           imagePullPolicy: IfNotPresent
           command: ["granian"]
           args: ["--interface", "asgi", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--loop", "uvloop", "app:app"]
@@ -37,7 +37,7 @@ spec:
             - name: NATS_URL
               value: "nats://nats:4222"
             - name: REDIS_HOST
-              value: stock-redis-valkey
+              value: payment-redis-valkey
             - name: REDIS_PORT
               value: "6379"
             - name: REDIS_PASSWORD
@@ -45,7 +45,7 @@ spec:
             - name: REDIS_DB
               value: "0"
             - name: REDIS_SENTINEL_SERVICE
-              value: "stock-master"
+              value: "payment-master"
             - name: SENTINEL_HOSTS
               value: "order-redis-valkey-headless:26379,stock-redis-valkey-headless:26379,payment-redis-valkey-headless:26379"
           resources:

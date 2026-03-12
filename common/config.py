@@ -71,7 +71,7 @@ def create_redis_connection(
         if not sentinel_service_name:
             # Fall back to direct connection
             config = get_redis_config(prefix)
-            return aioredis.Redis(**config, max_connections=512, **merged)
+            return aioredis.Redis(**config, max_connections=1024, **merged)
 
         password = os.environ.get(f"{prefix}REDIS_PASSWORD", "redis")
         sentinel = Sentinel(
@@ -81,14 +81,14 @@ def create_redis_connection(
             # password: auth for the actual Redis master/replica connections
             password=password,
             db=int(os.environ.get(f"{prefix}REDIS_DB", 0)),
-            max_connections=512,
+            max_connections=1024,
             **merged,
         )
         return sentinel.master_for(sentinel_service_name)
 
     # Direct connection fallback
     config = get_redis_config(prefix)
-    return aioredis.Redis(**config, max_connections=512, **merged)
+    return aioredis.Redis(**config, max_connections=1024, **merged)
 
 
 def create_replica_connection(
