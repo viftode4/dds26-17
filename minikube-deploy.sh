@@ -16,7 +16,7 @@ REDIS_CHART_VERSION="5.4.3"
 echo "==> Checking minikube status..."
 if ! minikube status &>/dev/null; then
     echo "==> Starting minikube..."
-    minikube start --memory=8192 --cpus=8
+    minikube start --memory=4096 --cpus=6
 fi
 
 echo "==> Pointing docker to minikube's daemon..."
