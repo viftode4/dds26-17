@@ -5,7 +5,7 @@ metadata:
 spec:
   type: ClusterIP
   selector:
-    component: order
+    app: order
   ports:
     - port: 5000
       name: http
@@ -16,39 +16,85 @@ kind: Deployment
 metadata:
   name: order-deployment
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      component: order
+      app: order
   template:
     metadata:
       labels:
-        component: order
+        app: order
     spec:
       containers:
         - name: order
           image: order:latest
-          resources:
-            limits:
-              memory: "1Gi"
-              cpu: "1"
-            requests:
-              memory: "1Gi"
-              cpu: "1"
-          command: ["gunicorn"]
-          args: ["-b", "0.0.0.0:5000", "app:app"]
+          imagePullPolicy: IfNotPresent
+          command: ["granian"]
+          args: ["--interface", "asgi", "--host", "0.0.0.0", "--port", "5000", "--workers", "2", "--loop", "uvloop", "app:app"]
           ports:
             - containerPort: 5000
           env:
-            - name: USER_SERVICE_URL
-              value: "user-service"
-            - name: STOCK_SERVICE_URL
-              value: "stock-service"
+            - name: GATEWAY_URL
+              value: "http://gateway:80"
+            - name: NATS_URL
+              value: "nats://nats:4222"
             - name: REDIS_HOST
-              value: redis-master
+              value: order-redis-valkey
             - name: REDIS_PORT
-              value: '6379'
+              value: "6379"
             - name: REDIS_PASSWORD
               value: "redis"
             - name: REDIS_DB
               value: "0"
+            - name: REDIS_SENTINEL_SERVICE
+              value: "order-master"
+            - name: STOCK_REDIS_HOST
+              value: stock-redis-valkey
+            - name: STOCK_REDIS_PORT
+              value: "6379"
+            - name: STOCK_REDIS_PASSWORD
+              value: "redis"
+            - name: STOCK_REDIS_DB
+              value: "0"
+            - name: STOCK_REDIS_SENTINEL_SERVICE
+              value: "stock-master"
+            - name: PAYMENT_REDIS_HOST
+              value: payment-redis-valkey
+            - name: PAYMENT_REDIS_PORT
+              value: "6379"
+            - name: PAYMENT_REDIS_PASSWORD
+              value: "redis"
+            - name: PAYMENT_REDIS_DB
+              value: "0"
+            - name: PAYMENT_REDIS_SENTINEL_SERVICE
+              value: "payment-master"
+            - name: SENTINEL_HOSTS
+              value: "order-redis-valkey-headless:26379,stock-redis-valkey-headless:26379,payment-redis-valkey-headless:26379"
+            - name: INSTANCE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 500m
+            limits:
+              memory: 512Mi
+              cpu: 3000m
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            failureThreshold: 12
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5000
+            periodSeconds: 10

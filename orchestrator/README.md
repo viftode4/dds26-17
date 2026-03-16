@@ -133,9 +133,8 @@ from orchestrator import (
   half-open probing
 - **Forward recovery**: Confirm failures are retried with exponential backoff
   before falling back to compensation
-- **Adaptive reservation TTL**: TTL = f(p99 latency) — automatically adjusts
-  to current system load: `max(30, min(120, int(p99_ms / 1000 * 3) + 10))`,
-  clamped to 30–120 seconds
+- **Reservation TTL**: Configurable TTL for locks/reservations (default 60s in the
+  provided payload builders) to prevent resource leaks during long-tail failures
 - **Transport-agnostic**: Any messaging system implementing the `Transport`
   protocol can be used (NATS, Redis Streams, gRPC, etc.)
 - **AOF durability**: Valkey AOF persistence ensures committed data survives restarts
@@ -190,8 +189,6 @@ Timing constants:
 | `CircuitBreaker(recovery_timeout=)` | `30.0` | Seconds before half-open probe |
 | `MetricsCollector(window_size=)` | `100` | Sliding window for abort rate |
 | `STEP_TIMEOUT` | `10.0s` | Per-step response timeout |
-| `CONFIRM_MAX_RETRIES` | `3` | Forward recovery attempts |
-| `WALEngine.MAX_LEN` | `50000` | Max WAL stream entries (trimmed on append) |
 | `RECONCILIATION_INTERVAL` | `60` | Seconds between reconciliation runs |
 | `ORPHAN_SAGA_TIMEOUT` | `120` | Seconds before orphaned sagas are aborted |
 

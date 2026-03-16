@@ -73,26 +73,29 @@ async def handle_command(fields: dict) -> str:
         items = _parse_items(fields)
         ttl = int(fields.get("ttl", "30"))
         result = await _2pc_prepare(saga_id, items, ttl)
-        return "prepared" if result == 1 else "failed"
+        outcome = "prepared" if result == 1 else "failed"
     elif action == "commit":
         items = _parse_items(fields)
         await _2pc_commit(saga_id, items)
-        return "committed"
+        outcome = "committed"
     elif action == "abort":
         items = _parse_items(fields)
         await _2pc_abort(saga_id, items)
-        return "aborted"
+        outcome = "aborted"
     elif action == "execute":
         items = _parse_items(fields)
         result = await _saga_execute(saga_id, items)
-        return "executed" if result == 1 else "failed"
+        outcome = "executed" if result == 1 else "failed"
     elif action == "compensate":
         items = _parse_items(fields)
         await _saga_compensate(saga_id, items)
-        return "compensated"
+        outcome = "compensated"
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
         return "failed"
+
+    log.info("Command handled", action=action, saga_id=saga_id, result=outcome)
+    return outcome
 
 
 async def handle_nats_message(msg):
