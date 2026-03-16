@@ -429,8 +429,3 @@ docker compose logs -f payment-service payment-service-2
 See [`docs/plans/2026-02-15-system-design.md`](docs/plans/2026-02-15-system-design.md)
 for the full system design, protocol descriptions, failure analysis, and
 architectural decisions.
-
-
-# KNOWN ISSUES BACKLOG
-
-We can write all issues we find here. Then check the fixed ones.

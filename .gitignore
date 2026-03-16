@@ -52,6 +52,7 @@ tla/*_TTrace_*
 
 # Benchmark results
 *.csv
+test/benchmark_results/
 
 # Serena
 .serena/

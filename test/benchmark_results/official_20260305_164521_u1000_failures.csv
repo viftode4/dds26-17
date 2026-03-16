@@ -1,3 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/orders/checkout/[order_id],"CatchResponseError('{""error"":""Checkout failed: timeout""}')",1
-POST,/orders/checkout/[order_id],"CatchResponseError('{""error"":""Order already paid""}')",12236

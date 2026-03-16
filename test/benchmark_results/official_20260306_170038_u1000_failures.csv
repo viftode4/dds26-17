@@ -1,2 +1,0 @@
-Method,Name,Error,Occurrences
-POST,/orders/checkout/[order_id],"CatchResponseError('{""error"":""Order already paid""}')",17470
