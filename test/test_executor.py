@@ -91,6 +91,21 @@ class TestTwoPCExecutor:
         wal_steps = [c.args[1] for c in mock_wal.log.call_args_list if c.args[0] == saga_id]
         assert wal_steps == ["PREPARING", "COMMITTING"]
         mock_wal.log_terminal.assert_called_with(saga_id, "COMPLETED")
+        # Task 1.8: verify prepare and commit were actually sent to BOTH services
+        prepare_calls = [
+            c for c in mock_transport.send_and_wait.call_args_list
+            if c.args[1] == "prepare"
+        ]
+        commit_calls = [
+            c for c in mock_transport.send_and_wait.call_args_list
+            if c.args[1] == "commit"
+        ]
+        assert len(prepare_calls) == 2, f"Expected 2 prepare calls, got {len(prepare_calls)}"
+        assert len(commit_calls) == 2, f"Expected 2 commit calls, got {len(commit_calls)}"
+        prepare_services = {c.args[0] for c in prepare_calls}
+        assert prepare_services == {"stock", "payment"}, (
+            f"Prepare not sent to both services: {prepare_services}"
+        )
 
     @pytest.mark.asyncio
     async def test_2pc_prepare_fails(self, mock_transport, mock_wal,
@@ -250,6 +265,14 @@ class TestSagaExecutor:
             if c.args[0] == "stock" and c.args[1] == "compensate"
         ]
         assert len(compensate_calls) >= 1
+        # Task 1.10: payment must NOT have been asked to compensate (it never executed)
+        payment_compensate_calls = [
+            c for c in mock_transport.send_and_wait.call_args_list
+            if c.args[0] == "payment" and c.args[1] == "compensate"
+        ]
+        assert len(payment_compensate_calls) == 0, (
+            "Payment should NOT be compensated — it never executed"
+        )
         wal_steps = [c.args[1] for c in mock_wal.log.call_args_list if c.args[0] == saga_id]
         assert wal_steps == ["EXECUTING", "COMPENSATING"]
         mock_wal.log_terminal.assert_called_with(saga_id, "FAILED")

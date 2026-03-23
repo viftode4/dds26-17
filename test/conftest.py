@@ -1,4 +1,4 @@
-"""Shared fixtures for orchestrator unit tests (no Docker required)."""
+"""Shared fixtures for orchestrator unit and integration tests."""
 from __future__ import annotations
 
 import asyncio
@@ -127,3 +127,37 @@ def docker_compose(*args, check=False):
         ["docker", "compose", *args],
         capture_output=True, text=True, check=check, timeout=60,
     )
+
+
+# ---------------------------------------------------------------------------
+# Integration test isolation (task 0.4)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _flush_databases_between_integration_tests(request):
+    """Flush all Redis databases before each integration test.
+
+    Only runs when the test is marked with @pytest.mark.integration.
+    Uses `docker compose exec` to issue FLUSHALL on each service DB.
+    Set SKIP_DB_FLUSH=1 to disable (e.g. when running against a remote stack).
+    """
+    import os
+    if "integration" not in request.keywords:
+        yield
+        return
+    if os.environ.get("SKIP_DB_FLUSH", "").lower() in ("1", "true", "yes"):
+        yield
+        return
+
+    db_containers = [
+        ("order-db",   "redis-cli", "-a", "redis", "FLUSHALL"),
+        ("stock-db",   "redis-cli", "-a", "redis", "FLUSHALL"),
+        ("payment-db", "redis-cli", "-a", "redis", "FLUSHALL"),
+    ]
+    for container, *cmd in db_containers:
+        subprocess.run(
+            ["docker", "compose", "exec", "-T", container, *cmd],
+            capture_output=True, text=True, timeout=15, check=False,
+        )
+    yield
+

@@ -142,6 +142,10 @@ class TestMicroservices(unittest.TestCase):
         stock_after_subtract: int = tu.find_item(item_id1)['stock']
         self.assertEqual(stock_after_subtract, 14)
 
+        # Task 1.11: also verify item2 stock decreased (was missing before)
+        stock_item2_after: int = tu.find_item(item_id2)['stock']
+        self.assertEqual(stock_item2_after, 14)  # started at 15 (after the add back), sold 1
+
         credit: int = tu.find_user(user_id)['credit']
         self.assertEqual(credit, 5)
 

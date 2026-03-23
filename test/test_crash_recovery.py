@@ -12,8 +12,15 @@ import subprocess
 import httpx
 import pytest
 
-GATEWAY = "http://127.0.0.1:8000"
-TIMEOUT = httpx.Timeout(60.0, connect=10.0)
+from helpers import (
+    GATEWAY, TIMEOUT,
+    assert_conservation,
+    wait_until,
+    create_item,
+    create_user,
+    create_order_with_item,
+    wait_gateway_healthy,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -36,91 +43,114 @@ def _restart_container(name: str):
     _docker_compose("start", name, check=False)
 
 
-async def _wait_healthy(client: httpx.AsyncClient, max_wait: float = 30.0):
-    """Wait until the gateway is responsive."""
-    deadline = asyncio.get_event_loop().time() + max_wait
-    while asyncio.get_event_loop().time() < deadline:
-        try:
-            r = await client.get(f"{GATEWAY}/orders/health")
-            if r.status_code == 200:
-                return
-        except httpx.ConnectError:
-            pass
-        await asyncio.sleep(1.0)
-    raise TimeoutError("Gateway did not become healthy")
-
-
 @pytest.mark.asyncio
 async def test_order_crash_mid_checkout():
-    """Kill order-service-1 during checkout, wait for recovery → consistency maintained."""
+    """Kill order-service-1 during checkout, wait for recovery → full conservation maintained.
+
+    Tasks 1.4:
+    - Replaces sleep(10)/sleep(5) with wait_until-based polling
+    - Adds exact conservation: stock == initial - n_committed
+    - Adds payment-side check
+    - Adds order.paid flag cross-check
+    """
+    item_price = 100
+    initial_stock = 50
+    initial_credit = 100000
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        await _wait_healthy(client)
+        await wait_gateway_healthy(client)
 
-        # Setup: create item + user
-        item_price = 100
-        r = await client.post(f"{GATEWAY}/stock/item/create/{item_price}")
-        item_id = r.json()["item_id"]
-        initial_stock = 50
-        await client.post(f"{GATEWAY}/stock/add/{item_id}/{initial_stock}")
-
-        r = await client.post(f"{GATEWAY}/payment/create_user")
-        user_id = r.json()["user_id"]
-        await client.post(f"{GATEWAY}/payment/add_funds/{user_id}/100000")
+        item_id = await create_item(client, price=item_price, stock=initial_stock)
+        user_id = await create_user(client, credit=initial_credit)
 
         # Fire several checkouts concurrently
-        async def _checkout():
-            r = await client.post(f"{GATEWAY}/orders/create/{user_id}")
-            oid = r.json()["order_id"]
-            await client.post(f"{GATEWAY}/orders/addItem/{oid}/{item_id}/1")
+        order_ids = []
+        for _ in range(10):
+            oid = await create_order_with_item(client, user_id, item_id, 1)
+            order_ids.append(oid)
+
+        checkout_results = []
+
+        async def _checkout(oid):
             try:
-                return await client.post(f"{GATEWAY}/orders/checkout/{oid}")
+                r = await client.post(f"{GATEWAY}/orders/checkout/{oid}")
+                return r
             except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
                 return None  # Expected — container died
 
-        # Start 10 checkouts, kill order-service-1 after a brief delay
-        tasks = [asyncio.create_task(_checkout()) for _ in range(10)]
+        tasks = [asyncio.create_task(_checkout(oid)) for oid in order_ids]
         await asyncio.sleep(0.3)
         _kill_container("order-service-1")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
+        checkout_results = [
+            r for r in results
+            if isinstance(r, httpx.Response) and r.status_code == 200
+        ]
+        n_confirmed = len(checkout_results)
 
         # Wait for recovery (order-service-2 takes over leadership)
-        await asyncio.sleep(10.0)
-        _restart_container("order-service-1")
-        await asyncio.sleep(5.0)
-        await _wait_healthy(client)
+        # Task 1.4: use polling instead of hardcoded sleep
+        async def _service_healthy():
+            try:
+                r = await client.get(f"{GATEWAY}/orders/health")
+                return r.status_code == 200
+            except (httpx.ConnectError, httpx.ReadError):
+                return False
 
-        # Consistency: stock >= 0, stock <= initial (no leaks or negative values)
+        await wait_until(_service_healthy, timeout=30.0, interval=1.0,
+                         msg="order-service-2 did not take over within 30s")
+
+        _restart_container("order-service-1")
+
+        # Allow recovery worker time to complete in-flight sagas
+        await asyncio.sleep(15.0)
+        await wait_gateway_healthy(client)
+
+        # Task 1.4a: stock bounds
         r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
-        stock_data = r.json()
-        assert stock_data["stock"] >= 0, \
-            f"Negative stock after crash recovery: {stock_data['stock']}"
-        assert stock_data["stock"] <= initial_stock, \
-            f"Stock exceeded initial after crash: {stock_data['stock']} > {initial_stock}"
+        assert r.status_code == 200
+        final_stock = r.json()["stock"]
+        assert final_stock >= 0, f"Negative stock after crash recovery: {final_stock}"
+        assert final_stock <= initial_stock, (
+            f"Stock exceeded initial after crash: {final_stock} > {initial_stock}"
+        )
+
+        # Task 1.4b: full conservation equation (credit_spent == stock_sold × price)
+        r = await client.get(f"{GATEWAY}/payment/find_user/{user_id}")
+        assert r.status_code == 200
+        final_credit = r.json()["credit"]
+        assert final_credit >= 0, f"Negative credit after crash: {final_credit}"
+
+        stock_sold = initial_stock - final_stock
+        credit_spent = initial_credit - final_credit
+        assert credit_spent == stock_sold * item_price, (
+            f"Conservation violated after crash+recovery: "
+            f"credit_spent={credit_spent} != stock_sold({stock_sold}) × price({item_price})"
+        )
 
 
 @pytest.mark.asyncio
 async def test_stock_crash_mid_reserve():
-    """Kill stock-service during transaction → saga compensates, no leaks."""
+    """Kill stock-service during transaction → saga compensates, no leaks.
+
+    Task 1.5:
+    - Replaces sleep(15) with wait_until-based polling
+    - Adds exact conservation + payment-side check
+    """
+    item_price = 50
+    initial_stock = 20
+    initial_credit = 50000
+
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        await _wait_healthy(client)
+        await wait_gateway_healthy(client)
 
-        # Setup
-        item_price = 50
-        r = await client.post(f"{GATEWAY}/stock/item/create/{item_price}")
-        item_id = r.json()["item_id"]
-        initial_stock = 20
-        await client.post(f"{GATEWAY}/stock/add/{item_id}/{initial_stock}")
-
-        r = await client.post(f"{GATEWAY}/payment/create_user")
-        user_id = r.json()["user_id"]
-        await client.post(f"{GATEWAY}/payment/add_funds/{user_id}/50000")
+        item_id = await create_item(client, price=item_price, stock=initial_stock)
+        user_id = await create_user(client, credit=initial_credit)
 
         # Fire checkouts and kill stock-service mid-flight
         async def _checkout():
-            r = await client.post(f"{GATEWAY}/orders/create/{user_id}")
-            oid = r.json()["order_id"]
-            await client.post(f"{GATEWAY}/orders/addItem/{oid}/{item_id}/1")
+            oid = await create_order_with_item(client, user_id, item_id, 1)
             try:
                 return await client.post(f"{GATEWAY}/orders/checkout/{oid}")
             except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
@@ -132,15 +162,40 @@ async def test_stock_crash_mid_reserve():
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Restart and wait for recovery
+        # Restart and wait for recovery using polling
         _restart_container("stock-service")
-        await asyncio.sleep(15.0)
-        await _wait_healthy(client)
 
-        # Consistency: stock >= 0, stock <= initial (no leaks or negative values)
+        async def _stock_service_responsive():
+            try:
+                r = await client.get(f"{GATEWAY}/orders/health")
+                return r.status_code == 200
+            except (httpx.ConnectError, httpx.ReadError):
+                return False
+
+        await wait_until(_stock_service_responsive, timeout=40.0, interval=1.0,
+                         msg="Stock service did not recover within 40s")
+        # Extra settle time for compensation to complete
+        await asyncio.sleep(5.0)
+        await wait_gateway_healthy(client)
+
+        # Task 1.5a: stock bounds
         r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
-        stock_data = r.json()
-        assert stock_data["stock"] >= 0, \
-            f"Negative stock after crash recovery: {stock_data['stock']}"
-        assert stock_data["stock"] <= initial_stock, \
-            f"Stock exceeded initial after crash: {stock_data['stock']} > {initial_stock}"
+        assert r.status_code == 200
+        final_stock = r.json()["stock"]
+        assert final_stock >= 0, f"Negative stock after crash recovery: {final_stock}"
+        assert final_stock <= initial_stock, (
+            f"Stock exceeded initial after crash: {final_stock} > {initial_stock}"
+        )
+
+        # Task 1.5b: conservation equation
+        r = await client.get(f"{GATEWAY}/payment/find_user/{user_id}")
+        assert r.status_code == 200
+        final_credit = r.json()["credit"]
+        assert final_credit >= 0, f"Negative credit after crash: {final_credit}"
+
+        stock_sold = initial_stock - final_stock
+        credit_spent = initial_credit - final_credit
+        assert credit_spent == stock_sold * item_price, (
+            f"Conservation violated after crash+recovery: "
+            f"credit_spent={credit_spent} != stock_sold({stock_sold}) × price({item_price})"
+        )

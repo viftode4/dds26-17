@@ -107,7 +107,8 @@ async def test_recover_preparing_aborts(mock_sleep):
         c for c in transport.send_and_wait.call_args_list
         if c.args[1] == "abort"
     ]
-    assert len(abort_calls) >= 2
+    # Task 1.9: tightened from >= 2 to == 2 (exactly one abort per service)
+    assert len(abort_calls) == 2, f"Expected exactly 2 abort calls, got {len(abort_calls)}"
     assert wal.log.call_args_list[-1].args == ("saga-prep", "FAILED")
 
 
@@ -194,7 +195,8 @@ async def test_recover_aborting(mock_sleep):
         c for c in transport.send_and_wait.call_args_list
         if c.args[1] == "abort"
     ]
-    assert len(abort_calls) >= 2
+    # Task 1.9: tightened from >= 2 to == 2 (exactly one abort per service)
+    assert len(abort_calls) == 2, f"Expected exactly 2 abort calls, got {len(abort_calls)}"
     assert wal.log.call_args_list[-1].args == ("saga-abort", "FAILED")
 
 
