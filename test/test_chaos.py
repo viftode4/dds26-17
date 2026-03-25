@@ -309,20 +309,32 @@ async def test_redis_failover_data_loss_detection():
         await asyncio.sleep(20.0)
 
         tracker = OutcomeTracker()
-        # Try checkouts after failover — system must not corrupt data
+        # Try checkouts after failover — system must not corrupt data.
+        # Cannot use checkout() helper here because addItem may fail if
+        # the item was lost during failover (not replicated to promoted replica).
         for _ in range(3):
             try:
-                r = await checkout(client, user_id, item_id, 1)
+                r_create = await client.post(f"{GATEWAY}/orders/create/{user_id}")
+                if r_create.status_code != 200:
+                    tracker.record_response(r_create)
+                    continue
+                order_id = r_create.json()["order_id"]
+                r_add = await client.post(f"{GATEWAY}/orders/addItem/{order_id}/{item_id}/1")
+                if r_add.status_code != 200:
+                    tracker.record_response(r_add)
+                    continue
+                r = await client.post(f"{GATEWAY}/orders/checkout/{order_id}")
                 tracker.record_response(r)
             except (httpx.ReadError, httpx.RemoteProtocolError,
                     httpx.ConnectError, httpx.TimeoutException) as e:
                 tracker.record_exception(e)
 
-        # Restart stock-db
+        # Restart stock-db and services (refresh connection pools + reload Lua)
         _docker_compose("start", "stock-db")
         await asyncio.sleep(10.0)
-        _docker_compose("restart", "stock-service", "stock-service-2")
-        await asyncio.sleep(10.0)
+        _docker_compose("restart", "stock-service", "stock-service-2",
+                        "order-service-1", "order-service-2", "gateway")
+        await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 
         # Check stock/find works
@@ -389,8 +401,8 @@ async def test_wal_survives_redis_failover():
         _docker_compose("start", "order-db")
         await asyncio.sleep(10.0)
 
-        # Restart order services to reconnect to new master
-        _docker_compose("restart", "order-service-1", "order-service-2")
+        # Restart order services + gateway to reconnect to new master
+        _docker_compose("restart", "order-service-1", "order-service-2", "gateway")
         await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 

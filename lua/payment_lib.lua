@@ -46,7 +46,9 @@ end
 -- KEYS[1] = user:{user_id}
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
--- ARGV: saga_id
+-- ARGV: saga_id, amount, user_id
+--   amount/user_id are used to re-apply the deduction if prepare
+--   data was lost during a Redis Sentinel failover.
 local function payment_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
 
@@ -54,7 +56,17 @@ local function payment_2pc_commit(KEYS, ARGV)
     local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'committed' then return 1 end
 
-    -- Delete lock key (amount already deducted in prepare)
+    -- Safety: if prepare data was lost (Redis Sentinel failover during 2PC),
+    -- re-apply the credit deduction.  In 2PC the commit decision is irrevocable.
+    if status ~= 'prepared' then
+        local amount = tonumber(ARGV[2])
+        if amount and amount > 0 then
+            redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
+            redis.call('HSET', KEYS[3], 'amount', tostring(amount))
+        end
+    end
+
+    -- Delete lock key (amount already deducted in prepare or above)
     redis.call('DEL', KEYS[2])
 
     redis.call('HSET', KEYS[3], 'status', 'committed')

@@ -103,6 +103,14 @@ async def handle_nats_message(msg):
     saga_id = fields.get("saga_id", "")
     try:
         event = await handle_command(fields)
+        # Ensure mutating writes reach at least one replica before confirming.
+        # Prevents data loss during Sentinel failover between our response and
+        # the orchestrator's next action (e.g. commit after prepare).
+        if event in ("prepared", "committed", "executed", "aborted", "compensated"):
+            try:
+                await db.execute_command("WAIT", 1, 5000)
+            except Exception:
+                log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":
             response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
         else:
@@ -135,7 +143,10 @@ async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [f"saga:{saga_id}:stock:status"]
-    await db.fcall("stock_2pc_commit", len(keys), *keys, saga_id, str(n))
+    args = [saga_id, str(n)]
+    for item_id, amount in items:
+        args += [item_id, str(amount)]
+    await db.fcall("stock_2pc_commit", len(keys), *keys, *args)
 
 
 async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
@@ -178,6 +189,12 @@ async def create_item(request: Request):
             "reserved_stock": 0,
             "price": price,
         })
+        # Ensure replica has the item before responding — prevents stale reads
+        # when addItem immediately reads the item price via the replica.
+        try:
+            await db.execute_command("WAIT", 1, 5000)
+        except Exception:
+            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"item_id": key})
@@ -196,6 +213,10 @@ async def batch_init_users(request: Request):
                     "price": item_price,
                 })
             await pipe.execute()
+        try:
+            await db.execute_command("WAIT", 1, 5000)
+        except Exception:
+            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for stock successful"})
@@ -233,6 +254,10 @@ async def add_stock(request: Request):
         raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
+    try:
+        await db.execute_command("WAIT", 1, 5000)
+    except Exception:
+        pass
     return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
 

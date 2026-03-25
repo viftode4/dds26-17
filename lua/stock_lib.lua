@@ -56,7 +56,9 @@ end
 -- 2PC Commit: Finalize (deduction already happened in prepare)
 --
 -- Same KEYS layout as prepare
--- ARGV: saga_id, n_items
+-- ARGV: saga_id, n_items, (item_id, amount)...
+--   item_id/amount pairs are used to re-apply the deduction if prepare
+--   data was lost during a Redis Sentinel failover.
 local function stock_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
@@ -66,7 +68,21 @@ local function stock_2pc_commit(KEYS, ARGV)
     local status = redis.call('HGET', status_key, 'status')
     if status == 'committed' then return 1 end
 
-    -- Delete all lock keys (amounts already deducted in prepare)
+    -- Safety: if prepare data was lost (Redis Sentinel failover during 2PC),
+    -- re-apply the stock deduction.  In 2PC the commit decision is irrevocable
+    -- so we MUST ensure stock is deducted to maintain conservation invariant:
+    --   total_credit_spent == total_stock_sold * price
+    if status ~= 'prepared' then
+        for i = 1, n_items do
+            local item_key = KEYS[i]
+            local item_id = ARGV[1 + i * 2]
+            local amount = tonumber(ARGV[2 + i * 2])
+            redis.call('HINCRBY', item_key, 'available_stock', -amount)
+            redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
+        end
+    end
+
+    -- Delete all lock keys (amounts already deducted in prepare or above)
     for i = 1, n_items do
         redis.call('DEL', KEYS[n_items + i])
     end

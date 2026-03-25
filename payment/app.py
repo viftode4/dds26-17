@@ -76,7 +76,7 @@ async def handle_command(fields: dict) -> str:
         result = await _2pc_prepare(saga_id, user_id, int(amount), ttl)
         outcome = "prepared" if result == 1 else "failed"
     elif action == "commit":
-        await _2pc_commit(saga_id, user_id)
+        await _2pc_commit(saga_id, user_id, int(amount))
         outcome = "committed"
     elif action == "abort":
         await _2pc_abort(saga_id, user_id)
@@ -100,6 +100,14 @@ async def handle_nats_message(msg):
     saga_id = fields.get("saga_id", "")
     try:
         event = await handle_command(fields)
+        # Ensure mutating writes reach at least one replica before confirming.
+        # Prevents data loss during Sentinel failover between our response and
+        # the orchestrator's next action (e.g. commit after prepare).
+        if event in ("prepared", "committed", "executed", "aborted", "compensated"):
+            try:
+                await db.execute_command("WAIT", 1, 5000)
+            except Exception:
+                log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":
             response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_credit"}
         else:
@@ -120,13 +128,13 @@ async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -
     return await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
 
 
-async def _2pc_commit(saga_id: str, user_id: str):
+async def _2pc_commit(saga_id: str, user_id: str, amount: int):
     keys = [
         f"user:{user_id}",
         f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
     ]
-    await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id)
+    await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, str(amount), user_id)
 
 
 async def _2pc_abort(saga_id: str, user_id: str):
@@ -172,6 +180,10 @@ async def create_user(request: Request):
             "available_credit": 0,
             "held_credit": 0,
         })
+        try:
+            await db.execute_command("WAIT", 1, 5000)
+        except Exception:
+            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"user_id": key})
@@ -225,6 +237,10 @@ async def add_credit(request: Request):
         raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
+    try:
+        await db.execute_command("WAIT", 1, 5000)
+    except Exception:
+        pass
     return JSONResponse({"done": True})
 
 

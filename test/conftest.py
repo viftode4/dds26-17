@@ -162,7 +162,38 @@ def docker_compose(*args, check=False):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
-def _flush_databases_between_integration_tests(request):
+def _ensure_clean_topology(request):
+    """Restore Sentinel topology before each slow/chaos test.
+
+    After tests that kill Redis masters (triggering Sentinel failover), the
+    topology is inverted: replicas become masters and vice versa.  This fixture
+    detects the drift and restores the original roles so each test starts clean.
+    """
+    if "integration" not in request.keywords:
+        yield
+        return
+
+    from topology import (
+        ensure_containers_running,
+        is_topology_drifted,
+        restore_topology,
+        restart_app_services,
+        wait_stack_healthy,
+    )
+
+    ensure_containers_running()
+
+    drifted = is_topology_drifted()
+    if any(drifted.values()):
+        print(f"\n[topology] Drift detected: {drifted}, restoring...")
+        restore_topology()
+        restart_app_services()
+        wait_stack_healthy(timeout=60)
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
     """Flush all Redis databases before each integration test.
 
     Only runs when the test is marked with @pytest.mark.integration.
