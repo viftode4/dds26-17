@@ -107,10 +107,13 @@ async def test_sentinel_failover_stock_master():
         # Wait for Sentinel failover (down-after=5s + failover-timeout=10s)
         await asyncio.sleep(20)
 
-        # Restart stock services to force connection pool refresh to new master.
-        # Without restart, the services' redis-py pool may hold stale connections
-        # to the dead master, causing health checks to fail and HAProxy to mark
-        # both backends as down.
+        # Restart stock-db so the promoted master gets a replica.
+        # With min-replicas-to-write=1, the promoted master rejects writes
+        # until it has at least one connected replica.
+        _docker_compose("start", "stock-db")
+        await asyncio.sleep(10)
+
+        # Restart stock services + gateway to force connection pool refresh.
         _docker_compose("restart", "stock-service", "stock-service-2", "gateway")
         await asyncio.sleep(10)
 
