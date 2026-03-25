@@ -116,8 +116,6 @@ services:
         --appendfsync everysec
         --io-threads 4
         --io-threads-do-reads yes
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
@@ -134,8 +132,6 @@ services:
         --appendfsync everysec
         --io-threads 4
         --io-threads-do-reads yes
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
@@ -152,8 +148,6 @@ services:
         --appendfsync everysec
         --io-threads 4
         --io-threads-do-reads yes
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
@@ -245,7 +239,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          cpus: "0.5"
           memory: 64M
 
   sentinel-2:
@@ -269,7 +263,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          cpus: "0.5"
           memory: 64M
 
   sentinel-3:
@@ -293,7 +287,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.25"
+          cpus: "0.5"
           memory: 64M
 
   stock-service:
