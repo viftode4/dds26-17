@@ -218,3 +218,226 @@ async def test_recover_no_definition_fallback(mock_sleep):
     # Without a tx_def, recovery uses _send_action_to_all which has no steps to iterate
     # So it falls through to logging COMPLETED
     assert wal.log.call_args_list[-1].args == ("saga-nodef", "COMPLETED")
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_recover_executing_compensates(mock_sleep):
+    """WAL='EXECUTING' -> compensate ALL steps (we don't know which completed), FAILED."""
+    transport = AsyncMock()
+    wal = _wal_with_saga("saga-exec", "EXECUTING", {"tx_name": "checkout"})
+    tx_def = TransactionDefinition("checkout", _make_steps())
+
+    _route_transport(transport, {
+        ("stock", "compensate"): {"event": "compensated"},
+        ("payment", "compensate"): {"event": "compensated"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker.recover_incomplete_sagas()
+
+    compensate_calls = [
+        c for c in transport.send_and_wait.call_args_list
+        if c.args[1] == "compensate"
+    ]
+    assert len(compensate_calls) == 2, f"Expected exactly 2 compensate calls, got {len(compensate_calls)}"
+    assert wal.log.call_args_list[-1].args == ("saga-exec", "FAILED")
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_recover_compensating_retries(mock_sleep):
+    """WAL='COMPENSATING' -> retry compensation for all steps -> FAILED."""
+    transport = AsyncMock()
+    wal = _wal_with_saga("saga-comp", "COMPENSATING", {"tx_name": "checkout"})
+    tx_def = TransactionDefinition("checkout", _make_steps())
+
+    _route_transport(transport, {
+        ("stock", "compensate"): [{"event": "failed"}, {"event": "compensated"}],
+        ("payment", "compensate"): {"event": "compensated"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker.recover_incomplete_sagas()
+
+    final_log = wal.log.call_args_list[-1].args
+    assert final_log[1] == "FAILED", "COMPENSATING recovery must end in FAILED"
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_compensate_with_known_completed_steps(mock_sleep):
+    """Only compensate steps listed in data['completed_steps'], not all steps."""
+    transport = AsyncMock()
+    # Only stock completed; payment never executed
+    wal = _wal_with_saga("saga-partial", "COMPENSATING", {
+        "tx_name": "checkout",
+        "completed_steps": ["stock"],
+    })
+    tx_def = TransactionDefinition("checkout", _make_steps())
+
+    _route_transport(transport, {
+        ("stock", "compensate"): {"event": "compensated"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker.recover_incomplete_sagas()
+
+    compensate_calls = [
+        c for c in transport.send_and_wait.call_args_list
+        if c.args[1] == "compensate"
+    ]
+    services_compensated = {c.args[0] for c in compensate_calls}
+    assert "stock" in services_compensated, "Stock should be compensated (it completed)"
+    assert "payment" not in services_compensated, "Payment must NOT be compensated (it never ran)"
+    assert wal.log.call_args_list[-1].args == ("saga-partial", "FAILED")
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_recovery_exception_logs_failed(mock_sleep):
+    """Exception escaping _recover_saga is caught -> WAL logs FAILED, no crash.
+
+    Uses an unknown WAL state so _recover_saga calls wal.log() directly
+    (the else branch), which is made to raise. The outer handler in
+    recover_incomplete_sagas catches it and logs FAILED on a second call.
+    """
+    transport = AsyncMock()
+    # 'UNKNOWN_STATE' hits the else branch -> calls wal.log(saga_id, "FAILED") directly
+    wal = _wal_with_saga("saga-exc", "UNKNOWN_STATE", {"tx_name": "checkout"})
+    # First wal.log call raises (simulating e.g. Redis failure), second succeeds
+    wal.log = AsyncMock(side_effect=[RuntimeError("redis down"), None])
+
+    worker = RecoveryWorker(wal, transport, definitions={})
+    # Must not raise — the outer except in recover_incomplete_sagas handles it
+    await worker.recover_incomplete_sagas()
+
+    # The exception handler retries wal.log with "FAILED"
+    logged_states = [c.args[1] for c in wal.log.call_args_list]
+    assert "FAILED" in logged_states, "Exception must result in WAL FAILED entry"
+    transport.send_and_wait.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_recover_committing_commits_both_services(mock_sleep):
+    """WAL='COMMITTING' -> commit sent to BOTH services -> COMPLETED."""
+    transport = AsyncMock()
+    wal = _wal_with_saga("saga-commit2", "COMMITTING", {"tx_name": "checkout"})
+    tx_def = TransactionDefinition("checkout", _make_steps())
+
+    _route_transport(transport, {
+        ("stock", "commit"): {"event": "committed"},
+        ("payment", "commit"): {"event": "committed"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker.recover_incomplete_sagas()
+
+    commit_calls = [
+        c for c in transport.send_and_wait.call_args_list
+        if c.args[1] == "commit"
+    ]
+    assert len(commit_calls) == 2, f"Expected exactly 2 commit calls, got {len(commit_calls)}"
+    commit_services = {c.args[0] for c in commit_calls}
+    assert commit_services == {"stock", "payment"}, (
+        f"Commit not sent to both services: {commit_services}"
+    )
+    assert wal.log.call_args_list[-1].args == ("saga-commit2", "COMPLETED")
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.time.time")
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_abort_orphaned_sagas_by_age(mock_sleep, mock_time):
+    """Sagas older than ORPHAN_SAGA_TIMEOUT (120s) are aborted."""
+    transport = AsyncMock()
+
+    now = 1000.0
+    mock_time.return_value = now
+
+    saga_id = "saga-orphan"
+    wal = AsyncMock(spec=WALEngine.__class__)
+    wal.log = AsyncMock()
+    wal.log_terminal = AsyncMock()
+    # Created 200s ago — well past the 120s threshold
+    wal.get_incomplete_sagas = AsyncMock(return_value={
+        saga_id: {
+            "saga_id": saga_id,
+            "last_step": "PREPARING",
+            "created_at": now - 200,
+            "data": {"tx_name": "checkout"},
+        }
+    })
+
+    tx_def = TransactionDefinition("checkout", _make_steps())
+    _route_transport(transport, {
+        ("stock", "abort"): {"event": "aborted"},
+        ("payment", "abort"): {"event": "aborted"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker._abort_orphaned_sagas()
+
+    abort_calls = [c for c in transport.send_and_wait.call_args_list if c.args[1] == "abort"]
+    assert len(abort_calls) == 2, f"Expected 2 abort calls for orphaned saga, got {len(abort_calls)}"
+    assert wal.log.call_args_list[-1].args == (saga_id, "FAILED")
+
+
+@pytest.mark.asyncio
+@patch("orchestrator.recovery.time.time")
+@patch("orchestrator.recovery.asyncio.sleep", side_effect=_noop_sleep)
+async def test_orphaned_committing_saga_completed(mock_sleep, mock_time):
+    """Orphaned saga in COMMITTING state -> committed (never aborted)."""
+    transport = AsyncMock()
+
+    now = 1000.0
+    mock_time.return_value = now
+
+    saga_id = "saga-orphan-commit"
+    wal = AsyncMock(spec=WALEngine.__class__)
+    wal.log = AsyncMock()
+    wal.log_terminal = AsyncMock()
+    wal.get_incomplete_sagas = AsyncMock(return_value={
+        saga_id: {
+            "saga_id": saga_id,
+            "last_step": "COMMITTING",
+            "created_at": now - 200,
+            "data": {"tx_name": "checkout"},
+        }
+    })
+
+    tx_def = TransactionDefinition("checkout", _make_steps())
+    _route_transport(transport, {
+        ("stock", "commit"): {"event": "committed"},
+        ("payment", "commit"): {"event": "committed"},
+    })
+
+    worker = RecoveryWorker(wal, transport, definitions={"checkout": tx_def})
+    await worker._abort_orphaned_sagas()
+
+    commit_calls = [c for c in transport.send_and_wait.call_args_list if c.args[1] == "commit"]
+    abort_calls = [c for c in transport.send_and_wait.call_args_list if c.args[1] == "abort"]
+    assert len(commit_calls) == 2, "Orphaned COMMITTING saga must be committed"
+    assert len(abort_calls) == 0, "Orphaned COMMITTING saga must NEVER be aborted"
+    assert wal.log.call_args_list[-1].args == (saga_id, "COMPLETED")
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_loop_calls_callback():
+    """start_reconciliation() -> _reconcile() invokes reconcile_fn."""
+    transport = AsyncMock()
+    wal = AsyncMock(spec=WALEngine.__class__)
+    wal.log = AsyncMock()
+    wal.get_incomplete_sagas = AsyncMock(return_value={})
+
+    callback_called = False
+
+    async def _my_reconcile():
+        nonlocal callback_called
+        callback_called = True
+
+    worker = RecoveryWorker(wal, transport, reconcile_fn=_my_reconcile)
+    await worker._reconcile()
+
+    assert callback_called, "reconcile_fn must be called by _reconcile()"

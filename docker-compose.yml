@@ -53,6 +53,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
@@ -91,6 +92,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
@@ -313,6 +315,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
@@ -349,6 +352,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
@@ -386,6 +390,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
@@ -422,6 +427,7 @@ services:
         condition: service_started
       sentinel-3:
         condition: service_started
+    restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s

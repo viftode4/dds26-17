@@ -28,7 +28,7 @@ class CircuitBreaker:
         self._failure_count += 1
         self._last_failure_time = time.monotonic()
         self._probe_in_flight = False
-        if self._failure_count >= self.failure_threshold:
+        if self._state == "half-open" or self._failure_count >= self.failure_threshold:
             if self._state != "open":
                 logger.warning("Circuit breaker OPEN", failures=self._failure_count)
             self._state = "open"

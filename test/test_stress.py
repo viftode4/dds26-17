@@ -11,7 +11,6 @@ import pytest
 
 from helpers import (
     GATEWAY, TIMEOUT, LIMITS,
-    assert_conservation,
     wait_until,
     create_item,
     create_user,
@@ -161,17 +160,13 @@ async def test_checkout_contention():
         )
 
         # Task 1.2b: credit-side verification
+        total_credit_spent = 0
         for uid in user_ids:
             r = await client.get(f"{GATEWAY}/payment/find_user/{uid}")
             assert r.status_code == 200
             assert r.json()["credit"] >= 0, f"Negative credit for user {uid}"
+            total_credit_spent += initial_credit - r.json()["credit"]
 
-        total_credit_spent = sum(
-            initial_credit - (
-                (await client.get(f"{GATEWAY}/payment/find_user/{uid}")).json()["credit"]
-            )
-            for uid in user_ids
-        )
         assert total_credit_spent == successes * item_price, (
             f"Credit conservation: spent={total_credit_spent} "
             f"expected={successes * item_price}"

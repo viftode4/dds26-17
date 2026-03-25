@@ -17,6 +17,7 @@ from helpers import (
     assert_conservation,
     wait_until,
     create_item, create_user, checkout,
+    create_order_with_item,
     wait_gateway_healthy,
     OutcomeTracker,
 )
@@ -64,24 +65,38 @@ async def test_network_partition_stock_db():
         item_id = await create_item(client, price=item_price, stock=initial_stock)
         user_id = await create_user(client, credit=initial_credit)
 
+        # Pre-create orders BEFORE the partition — addItem needs stock-db for price lookup,
+        # so order setup must happen while the DB is still reachable.
+        order_ids = []
+        for _ in range(5):
+            order_ids.append(await create_order_with_item(client, user_id, item_id, 1))
+
         tracker = OutcomeTracker()
 
         # Partition the stock DB
         _docker_network_disconnect("distributed-data-systems-stock-db-1")
 
-        # Issue checkouts — should fail gracefully (5xx/timeout), not corrupt data
-        for _ in range(5):
+        # Issue the checkout phase concurrently — sequential would accumulate
+        # 5×30s = 150s of backoff before the partition is lifted.
+        async def _do_checkout_order(order_id: str):
             try:
-                r = await checkout(client, user_id, item_id, 1)
-                tracker.record_response(r)
+                r = await client.post(f"{GATEWAY}/orders/checkout/{order_id}")
+                return tracker.record_response(r)
             except (httpx.ReadError, httpx.RemoteProtocolError,
                     httpx.ConnectError, httpx.TimeoutException) as e:
-                tracker.record_exception(e)
+                return tracker.record_exception(e)
 
-        # Reconnect partition
+        await asyncio.gather(*[_do_checkout_order(oid) for oid in order_ids],
+                             return_exceptions=True)
+
+        # Reconnect partition and allow server-side abort/commit retry loops to complete.
+        # _verified_action retries with exponential backoff up to 60s between retries.
+        # A mid-2PC-commit saga (payment committed, stock commit pending) can be stuck
+        # for up to 60s before the next retry fires after reconnect.
         _docker_network_connect("distributed-data-systems-stock-db-1")
-        await asyncio.sleep(5.0)
+        await asyncio.sleep(5.0)  # DB reconnect settle
         await wait_gateway_healthy(client)
+        await asyncio.sleep(75.0)  # cover the full 60s max backoff + retry overhead
 
         # Verify conservation — all partitioned requests should have been rolled back
         await assert_conservation(
@@ -113,23 +128,35 @@ async def test_network_partition_nats():
         item_id = await create_item(client, price=item_price, stock=initial_stock)
         user_id = await create_user(client, credit=initial_credit)
 
+        # Pre-create orders BEFORE pausing NATS — addItem uses NATS for stock price
+        # lookup; with NATS paused it would fail with "Item not found".
+        order_ids = []
+        for _ in range(3):
+            order_ids.append(await create_order_with_item(client, user_id, item_id, 1))
+
         tracker = OutcomeTracker()
 
-        # Pause NATS (stops it from processing messages but keeps container alive)
+        # Pause NATS then issue ONLY the checkout phase concurrently.
         _docker_compose("pause", "nats")
 
-        for _ in range(3):
+        async def _do_checkout(order_id: str):
             try:
-                r = await checkout(client, user_id, item_id, 1)
-                tracker.record_response(r)
+                r = await client.post(f"{GATEWAY}/orders/checkout/{order_id}")
+                return tracker.record_response(r)
             except (httpx.ReadError, httpx.RemoteProtocolError,
                     httpx.ConnectError, httpx.TimeoutException) as e:
-                tracker.record_exception(e)
+                return tracker.record_exception(e)
 
-        # Unpause NATS
+        tasks = [asyncio.create_task(_do_checkout(oid)) for oid in order_ids]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Unpause NATS. The server-side executor _verified_action retry loops
+        # are still running — they will succeed on the next retry cycle after
+        # NATS becomes available. With backoff up to 60s, allow generous settle time.
         _docker_compose("unpause", "nats")
-        await asyncio.sleep(10.0)
+        await asyncio.sleep(10.0)  # NATS reconnect time
         await wait_gateway_healthy(client)
+        await asyncio.sleep(30.0)  # allow in-flight retry loops to complete
 
         # Conservation must hold
         await assert_conservation(
@@ -159,17 +186,23 @@ async def test_nats_crash_recovery():
         item_id = await create_item(client, price=item_price, stock=initial_stock)
         user_id = await create_user(client, credit=initial_credit)
 
+        # Pre-create 10 orders BEFORE killing NATS — addItem uses NATS for price
+        # lookup; if NATS is down, addItem fails with "Item not found".
+        order_ids = []
+        for _ in range(10):
+            order_ids.append(await create_order_with_item(client, user_id, item_id, 1))
+
         tracker = OutcomeTracker()
 
-        async def _checkout():
+        async def _checkout(order_id: str):
             try:
-                r = await checkout(client, user_id, item_id, 1)
+                r = await client.post(f"{GATEWAY}/orders/checkout/{order_id}")
                 return tracker.record_response(r)
             except (httpx.ReadError, httpx.RemoteProtocolError,
                     httpx.ConnectError, httpx.TimeoutException) as e:
                 return tracker.record_exception(e)
 
-        tasks = [asyncio.create_task(_checkout()) for _ in range(10)]
+        tasks = [asyncio.create_task(_checkout(oid)) for oid in order_ids]
         await asyncio.sleep(0.2)
 
         # Kill NATS
@@ -179,11 +212,12 @@ async def test_nats_crash_recovery():
 
         # Restart NATS
         _docker_compose("start", "nats")
-        await asyncio.sleep(15.0)  # reconnect time for all services
+        await asyncio.sleep(20.0)  # reconnect time for all services
         await wait_gateway_healthy(client)
 
-        # Recovery worker resolves in-flight sagas
-        await asyncio.sleep(10.0)
+        # Recovery worker resolves in-flight sagas (RECONCILIATION_INTERVAL=60s;
+        # leadership re-acquisition triggers an immediate scan but still needs time)
+        await asyncio.sleep(30.0)
 
         await assert_conservation(
             client,
@@ -231,11 +265,15 @@ async def test_cascade_failure():
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Restart everything
+        # Restart everything.
+        # stock-db: Sentinel will promote stock-db-replica to master (~20s).
+        # Restart stock-service instances to force reconnection to the new master.
         _docker_compose("start", "stock-db", "payment-service")
-        await asyncio.sleep(20.0)  # Sentinel failover time for stock-db
+        await asyncio.sleep(25.0)  # Sentinel failover time for stock-db
+        _docker_compose("restart", "stock-service", "stock-service-2")
+        await asyncio.sleep(15.0)  # stock-service startup time
         await wait_gateway_healthy(client)
-        await asyncio.sleep(10.0)  # recovery worker time
+        await asyncio.sleep(20.0)  # recovery worker time
 
         await assert_conservation(
             client,

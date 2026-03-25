@@ -14,7 +14,6 @@ import pytest
 
 from helpers import (
     GATEWAY, TIMEOUT,
-    assert_conservation,
     wait_until,
     create_item,
     create_user,

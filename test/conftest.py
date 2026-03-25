@@ -9,6 +9,34 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 
+
+# ---------------------------------------------------------------------------
+# Docker availability check — skip integration tests if stack is not up
+# ---------------------------------------------------------------------------
+
+def _docker_stack_is_up() -> bool:
+    """Return True if the Docker Compose stack has at least one running container."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "ps", "-q", "--status", "running"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    """Auto-skip integration-marked tests when the Docker stack is not running."""
+    if not any(item.get_closest_marker("integration") for item in items):
+        return
+    if _docker_stack_is_up():
+        return
+    skip_marker = pytest.mark.skip(reason="Docker Compose stack not running (start with: docker compose up -d)")
+    for item in items:
+        if item.get_closest_marker("integration"):
+            item.add_marker(skip_marker)
+
 from orchestrator.definition import Step, TransactionDefinition
 from orchestrator.executor import CircuitBreaker
 from orchestrator.wal import WALEngine
@@ -149,10 +177,17 @@ def _flush_databases_between_integration_tests(request):
         yield
         return
 
+    # Flush both master and replica containers for each DB.
+    # After a Sentinel failover, the replica becomes the new master, so we
+    # must flush it too. Flushing a still-replica fails with READONLY (silently
+    # ignored via check=False), which is harmless.
     db_containers = [
-        ("order-db",   "redis-cli", "-a", "redis", "FLUSHALL"),
-        ("stock-db",   "redis-cli", "-a", "redis", "FLUSHALL"),
-        ("payment-db", "redis-cli", "-a", "redis", "FLUSHALL"),
+        ("order-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("order-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("stock-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("stock-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("payment-db",        "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("payment-db-replica","redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
     ]
     for container, *cmd in db_containers:
         subprocess.run(

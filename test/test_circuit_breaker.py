@@ -69,3 +69,11 @@ class TestCircuitBreaker:
         cb.record_success()
         assert cb._failure_count == 0
         assert cb._state == "closed"
+
+    def test_half_open_failure_reopens(self):
+        """A failure in half-open state re-opens the circuit."""
+        cb = CircuitBreaker(failure_threshold=2)
+        cb._state = "half-open"
+        cb.record_failure()
+        assert cb._state == "open"
+        assert cb.is_open() is True
