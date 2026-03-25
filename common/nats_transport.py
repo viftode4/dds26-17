@@ -90,9 +90,15 @@ class NatsOrchestratorTransport:
                             payload: dict, timeout: float = 10.0) -> dict:
         subject = f"svc.{service}.{action}"
         msg = {**payload, "action": action}
+        # Mutations (prepare/execute) are NOT safely retryable across Sentinel
+        # failover — the idempotency status key lives on the old master and may
+        # not replicate before promotion.  Retrying can deduct stock/credit twice.
+        # Only commit/abort/compensate are idempotent by design (they check status
+        # and handle missing prepare data via re-deduction).
+        max_retries = 1 if action in ("prepare", "execute") else self.TRANSIENT_RETRIES
         backoff = self.INITIAL_BACKOFF
         last_error = ""
-        for attempt in range(1, self.TRANSIENT_RETRIES + 1):
+        for attempt in range(1, max_retries + 1):
             try:
                 return await self._transport.request(subject, msg, timeout=timeout)
             except asyncio.TimeoutError:
@@ -103,7 +109,7 @@ class NatsOrchestratorTransport:
                     last_error = err
                 else:
                     return {"event": "failed", "reason": err}
-            if attempt < self.TRANSIENT_RETRIES:
+            if attempt < max_retries:
                 log.warning("NATS transient error, retrying",
                             subject=subject, attempt=attempt, error=last_error)
                 await asyncio.sleep(min(backoff, self.MAX_BACKOFF))

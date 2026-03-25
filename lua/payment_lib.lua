@@ -19,9 +19,10 @@ local function payment_2pc_prepare(KEYS, ARGV)
     local saga_id = ARGV[2]
     local lock_ttl = tonumber(ARGV[4])
 
-    -- Idempotency
+    -- Idempotency + poison pill: refuse if already aborted/committed
     local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'prepared' then return 1 end
+    if status == 'aborted' or status == 'committed' then return 0 end
 
     -- Validate
     local available = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))
@@ -110,9 +111,10 @@ local function payment_saga_execute(KEYS, ARGV)
     local saga_id = ARGV[2]
     local user_id = ARGV[3]
 
-    -- Idempotency
+    -- Idempotency + poison pill: refuse if already compensated
     local status = redis.call('GET', KEYS[2])
     if status == 'executed' then return 1 end
+    if status == 'compensated' then return 0 end
 
     -- Validate
     local available = tonumber(redis.call('HGET', KEYS[1], 'available_credit'))

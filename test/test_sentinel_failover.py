@@ -107,7 +107,25 @@ async def test_sentinel_failover_stock_master():
         # Wait for Sentinel failover (down-after=5s + failover-timeout=10s)
         await asyncio.sleep(20)
 
-        # Issue 5 checkouts — during/after failover, transient 5xx are acceptable
+        # Restart stock services to force connection pool refresh to new master.
+        # Without restart, the services' redis-py pool may hold stale connections
+        # to the dead master, causing health checks to fail and HAProxy to mark
+        # both backends as down.
+        _docker_compose("restart", "stock-service", "stock-service-2", "gateway")
+        await asyncio.sleep(10)
+
+        # Wait for stock service to be reachable through HAProxy after failover.
+        async def _stock_healthy():
+            try:
+                r = await client.get(f"{GATEWAY}/stock/health")
+                return r.status_code == 200
+            except Exception:
+                return False
+
+        await wait_until(_stock_healthy, timeout=45.0, interval=2.0,
+                         msg="stock service not healthy through gateway after failover")
+
+        # Issue 5 checkouts — after failover recovery
         tracker = OutcomeTracker()
         for _ in range(5):
             order_id = await create_order_with_item(client, user_id, item_id, 1)

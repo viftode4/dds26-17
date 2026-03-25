@@ -21,9 +21,12 @@ local function stock_2pc_prepare(KEYS, ARGV)
     local n_items = (#KEYS - 1) / 2
     local status_key = KEYS[2 * n_items + 1]
 
-    -- Idempotency
+    -- Idempotency + poison pill: if abort already ran, refuse to prepare.
+    -- This prevents a late prepare (redis-py retry after Sentinel failover)
+    -- from deducting stock after the orchestrator already decided to abort.
     local status = redis.call('HGET', status_key, 'status')
     if status == 'prepared' then return 1 end
+    if status == 'aborted' or status == 'committed' then return 0 end
 
     -- Validate ALL items have sufficient available_stock
     for i = 1, n_items do
@@ -135,9 +138,10 @@ local function stock_saga_execute(KEYS, ARGV)
     local status_key = KEYS[n_items + 1]
     local amounts_key = KEYS[n_items + 2]
 
-    -- Idempotency
+    -- Idempotency + poison pill: refuse if already compensated
     local status = redis.call('GET', status_key)
     if status == 'executed' then return 1 end
+    if status == 'compensated' then return 0 end
 
     -- Validate ALL items
     for i = 1, n_items do
