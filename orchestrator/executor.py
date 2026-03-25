@@ -208,11 +208,18 @@ class SagaExecutor(_BaseExecutor):
                 if cb:
                     cb.record_success()
             else:
+                reason = result.get("reason", "insufficient_resources") if isinstance(result, dict) else str(result)
                 if isinstance(result, dict) and result.get("reason") == "timeout":
                     cb = self.circuit_breakers.get(step.service)
                     if cb:
                         cb.record_failure()
-                failure_reason = result.get("reason", "insufficient_resources") if isinstance(result, dict) else str(result)
+                    # Timeout is ambiguous — the step may have executed on the
+                    # service side (e.g. existing TCP connection completed after
+                    # our NATS timeout).  Add to completed_steps so it gets
+                    # compensated.  Compensation is idempotent: if the step
+                    # never actually executed, compensate is a harmless no-op.
+                    completed_steps.append(step)
+                failure_reason = reason
                 break
 
         if len(completed_steps) == len(tx_def.steps):

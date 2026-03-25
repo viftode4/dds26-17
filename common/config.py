@@ -56,7 +56,9 @@ def create_redis_connection(
         "socket_timeout": 5,
         "socket_connect_timeout": 5,
         "health_check_interval": 30,
-        "retry_on_error": [ConnectionError, TimeoutError],
+        # retry_on_error intentionally omitted — redis-py internal retries
+        # cause late Lua executions after the orchestrator has already
+        # aborted/compensated, leading to conservation violations.
     }
     # Merge with caller's kwargs (caller can override)
     merged = {**default_kwargs, **kwargs}
@@ -107,7 +109,9 @@ def create_replica_connection(
         "socket_timeout": 5,
         "socket_connect_timeout": 5,
         "health_check_interval": 30,
-        "retry_on_error": [ConnectionError, TimeoutError],
+        # retry_on_error intentionally omitted — redis-py internal retries
+        # cause late Lua executions after the orchestrator has already
+        # aborted/compensated, leading to conservation violations.
     }
     # Merge with caller's kwargs (caller can override)
     merged = {**default_kwargs, **kwargs}
