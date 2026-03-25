@@ -484,11 +484,15 @@ async def test_saga_compensation_failure_retries(mock_transport, mock_wal,
 @pytest.mark.asyncio
 async def test_saga_step_timeout(mock_transport, mock_wal,
                                   circuit_breakers, metrics, checkout_tx):
-    """Stock execute times out → treated as failure, status=failed (task 2D.3)."""
+    """Stock execute times out → treated as failure, compensated, status=failed (task 2D.3)."""
     # _try_step catches TimeoutError and returns {event:failed, reason:timeout}
+    # Timeout is ambiguous so the executor adds it to completed_steps and
+    # compensates.  Mock must return "compensated" for the compensate action.
     async def _timeout_then_ok(service, action, payload, timeout):
         if service == "stock" and action == "execute":
             raise asyncio.TimeoutError()
+        if action == "compensate":
+            return {"event": "compensated"}
         return {"event": "ok"}
 
     mock_transport.send_and_wait = AsyncMock(side_effect=_timeout_then_ok)
