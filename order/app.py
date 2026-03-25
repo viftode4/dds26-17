@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis
+from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
 from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
@@ -164,10 +164,15 @@ async def lifespan(app):
     )
 
     _leader_task = asyncio.create_task(_leadership_loop())
+
+    failover_task = await subscribe_failover_invalidation(
+        db, db_read, service_name="order")
     log.info("Order service started (active-active mode)")
 
     yield
 
+    if failover_task:
+        failover_task.cancel()
     if _http_client:
         await _http_client.aclose()
     if _leader_task:

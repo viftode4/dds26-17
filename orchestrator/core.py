@@ -112,9 +112,27 @@ class Orchestrator:
         return result
 
     def _select_protocol(self) -> str:
-        """Select protocol based on mode and abort-rate metrics."""
+        """Select protocol based on mode and abort-rate metrics.
+
+        Safety override: force 2PC when any circuit breaker is open (suspected
+        partition).  SAGA execute is an irrevocable mutation — if the response
+        is lost during a partition, the orchestrator cannot reliably compensate.
+        2PC prepare is reversible: the abort path restores the deduction, and
+        the poison-pill mechanism blocks late prepares after abort.
+        """
         if self.protocol_mode != "auto":
             return self.protocol_mode
+
+        # Force 2PC when any downstream service is degraded.  This prevents
+        # irrevocable SAGA mutations during suspected network partitions.
+        any_breaker_open = any(
+            cb.is_open() for cb in self.circuit_breakers.values()
+        )
+        if any_breaker_open:
+            if self.metrics.current_protocol != "2pc":
+                logger.warning("Forcing 2PC — circuit breaker open (suspected partition)")
+                self.metrics.current_protocol = "2pc"
+            return "2pc"
 
         abort_rate = self.metrics.sliding_abort_rate()
         current = self.metrics.current_protocol

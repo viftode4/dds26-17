@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis
+from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
 
@@ -52,10 +52,17 @@ async def lifespan(app):
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
     await _nats_transport.connect()
     await _nats_transport.subscribe("svc.stock.*", "stock-workers", handle_nats_message)
+
+    # Invalidate connection pools on Sentinel failover to prevent stale
+    # connections from reaching the demoted old master.
+    failover_task = await subscribe_failover_invalidation(
+        db, db_read, service_name="stock")
     log.info("Stock service started")
 
     yield
 
+    if failover_task:
+        failover_task.cancel()
     if _nats_transport:
         await _nats_transport.close()
     if db_read:

@@ -155,3 +155,61 @@ async def wait_for_redis(db: aioredis.Redis, name: str = "Redis",
             logger.warning("Redis not ready", name=name, attempt=attempt,
                            retries=retries, error=str(e))
             await asyncio.sleep(delay)
+
+
+async def subscribe_failover_invalidation(
+    *pools: aioredis.Redis,
+    service_name: str = "",
+) -> asyncio.Task | None:
+    """Subscribe to Sentinel +switch-master events and invalidate connection pools.
+
+    When Sentinel promotes a replica, all existing connections in the pool may
+    still point to the demoted old master.  Disconnecting the pool forces
+    redis-py to re-resolve the master via Sentinel on the next command.
+
+    Returns the background task (caller should cancel it on shutdown) or None
+    if Sentinel is not configured.
+    """
+    sentinel_hosts = get_sentinel_hosts()
+    if not sentinel_hosts:
+        return None
+
+    import redis.asyncio as _aioredis
+
+    async def _listener():
+        while True:
+            try:
+                sentinel_conn = _aioredis.Redis(
+                    host=sentinel_hosts[0][0],
+                    port=sentinel_hosts[0][1],
+                    decode_responses=True,
+                )
+                pubsub = sentinel_conn.pubsub()
+                await pubsub.psubscribe("*")
+                logger.info("Sentinel failover listener started",
+                            service=service_name)
+
+                async for message in pubsub.listen():
+                    if message["type"] != "pmessage":
+                        continue
+                    channel = message.get("channel", "")
+                    if "+switch-master" not in channel:
+                        continue
+
+                    data = message.get("data", "")
+                    logger.warning("Sentinel failover detected, invalidating pools",
+                                   service=service_name, event=data)
+                    for pool in pools:
+                        try:
+                            await pool.connection_pool.disconnect()
+                        except Exception:
+                            pass
+
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("Sentinel listener error, reconnecting",
+                               error=str(e))
+                await asyncio.sleep(2)
+
+    return asyncio.create_task(_listener())
