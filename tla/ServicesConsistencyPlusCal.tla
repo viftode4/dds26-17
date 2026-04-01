@@ -208,14 +208,20 @@ CheckoutSaga:
     goto CheckoutPaymentSaga;
     CheckoutPaymentSaga:
         orchestratorTxP := Append(orchestratorTxP, "checkout");
+        checkoutStatus[1] := "started";
+    CheckoutSagaMaybeR:
+        maybeRestart();
     CheckoutStockSaga:
         orchestratorTxS := Append(orchestratorTxS, "checkout");
+        checkoutStatus[2] := "started";
     
     CheckoutSagaProcess:
         if orchestratorRxP # <<>> then
             message := Head(orchestratorRxP);
             orchestratorRxP := Tail(orchestratorRxP);
-
+            SagaProcessPR:
+                maybeRestart();
+            SagaProcessP:
             if message = "checkoutOk" then
                 checkoutStatus[1] := "completed";
             elsif message = "checkoutFailed" then
@@ -230,7 +236,9 @@ CheckoutSaga:
         elsif orchestratorRxS # <<>> then
             message := Head(orchestratorRxS);
             orchestratorRxS := Tail(orchestratorRxS);
-
+            SagaProcessSR:
+                maybeRestart();
+            SagaProcessS:
             if message = "checkoutOk" then
                 checkoutStatus[2] := "completed";
             elsif message = "checkoutFailed" then
@@ -255,6 +263,26 @@ CheckoutSaga:
                 goto CheckoutSagaProcess;
             elsif checkoutStatus[1] \in {"failed", "compensated"} /\ checkoutStatus[2] \in {"failed", "compensated"} then
                 goto SagaEnd;
+            elsif ~retries[1] /\ restarted[1] then
+                if checkoutStatus[1] \in {"notStarted", "started"} then
+                    orchestratorTxP := Append(orchestratorTxP, "checkout");
+                    checkoutStatus[1] := "started";
+                    retries[1] := TRUE;
+                elsif checkoutStatus[1] = "compensating" then
+                    orchestratorTxP := Append(orchestratorTxP, "compensate");
+                    retries[1] := TRUE;
+                end if;
+                goto CheckoutSagaProcess;
+            elsif ~retries[2] /\ restarted[2] then
+                if checkoutStatus[2] \in {"notStarted", "started"} then
+                    orchestratorTxS := Append(orchestratorTxS, "checkout");
+                    checkoutStatus[2] := "started";
+                    retries[2] := TRUE;
+                elsif checkoutStatus[2] = "compensating" then
+                    orchestratorTxS := Append(orchestratorTxS, "compensate");
+                    retries[2] := TRUE;
+                end if;
+                goto CheckoutSagaProcess;
             else
                 goto CheckoutSagaProcess;
             end if;
@@ -356,6 +384,9 @@ PaymentReqProcessing:
         elsif paymentStatus = "completed" then
             \* Idempotency
             orchestratorRxP := Append(orchestratorRxP, "checkoutOk");
+        elsif paymentStatus = "failed" then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "checkoutFailed");
         end if;
     elsif message = "compensate" then
         if paymentStatus = "completed" then
@@ -466,6 +497,9 @@ StockReqProcessing:
         elsif stockStatus = "completed" then
             \* Idempotency
             orchestratorRxS := Append(orchestratorRxS, "checkoutOk");
+        elsif stockStatus = "failed" then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "checkoutFailed");
         end if;
     elsif message = "compensate" then
         if stockStatus = "completed" then
@@ -486,29 +520,29 @@ StockReqProcessing:
 end process;
 
 end algorithm;*)
-\* BEGIN TRANSLATION (chksum(pcal) = "24689193" /\ chksum(tla) = "2c9acbf4")
+\* BEGIN TRANSLATION (chksum(pcal) = "b4bcdb57" /\ chksum(tla) = "9a2c8f08")
 \* Label Start of process Orchestrator at line 68 col 5 changed to Start_
-\* Label Start of process PaymentWorker at line 273 col 5 changed to Start_P
+\* Label Start of process PaymentWorker at line 301 col 5 changed to Start_P
 \* Label R of process PaymentWorker at line 52 col 5 changed to R_
 \* Label PrepareSuccessResponseR of process PaymentWorker at line 52 col 5 changed to PrepareSuccessResponseR_
-\* Label PrepareSuccessResponse of process PaymentWorker at line 292 col 21 changed to PrepareSuccessResponse_
+\* Label PrepareSuccessResponse of process PaymentWorker at line 320 col 21 changed to PrepareSuccessResponse_
 \* Label PrepareFailedResponseR of process PaymentWorker at line 52 col 5 changed to PrepareFailedResponseR_
-\* Label PrepareFailedResponse of process PaymentWorker at line 298 col 21 changed to PrepareFailedResponse_
+\* Label PrepareFailedResponse of process PaymentWorker at line 326 col 21 changed to PrepareFailedResponse_
 \* Label ReplyCommitResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCommitResponseR_
-\* Label ReplyCommitResponse of process PaymentWorker at line 315 col 17 changed to ReplyCommitResponse_
-\* Label ReplyCommitResponse2 of process PaymentWorker at line 318 col 17 changed to ReplyCommitResponse2_
+\* Label ReplyCommitResponse of process PaymentWorker at line 343 col 17 changed to ReplyCommitResponse_
+\* Label ReplyCommitResponse2 of process PaymentWorker at line 346 col 17 changed to ReplyCommitResponse2_
 \* Label ReplyAbortMessageR of process PaymentWorker at line 52 col 5 changed to ReplyAbortMessageR_
-\* Label ReplyAbortMessage of process PaymentWorker at line 334 col 17 changed to ReplyAbortMessage_
-\* Label ReplyAbort2 of process PaymentWorker at line 337 col 17 changed to ReplyAbort2_
+\* Label ReplyAbortMessage of process PaymentWorker at line 362 col 17 changed to ReplyAbortMessage_
+\* Label ReplyAbort2 of process PaymentWorker at line 365 col 17 changed to ReplyAbort2_
 \* Label ReplyCheckoutResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCheckoutResponseR_
-\* Label ReplyCheckoutResponse of process PaymentWorker at line 348 col 21 changed to ReplyCheckoutResponse_
+\* Label ReplyCheckoutResponse of process PaymentWorker at line 376 col 21 changed to ReplyCheckoutResponse_
 \* Label FailedCheckoutResponseR of process PaymentWorker at line 52 col 5 changed to FailedCheckoutResponseR_
-\* Label FailedCheckoutResponse of process PaymentWorker at line 354 col 21 changed to FailedCheckoutResponse_
+\* Label FailedCheckoutResponse of process PaymentWorker at line 382 col 21 changed to FailedCheckoutResponse_
 \* Label ReplyCompensateResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCompensateResponseR_
-\* Label ReplyCompensateResponse of process PaymentWorker at line 368 col 17 changed to ReplyCompensateResponse_
-\* Label step of process PaymentWorker at line 375 col 9 changed to step_
+\* Label ReplyCompensateResponse of process PaymentWorker at line 399 col 17 changed to ReplyCompensateResponse_
+\* Label step of process PaymentWorker at line 406 col 9 changed to step_
 \* Process variable message of process Orchestrator at line 65 col 28 changed to message_
-\* Process variable message of process PaymentWorker at line 270 col 5 changed to message_P
+\* Process variable message of process PaymentWorker at line 298 col 5 changed to message_P
 VARIABLES pc, done, userCredits, userHeldCredits, userPaidCredits, 
           stockAvailable, stockHeld, stockSold, paymentStatus, stockStatus, 
           orchestratorTxP, orchestratorTxS, orchestratorRxP, orchestratorRxS, 
@@ -1060,85 +1094,122 @@ CheckoutSaga(self) == /\ pc[self] = "CheckoutSaga"
 
 CheckoutPaymentSaga(self) == /\ pc[self] = "CheckoutPaymentSaga"
                              /\ orchestratorTxP' = Append(orchestratorTxP, "checkout")
-                             /\ pc' = [pc EXCEPT ![self] = "CheckoutStockSaga"]
+                             /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                             /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaMaybeR"]
                              /\ UNCHANGED << done, userCredits, 
                                              userHeldCredits, userPaidCredits, 
                                              stockAvailable, stockHeld, 
                                              stockSold, paymentStatus, 
                                              stockStatus, orchestratorTxS, 
                                              orchestratorRxP, orchestratorRxS, 
-                                             restarted, anyRestarted, 
-                                             checkoutStatus, message_, retries, 
-                                             message_P, message >>
+                                             restarted, anyRestarted, message_, 
+                                             retries, message_P, message >>
+
+CheckoutSagaMaybeR(self) == /\ pc[self] = "CheckoutSagaMaybeR"
+                            /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                  THEN /\ \/ /\ TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "CheckoutStockSaga"]
+                                             /\ UNCHANGED <<restarted, anyRestarted>>
+                                          \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                             /\ anyRestarted' = TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                                  ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutStockSaga"]
+                                       /\ UNCHANGED << restarted, anyRestarted >>
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxP, orchestratorRxS, 
+                                            checkoutStatus, message_, retries, 
+                                            message_P, message >>
 
 CheckoutStockSaga(self) == /\ pc[self] = "CheckoutStockSaga"
                            /\ orchestratorTxS' = Append(orchestratorTxS, "checkout")
+                           /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
                            /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
                                            userPaidCredits, stockAvailable, 
                                            stockHeld, stockSold, paymentStatus, 
                                            stockStatus, orchestratorTxP, 
                                            orchestratorRxP, orchestratorRxS, 
-                                           restarted, anyRestarted, 
-                                           checkoutStatus, message_, retries, 
-                                           message_P, message >>
+                                           restarted, anyRestarted, message_, 
+                                           retries, message_P, message >>
 
 CheckoutSagaProcess(self) == /\ pc[self] = "CheckoutSagaProcess"
                              /\ IF orchestratorRxP # <<>>
                                    THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxP)]
                                         /\ orchestratorRxP' = Tail(orchestratorRxP)
-                                        /\ IF message_'[self] = "checkoutOk"
-                                              THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "completed"]
-                                              ELSE /\ IF message_'[self] = "checkoutFailed"
-                                                         THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "failed"]
-                                                         ELSE /\ IF message_'[self] = "compensateOk"
-                                                                    THEN /\ IF checkoutStatus[self][1] = "compensating"
-                                                                               THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "compensated"]
-                                                                               ELSE /\ TRUE
-                                                                                    /\ UNCHANGED checkoutStatus
-                                                                    ELSE /\ TRUE
-                                                                         /\ UNCHANGED checkoutStatus
-                                        /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessPR"]
                                         /\ UNCHANGED << orchestratorTxP, 
                                                         orchestratorTxS, 
-                                                        orchestratorRxS >>
+                                                        orchestratorRxS, 
+                                                        checkoutStatus, 
+                                                        retries >>
                                    ELSE /\ IF orchestratorRxS # <<>>
                                               THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxS)]
                                                    /\ orchestratorRxS' = Tail(orchestratorRxS)
-                                                   /\ IF message_'[self] = "checkoutOk"
-                                                         THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "completed"]
-                                                         ELSE /\ IF message_'[self] = "checkoutFailed"
-                                                                    THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "failed"]
-                                                                    ELSE /\ IF message_'[self] = "compensateOk"
-                                                                               THEN /\ IF checkoutStatus[self][2] = "compensating"
-                                                                                          THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "compensated"]
-                                                                                          ELSE /\ TRUE
-                                                                                               /\ UNCHANGED checkoutStatus
-                                                                               ELSE /\ TRUE
-                                                                                    /\ UNCHANGED checkoutStatus
-                                                   /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                   /\ pc' = [pc EXCEPT ![self] = "SagaProcessSR"]
                                                    /\ UNCHANGED << orchestratorTxP, 
-                                                                   orchestratorTxS >>
+                                                                   orchestratorTxS, 
+                                                                   checkoutStatus, 
+                                                                   retries >>
                                               ELSE /\ IF checkoutStatus[self] = <<"completed", "completed">>
                                                          THEN /\ pc' = [pc EXCEPT ![self] = "SagaEnd"]
                                                               /\ UNCHANGED << orchestratorTxP, 
                                                                               orchestratorTxS, 
-                                                                              checkoutStatus >>
+                                                                              checkoutStatus, 
+                                                                              retries >>
                                                          ELSE /\ IF checkoutStatus[self][1] = "failed" /\ checkoutStatus[self][2] \in {"notStarted", "completed"}
                                                                     THEN /\ orchestratorTxS' = Append(orchestratorTxS, "compensate")
                                                                          /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "compensating"]
                                                                          /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
-                                                                         /\ UNCHANGED orchestratorTxP
+                                                                         /\ UNCHANGED << orchestratorTxP, 
+                                                                                         retries >>
                                                                     ELSE /\ IF checkoutStatus[self][2] = "failed" /\ checkoutStatus[self][1] \in {"notStarted", "completed"}
                                                                                THEN /\ orchestratorTxP' = Append(orchestratorTxP, "compensate")
                                                                                     /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "compensating"]
                                                                                     /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                    /\ UNCHANGED << orchestratorTxS, 
+                                                                                                    retries >>
                                                                                ELSE /\ IF checkoutStatus[self][1] \in {"failed", "compensated"} /\ checkoutStatus[self][2] \in {"failed", "compensated"}
                                                                                           THEN /\ pc' = [pc EXCEPT ![self] = "SagaEnd"]
-                                                                                          ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
-                                                                                    /\ UNCHANGED << orchestratorTxP, 
-                                                                                                    checkoutStatus >>
-                                                                         /\ UNCHANGED orchestratorTxS
+                                                                                               /\ UNCHANGED << orchestratorTxP, 
+                                                                                                               orchestratorTxS, 
+                                                                                                               checkoutStatus, 
+                                                                                                               retries >>
+                                                                                          ELSE /\ IF ~retries[self][1] /\ restarted[1]
+                                                                                                     THEN /\ IF checkoutStatus[self][1] \in {"notStarted", "started"}
+                                                                                                                THEN /\ orchestratorTxP' = Append(orchestratorTxP, "checkout")
+                                                                                                                     /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                                                                                                                     /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                ELSE /\ IF checkoutStatus[self][1] = "compensating"
+                                                                                                                           THEN /\ orchestratorTxP' = Append(orchestratorTxP, "compensate")
+                                                                                                                                /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                           ELSE /\ TRUE
+                                                                                                                                /\ UNCHANGED << orchestratorTxP, 
+                                                                                                                                                retries >>
+                                                                                                                     /\ UNCHANGED checkoutStatus
+                                                                                                          /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                          /\ UNCHANGED orchestratorTxS
+                                                                                                     ELSE /\ IF ~retries[self][2] /\ restarted[2]
+                                                                                                                THEN /\ IF checkoutStatus[self][2] \in {"notStarted", "started"}
+                                                                                                                           THEN /\ orchestratorTxS' = Append(orchestratorTxS, "checkout")
+                                                                                                                                /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
+                                                                                                                                /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                           ELSE /\ IF checkoutStatus[self][2] = "compensating"
+                                                                                                                                      THEN /\ orchestratorTxS' = Append(orchestratorTxS, "compensate")
+                                                                                                                                           /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                                      ELSE /\ TRUE
+                                                                                                                                           /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                                           retries >>
+                                                                                                                                /\ UNCHANGED checkoutStatus
+                                                                                                                     /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                                ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                                     /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                     checkoutStatus, 
+                                                                                                                                     retries >>
+                                                                                                          /\ UNCHANGED orchestratorTxP
                                                    /\ UNCHANGED << orchestratorRxS, 
                                                                    message_ >>
                                         /\ UNCHANGED orchestratorRxP
@@ -1147,8 +1218,85 @@ CheckoutSagaProcess(self) == /\ pc[self] = "CheckoutSagaProcess"
                                              stockAvailable, stockHeld, 
                                              stockSold, paymentStatus, 
                                              stockStatus, restarted, 
-                                             anyRestarted, retries, message_P, 
-                                             message >>
+                                             anyRestarted, message_P, message >>
+
+SagaProcessPR(self) == /\ pc[self] = "SagaProcessPR"
+                       /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                             THEN /\ \/ /\ TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessP"]
+                                        /\ UNCHANGED <<restarted, anyRestarted>>
+                                     \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                        /\ anyRestarted' = TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "SagaProcessP"]
+                                  /\ UNCHANGED << restarted, anyRestarted >>
+                       /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                       userPaidCredits, stockAvailable, 
+                                       stockHeld, stockSold, paymentStatus, 
+                                       stockStatus, orchestratorTxP, 
+                                       orchestratorTxS, orchestratorRxP, 
+                                       orchestratorRxS, checkoutStatus, 
+                                       message_, retries, message_P, message >>
+
+SagaProcessP(self) == /\ pc[self] = "SagaProcessP"
+                      /\ IF message_[self] = "checkoutOk"
+                            THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "completed"]
+                            ELSE /\ IF message_[self] = "checkoutFailed"
+                                       THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "failed"]
+                                       ELSE /\ IF message_[self] = "compensateOk"
+                                                  THEN /\ IF checkoutStatus[self][1] = "compensating"
+                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "compensated"]
+                                                             ELSE /\ TRUE
+                                                                  /\ UNCHANGED checkoutStatus
+                                                  ELSE /\ TRUE
+                                                       /\ UNCHANGED checkoutStatus
+                      /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      orchestratorRxS, restarted, anyRestarted, 
+                                      message_, retries, message_P, message >>
+
+SagaProcessSR(self) == /\ pc[self] = "SagaProcessSR"
+                       /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                             THEN /\ \/ /\ TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessS"]
+                                        /\ UNCHANGED <<restarted, anyRestarted>>
+                                     \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                        /\ anyRestarted' = TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "SagaProcessS"]
+                                  /\ UNCHANGED << restarted, anyRestarted >>
+                       /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                       userPaidCredits, stockAvailable, 
+                                       stockHeld, stockSold, paymentStatus, 
+                                       stockStatus, orchestratorTxP, 
+                                       orchestratorTxS, orchestratorRxP, 
+                                       orchestratorRxS, checkoutStatus, 
+                                       message_, retries, message_P, message >>
+
+SagaProcessS(self) == /\ pc[self] = "SagaProcessS"
+                      /\ IF message_[self] = "checkoutOk"
+                            THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "completed"]
+                            ELSE /\ IF message_[self] = "checkoutFailed"
+                                       THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "failed"]
+                                       ELSE /\ IF message_[self] = "compensateOk"
+                                                  THEN /\ IF checkoutStatus[self][2] = "compensating"
+                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "compensated"]
+                                                             ELSE /\ TRUE
+                                                                  /\ UNCHANGED checkoutStatus
+                                                  ELSE /\ TRUE
+                                                       /\ UNCHANGED checkoutStatus
+                      /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      orchestratorRxS, restarted, anyRestarted, 
+                                      message_, retries, message_P, message >>
 
 SagaEnd(self) == /\ pc[self] = "SagaEnd"
                  /\ done' = TRUE
@@ -1176,8 +1324,12 @@ Orchestrator(self) == Start_(self) \/ Checkout2PC(self)
                          \/ Cont5(self) \/ Int6(self) \/ Cont6(self)
                          \/ 2pcEnd(self) \/ CheckoutSaga(self)
                          \/ CheckoutPaymentSaga(self)
+                         \/ CheckoutSagaMaybeR(self)
                          \/ CheckoutStockSaga(self)
-                         \/ CheckoutSagaProcess(self) \/ SagaEnd(self)
+                         \/ CheckoutSagaProcess(self)
+                         \/ SagaProcessPR(self) \/ SagaProcessP(self)
+                         \/ SagaProcessSR(self) \/ SagaProcessS(self)
+                         \/ SagaEnd(self)
 
 Start_P(self) == /\ pc[self] = "Start_P"
                  /\ orchestratorTxP # <<>> \/ done
@@ -1282,8 +1434,10 @@ PaymentReqProcessing(self) == /\ pc[self] = "PaymentReqProcessing"
                                                                                      /\ UNCHANGED orchestratorRxP
                                                                                 ELSE /\ IF paymentStatus = "completed"
                                                                                            THEN /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutOk")
-                                                                                           ELSE /\ TRUE
-                                                                                                /\ UNCHANGED orchestratorRxP
+                                                                                           ELSE /\ IF paymentStatus = "failed"
+                                                                                                      THEN /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutFailed")
+                                                                                                      ELSE /\ TRUE
+                                                                                                           /\ UNCHANGED orchestratorRxP
                                                                                      /\ pc' = [pc EXCEPT ![self] = "step_"]
                                                                                      /\ UNCHANGED << userCredits, 
                                                                                                      userPaidCredits, 
@@ -1767,8 +1921,10 @@ StockReqProcessing(self) == /\ pc[self] = "StockReqProcessing"
                                                                                    /\ UNCHANGED orchestratorRxS
                                                                               ELSE /\ IF stockStatus = "completed"
                                                                                          THEN /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutOk")
-                                                                                         ELSE /\ TRUE
-                                                                                              /\ UNCHANGED orchestratorRxS
+                                                                                         ELSE /\ IF stockStatus = "failed"
+                                                                                                    THEN /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutFailed")
+                                                                                                    ELSE /\ TRUE
+                                                                                                         /\ UNCHANGED orchestratorRxS
                                                                                    /\ pc' = [pc EXCEPT ![self] = "step"]
                                                                                    /\ UNCHANGED << stockAvailable, 
                                                                                                    stockSold, 
