@@ -9,3 +9,7 @@ recovery, HAProxy gateway, active-active architecture, comprehensive test suite 
 Daniel Popovici:
 Contributed to initial microservice implementations, Kubernetes configuration, fault tolerance
 testing (2PC/Saga validation), and 2PC bug fixes.
+
+Dinu Blanovschi:
+
+TLA+ model for formal proofs of consistency and fault tolerance of our code.
