@@ -99,11 +99,12 @@ def restore_topology():
     For each drifted service:
     1. REPLICAOF NO ONE on the original master (promote it back)
     2. REPLICAOF <master> 6379 on the replica (demote it back)
-    3. Restart Sentinel so it re-resolves the original master hostnames
+    3. SENTINEL REMOVE + SENTINEL MONITOR to give sentinels the correct master
+       IP directly — avoids the multi-second failover cycle that SENTINEL RESET
+       triggers when the current monitored IP has become a replica.
     4. Poll until Sentinel reports the correct master
     """
     drifted = is_topology_drifted()
-    any_drifted = any(drifted.values())
 
     for service_name, is_drifted in drifted.items():
         if not is_drifted:
@@ -123,18 +124,34 @@ def restore_topology():
         # Demote the replica back (use container hostname for Docker DNS resolution)
         _redis_cli(replica_container, "REPLICAOF", master_container, "6379")
 
-    if not any_drifted:
-        return
+        # Explicitly re-register the master with each sentinel.
+        # SENTINEL RESET keeps the old (drifted) master IP and waits for
+        # auto-discovery which can take >60s when failover-timeout doubles
+        # after repeated failovers. SENTINEL REMOVE + MONITOR gives the
+        # correct IP immediately.
+        master_ip = get_container_ip(master_container)
+        if master_ip:
+            for sentinel in SENTINEL_CONTAINERS:
+                _redis_cli(sentinel, "SENTINEL", "REMOVE", service_name, port=26379)
+                _redis_cli(sentinel, "SENTINEL", "MONITOR", service_name,
+                           master_ip, "6379", "2", port=26379)
+                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
+                           "auth-pass", "redis", port=26379)
+                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
+                           "down-after-milliseconds", "5000", port=26379)
+                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
+                           "failover-timeout", "10000", port=26379)
+        else:
+            print(f"[topology] WARNING: Cannot resolve IP for {master_container}, "
+                  f"falling back to SENTINEL RESET")
+            for sentinel in SENTINEL_CONTAINERS:
+                _redis_cli(sentinel, "SENTINEL", "RESET", "*", port=26379)
 
-    # Restart all sentinels so sentinel-entrypoint.sh re-resolves the expected
-    # master container IPs. SENTINEL RESET alone can leave stock-master pinned
-    # to the old promoted replica even after Redis roles are restored.
-    print("[topology] Restarting sentinels to refresh monitored masters")
-    _docker_compose("restart", *SENTINEL_CONTAINERS)
-    time.sleep(5)
+    # Brief settle for sentinel state propagation
+    time.sleep(3)
 
     # Wait for sentinels to converge on the correct masters
-    _wait_sentinel_converged(timeout=30)
+    _wait_sentinel_converged(timeout=60)
 
 
 def _wait_redis_ready(container: str, timeout: float = 15):
@@ -148,7 +165,7 @@ def _wait_redis_ready(container: str, timeout: float = 15):
     print(f"[topology] WARNING: {container} did not respond to PING within {timeout}s")
 
 
-def _wait_sentinel_converged(timeout: float = 30):
+def _wait_sentinel_converged(timeout: float = 60):
     """Poll sentinel until all services report the expected master IP."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

@@ -198,7 +198,7 @@ async def subscribe_failover_invalidation(
 
                     data = message.get("data", "")
                     logger.warning("Sentinel failover detected, invalidating pools",
-                                   service=service_name, event=data)
+                                   service=service_name, switch_master=data)
                     for pool in pools:
                         try:
                             await pool.connection_pool.disconnect()

@@ -188,7 +188,7 @@ def _ensure_clean_topology(request):
         print(f"\n[topology] Drift detected: {drifted}, restoring...")
         restore_topology()
         restart_app_services()
-        wait_stack_healthy(timeout=60)
+        wait_stack_healthy(timeout=120)
     yield
 
 

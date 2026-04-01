@@ -111,6 +111,7 @@ services:
     command: >
       redis-server
         --requirepass redis
+        --masterauth redis
         --maxmemory 200mb
         --appendonly yes
         --appendfsync everysec
@@ -127,6 +128,7 @@ services:
     command: >
       redis-server
         --requirepass redis
+        --masterauth redis
         --maxmemory 200mb
         --appendonly yes
         --appendfsync everysec
@@ -143,6 +145,7 @@ services:
     command: >
       redis-server
         --requirepass redis
+        --masterauth redis
         --maxmemory 200mb
         --appendonly yes
         --appendfsync everysec

@@ -114,7 +114,9 @@ async def handle_nats_message(msg):
         # the orchestrator's next action (e.g. commit after prepare).
         if event in ("prepared", "committed", "executed", "aborted", "compensated"):
             try:
-                await db.execute_command("WAIT", 1, 5000)
+                info = await db.info("replication")
+                if info.get("connected_slaves", 0) > 0:
+                    await db.execute_command("WAIT", 1, 5000)
             except Exception:
                 log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":

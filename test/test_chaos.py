@@ -329,15 +329,12 @@ async def test_redis_failover_data_loss_detection():
                     httpx.ConnectError, httpx.TimeoutException) as e:
                 tracker.record_exception(e)
 
-        # Restart stock-db and services (refresh connection pools + reload Lua)
-        _docker_compose("start", "stock-db")
-        await asyncio.sleep(10.0)
-        _docker_compose("restart", "stock-service", "stock-service-2",
-                        "order-service-1", "order-service-2", "gateway")
-        await asyncio.sleep(15.0)
-        await wait_gateway_healthy(client)
+        # Check conservation while stock-db is still dead and stock-db-replica
+        # is the sole master. Starting stock-db first would cause db_read
+        # (slave_for) to connect to the partially-resynced slave and read
+        # stale stock values before the resync completes.
+        await wait_gateway_healthy(client, max_wait=120.0)
 
-        # Check stock/find works
         r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
         if r.status_code == 200:
             # Item survived failover — verify conservation
@@ -354,11 +351,18 @@ async def test_redis_failover_data_loss_detection():
             r = await client.get(f"{GATEWAY}/payment/find_user/{user_id}")
             assert r.status_code == 200
             final_credit = r.json()["credit"]
-            # Credit should only differ by successful committed transactions (0 if item not found)
             assert final_credit >= 0, f"Negative credit after data loss: {final_credit}"
             print(f"Item lost in failover — credit check only. Final credit: {final_credit}")
 
         print(f"Failover outcomes: {tracker.summary()}")
+
+        # Bring stock-db back up and restore topology for subsequent tests.
+        _docker_compose("start", "stock-db")
+        await asyncio.sleep(30.0)
+        from topology import restore_topology, restart_app_services, wait_stack_healthy as _topo_healthy
+        restore_topology()
+        restart_app_services()
+        _topo_healthy(timeout=120)
 
 
 # ---------------------------------------------------------------------------
