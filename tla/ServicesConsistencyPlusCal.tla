@@ -42,9 +42,13 @@ define
     StockConsistent == stockAvailable + stockHeld + stockSold = InitialStock
 
     EventuallyCompletes == <>(
-        \/ paymentStatus = "completed" /\ stockStatus = "completed"
-        \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"}
-        \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"}
+        /\ (
+            \/ paymentStatus = "completed" /\ stockStatus = "completed" /\ userCredits + userPaidCredits = InitialCredits /\ stockAvailable + stockSold = InitialStock
+            \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+            \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+            )
+        /\ userHeldCredits = 0
+        /\ stockHeld = 0
     )
 end define;
 
@@ -520,29 +524,29 @@ StockReqProcessing:
 end process;
 
 end algorithm;*)
-\* BEGIN TRANSLATION (chksum(pcal) = "b4bcdb57" /\ chksum(tla) = "9a2c8f08")
-\* Label Start of process Orchestrator at line 68 col 5 changed to Start_
-\* Label Start of process PaymentWorker at line 301 col 5 changed to Start_P
-\* Label R of process PaymentWorker at line 52 col 5 changed to R_
-\* Label PrepareSuccessResponseR of process PaymentWorker at line 52 col 5 changed to PrepareSuccessResponseR_
-\* Label PrepareSuccessResponse of process PaymentWorker at line 320 col 21 changed to PrepareSuccessResponse_
-\* Label PrepareFailedResponseR of process PaymentWorker at line 52 col 5 changed to PrepareFailedResponseR_
-\* Label PrepareFailedResponse of process PaymentWorker at line 326 col 21 changed to PrepareFailedResponse_
-\* Label ReplyCommitResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCommitResponseR_
-\* Label ReplyCommitResponse of process PaymentWorker at line 343 col 17 changed to ReplyCommitResponse_
-\* Label ReplyCommitResponse2 of process PaymentWorker at line 346 col 17 changed to ReplyCommitResponse2_
-\* Label ReplyAbortMessageR of process PaymentWorker at line 52 col 5 changed to ReplyAbortMessageR_
-\* Label ReplyAbortMessage of process PaymentWorker at line 362 col 17 changed to ReplyAbortMessage_
-\* Label ReplyAbort2 of process PaymentWorker at line 365 col 17 changed to ReplyAbort2_
-\* Label ReplyCheckoutResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCheckoutResponseR_
-\* Label ReplyCheckoutResponse of process PaymentWorker at line 376 col 21 changed to ReplyCheckoutResponse_
-\* Label FailedCheckoutResponseR of process PaymentWorker at line 52 col 5 changed to FailedCheckoutResponseR_
-\* Label FailedCheckoutResponse of process PaymentWorker at line 382 col 21 changed to FailedCheckoutResponse_
-\* Label ReplyCompensateResponseR of process PaymentWorker at line 52 col 5 changed to ReplyCompensateResponseR_
-\* Label ReplyCompensateResponse of process PaymentWorker at line 399 col 17 changed to ReplyCompensateResponse_
-\* Label step of process PaymentWorker at line 406 col 9 changed to step_
-\* Process variable message of process Orchestrator at line 65 col 28 changed to message_
-\* Process variable message of process PaymentWorker at line 298 col 5 changed to message_P
+\* BEGIN TRANSLATION (chksum(pcal) = "c458e0ff" /\ chksum(tla) = "3eebe4c6")
+\* Label Start of process Orchestrator at line 72 col 5 changed to Start_
+\* Label Start of process PaymentWorker at line 305 col 5 changed to Start_P
+\* Label R of process PaymentWorker at line 56 col 5 changed to R_
+\* Label PrepareSuccessResponseR of process PaymentWorker at line 56 col 5 changed to PrepareSuccessResponseR_
+\* Label PrepareSuccessResponse of process PaymentWorker at line 324 col 21 changed to PrepareSuccessResponse_
+\* Label PrepareFailedResponseR of process PaymentWorker at line 56 col 5 changed to PrepareFailedResponseR_
+\* Label PrepareFailedResponse of process PaymentWorker at line 330 col 21 changed to PrepareFailedResponse_
+\* Label ReplyCommitResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCommitResponseR_
+\* Label ReplyCommitResponse of process PaymentWorker at line 347 col 17 changed to ReplyCommitResponse_
+\* Label ReplyCommitResponse2 of process PaymentWorker at line 350 col 17 changed to ReplyCommitResponse2_
+\* Label ReplyAbortMessageR of process PaymentWorker at line 56 col 5 changed to ReplyAbortMessageR_
+\* Label ReplyAbortMessage of process PaymentWorker at line 366 col 17 changed to ReplyAbortMessage_
+\* Label ReplyAbort2 of process PaymentWorker at line 369 col 17 changed to ReplyAbort2_
+\* Label ReplyCheckoutResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCheckoutResponseR_
+\* Label ReplyCheckoutResponse of process PaymentWorker at line 380 col 21 changed to ReplyCheckoutResponse_
+\* Label FailedCheckoutResponseR of process PaymentWorker at line 56 col 5 changed to FailedCheckoutResponseR_
+\* Label FailedCheckoutResponse of process PaymentWorker at line 386 col 21 changed to FailedCheckoutResponse_
+\* Label ReplyCompensateResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCompensateResponseR_
+\* Label ReplyCompensateResponse of process PaymentWorker at line 403 col 17 changed to ReplyCompensateResponse_
+\* Label step of process PaymentWorker at line 410 col 9 changed to step_
+\* Process variable message of process Orchestrator at line 69 col 28 changed to message_
+\* Process variable message of process PaymentWorker at line 302 col 5 changed to message_P
 VARIABLES pc, done, userCredits, userHeldCredits, userPaidCredits, 
           stockAvailable, stockHeld, stockSold, paymentStatus, stockStatus, 
           orchestratorTxP, orchestratorTxS, orchestratorRxP, orchestratorRxS, 
@@ -564,9 +568,13 @@ UserCreditsConsistent == userCredits + userHeldCredits + userPaidCredits = Initi
 StockConsistent == stockAvailable + stockHeld + stockSold = InitialStock
 
 EventuallyCompletes == <>(
-    \/ paymentStatus = "completed" /\ stockStatus = "completed"
-    \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"}
-    \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"}
+    /\ (
+        \/ paymentStatus = "completed" /\ stockStatus = "completed" /\ userCredits + userPaidCredits = InitialCredits /\ stockAvailable + stockSold = InitialStock
+        \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+        \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+        )
+    /\ userHeldCredits = 0
+    /\ stockHeld = 0
 )
 
 VARIABLES checkoutStatus, message_, retries, message_P, message
