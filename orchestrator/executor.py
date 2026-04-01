@@ -168,13 +168,21 @@ class TwoPCExecutor(_BaseExecutor):
 
         if all_prepared:
             # Phase 2a: COMMIT (irrevocable)
-            await self.wal.log(saga_id, "COMMITTING", context)
+            await self.wal.log(
+                saga_id,
+                "COMMITTING",
+                {**context, "protocol": "2pc", "tx_name": tx_name},
+            )
             await self._verified_action("commit", "committed", saga_id, tx_def.steps, context)
             await self.wal.log_terminal(saga_id, "COMPLETED")
             return {"status": "success"}
         else:
             # Phase 2b: ABORT (release locks) — verified retry like commit
-            await self.wal.log(saga_id, "ABORTING", context)
+            await self.wal.log(
+                saga_id,
+                "ABORTING",
+                {**context, "protocol": "2pc", "tx_name": tx_name},
+            )
             await self._verified_action("abort", "aborted", saga_id, tx_def.steps, context)
             await self.wal.log_terminal(saga_id, "FAILED")
             reason = "insufficient_resources"

@@ -238,16 +238,18 @@ async def batch_init_users(request: Request):
 
 async def find_order(request: Request):
     order_id = request.path_params["order_id"]
-    # Pipeline: hgetall + lrange in 1 RTT
-    conn = db_read or db
     try:
-        async with conn.pipeline(transaction=False) as pipe:
+        # External reads must prefer the current Sentinel master. After a failover,
+        # a read replica can lag or still be reconnecting.
+        async with db.pipeline(transaction=False) as pipe:
             pipe.hgetall(f"order:{order_id}")
             pipe.lrange(f"order:{order_id}:items", 0, -1)
             entry, raw_items = await pipe.execute()
     except Exception:
+        if not db_read:
+            raise HTTPException(400, detail=DB_ERROR_STR)
         try:
-            async with db.pipeline(transaction=False) as pipe:
+            async with db_read.pipeline(transaction=False) as pipe:
                 pipe.hgetall(f"order:{order_id}")
                 pipe.lrange(f"order:{order_id}:items", 0, -1)
                 entry, raw_items = await pipe.execute()

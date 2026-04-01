@@ -109,6 +109,10 @@ async def handle_nats_message(msg):
     fields = json.loads(msg.data.decode())
     saga_id = fields.get("saga_id", "")
     try:
+        # Force Sentinel to re-resolve the master before each transaction step.
+        # Without this, a stale pooled connection can reconnect to the old master
+        # if it comes back before Sentinel has fully rewired it as a replica.
+        await db.connection_pool.disconnect()
         event = await handle_command(fields)
         # Ensure mutating writes reach at least one replica before confirming.
         # Prevents data loss during Sentinel failover between our response and
@@ -231,12 +235,15 @@ async def batch_init_users(request: Request):
 
 async def find_item(request: Request):
     item_id = request.path_params["item_id"]
-    conn = db_read or db
     try:
-        entry = await conn.hgetall(f"item:{item_id}")
+        # External reads must prefer the current Sentinel master. After a failover,
+        # the replica may still be reconnecting or serving stale data.
+        entry = await db.hgetall(f"item:{item_id}")
     except Exception:
+        if not db_read:
+            raise HTTPException(400, detail=DB_ERROR_STR)
         try:
-            entry = await db.hgetall(f"item:{item_id}")
+            entry = await db_read.hgetall(f"item:{item_id}")
         except aioredis.RedisError:
             raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:
