@@ -46,7 +46,7 @@ htmlcov/
 _template/
 
 # TLA+
-tla/tla2tools.jar
+# tla/tla2tools.jar
 tla/states/
 tla/*_TTrace_*
 
