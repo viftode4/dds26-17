@@ -2,20 +2,20 @@
 TLC2 Version 2026.03.31.154134 (rev: becec35)
 @!@!@ENDMSG 2262 @!@!@
 @!@!@STARTMSG 2187:0 @!@!@
-Running breadth-first search Model-Checking with fp 110 and seed 7739962199152997253 with 12 workers on 12 cores with 7282MB heap and 64MB offheap memory [pid: 61755] (Mac OS X 26.2 x86_64, Homebrew 25.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 82 and seed 7268928916856541671 with 8 workers on 10 cores with 7282MB heap and 64MB offheap memory [pid: 42345] (Mac OS X 26.4 aarch64, Oracle Corporation 25.0.1 64bit, MSBDiskFPSet, DiskStateQueue).
 @!@!@ENDMSG 2187 @!@!@
 @!@!@STARTMSG 2220:0 @!@!@
 Starting SANY...
 @!@!@ENDMSG 2220 @!@!@
-Parsing file /Users/dinu/distributed-data-systems/tla/ServicesConsistencyPlusCal.tla
+Parsing file /Users/dinu.blanovschi/proj/dds26-17/tla/ServicesConsistencyPlusCal.tla
 Warning: symbols were renamed.
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/Naturals.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/Sequences.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/TLC.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/_TLCTrace.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/FiniteSets.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/TLCExt.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
-Parsing file /private/var/folders/m4/tzjdbzl52z71qmf013sljdwr0000gp/T/tlc-8449888894702117062/Integers.tla (jar:file:/Users/dinu/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/Naturals.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/Sequences.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/TLC.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/_TLCTrace.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/FiniteSets.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/TLCExt.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file /private/var/folders/q5/jh667zc56pzbcbp87z9wknsw0000gn/T/tlc-18246840413824512099/Integers.tla (jar:file:/Users/dinu.blanovschi/.vscode/extensions/tlaplus.vscode-ide-2026.3.311551/tools/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
 Semantic processing of module Naturals
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
@@ -31,7 +31,7 @@ Linting of module ServicesConsistencyPlusCal
 SANY finished.
 @!@!@ENDMSG 2219 @!@!@
 @!@!@STARTMSG 2185:0 @!@!@
-Starting... (2026-04-01 02:49:34)
+Starting... (2026-04-01 14:12:56)
 @!@!@ENDMSG 2185 @!@!@
 @!@!@STARTMSG 2212:0 @!@!@
 Implied-temporal checking--satisfiability problem has 1 branches.
@@ -40,1409 +40,2642 @@ Implied-temporal checking--satisfiability problem has 1 branches.
 Computing initial states...
 @!@!@ENDMSG 2189 @!@!@
 @!@!@STARTMSG 2190:0 @!@!@
-Finished computing initial states: 1 distinct state generated at 2026-04-01 02:49:34.
+Finished computing initial states: 1 distinct state generated at 2026-04-01 14:12:56.
 @!@!@ENDMSG 2190 @!@!@
 @!@!@STARTMSG 2200:0 @!@!@
-Progress(29) at 2026-04-01 02:49:35: 450 states generated, 205 distinct states found, 0 states left on queue.
+Progress(73) at 2026-04-01 14:12:57: 44,622 states generated, 16,442 distinct states found, 0 states left on queue.
 @!@!@ENDMSG 2200 @!@!@
 @!@!@STARTMSG 2192:0 @!@!@
-Checking temporal properties for the complete state space with 205 total distinct states at (2026-04-01 02:49:35)
+Checking temporal properties for the complete state space with 16442 total distinct states at (2026-04-01 14:12:57)
 @!@!@ENDMSG 2192 @!@!@
 @!@!@STARTMSG 2267:0 @!@!@
-Finished checking temporal properties in 00s at 2026-04-01 02:49:35
+Finished checking temporal properties in 00s at 2026-04-01 14:12:57
 @!@!@ENDMSG 2267 @!@!@
 @!@!@STARTMSG 2193:0 @!@!@
 Model checking completed. No error has been found.
   Estimates of the probability that TLC did not check all reachable states
   because two distinct states had the same fingerprint:
-  calculated (optimistic):  val = 2.7E-15
+  calculated (optimistic):  val = 2.5E-11
 @!@!@ENDMSG 2193 @!@!@
 @!@!@STARTMSG 2201:0 @!@!@
-The coverage statistics at 2026-04-01 02:49:35 (see https://explain.tlapl.us/module-coverage-statistics for how to interpret the following statistics).
+The coverage statistics at 2026-04-01 14:12:57 (see https://explain.tlapl.us/module-coverage-statistics for how to interpret the following statistics).
 @!@!@ENDMSG 2201 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<done line 387, col 15 to line 387, col 18 of module ServicesConsistencyPlusCal>: 2
+<done line 512, col 15 to line 512, col 18 of module ServicesConsistencyPlusCal>: 1
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<message_ line 412, col 27 to line 412, col 34 of module ServicesConsistencyPlusCal>: 4
+<message_ line 538, col 27 to line 538, col 34 of module ServicesConsistencyPlusCal>: 4
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<stockStatus line 388, col 64 to line 388, col 74 of module ServicesConsistencyPlusCal>: 2
+<stockStatus line 513, col 64 to line 513, col 74 of module ServicesConsistencyPlusCal>: 3
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<userPaidCredits line 387, col 51 to line 387, col 65 of module ServicesConsistencyPlusCal>: 2
+<userPaidCredits line 512, col 51 to line 512, col 65 of module ServicesConsistencyPlusCal>: 1
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<stockSold line 388, col 38 to line 388, col 46 of module ServicesConsistencyPlusCal>: 1
+<stockSold line 513, col 38 to line 513, col 46 of module ServicesConsistencyPlusCal>: 1
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<pc line 387, col 11 to line 387, col 12 of module ServicesConsistencyPlusCal>: 39
+<pc line 512, col 11 to line 512, col 12 of module ServicesConsistencyPlusCal>: 552
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<message_P line 412, col 37 to line 412, col 45 of module ServicesConsistencyPlusCal>: 3
+<restarted line 515, col 11 to line 515, col 19 of module ServicesConsistencyPlusCal>: 4
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<userCredits line 387, col 21 to line 387, col 31 of module ServicesConsistencyPlusCal>: 2
+<message_P line 538, col 46 to line 538, col 54 of module ServicesConsistencyPlusCal>: 3
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<userHeldCredits line 387, col 34 to line 387, col 48 of module ServicesConsistencyPlusCal>: 1
+<userCredits line 512, col 21 to line 512, col 31 of module ServicesConsistencyPlusCal>: 1
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<orchestratorRxP line 389, col 45 to line 389, col 59 of module ServicesConsistencyPlusCal>: 5
+<userHeldCredits line 512, col 34 to line 512, col 48 of module ServicesConsistencyPlusCal>: 1
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<orchestratorRxS line 389, col 62 to line 389, col 76 of module ServicesConsistencyPlusCal>: 2
+<retries line 538, col 37 to line 538, col 43 of module ServicesConsistencyPlusCal>: 3
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<orchestratorTxP line 389, col 11 to line 389, col 25 of module ServicesConsistencyPlusCal>: 5
+<orchestratorRxP line 514, col 45 to line 514, col 59 of module ServicesConsistencyPlusCal>: 3
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<orchestratorTxS line 389, col 28 to line 389, col 42 of module ServicesConsistencyPlusCal>: 2
+<orchestratorRxS line 514, col 62 to line 514, col 76 of module ServicesConsistencyPlusCal>: 9
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<stockHeld line 388, col 27 to line 388, col 35 of module ServicesConsistencyPlusCal>: 1
+<orchestratorTxP line 514, col 11 to line 514, col 25 of module ServicesConsistencyPlusCal>: 7
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<stockAvailable line 388, col 11 to line 388, col 24 of module ServicesConsistencyPlusCal>: 1
+<orchestratorTxS line 514, col 28 to line 514, col 42 of module ServicesConsistencyPlusCal>: 11
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<checkoutStatus line 412, col 11 to line 412, col 24 of module ServicesConsistencyPlusCal>: 6
+<stockHeld line 513, col 27 to line 513, col 35 of module ServicesConsistencyPlusCal>: 2
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<message line 412, col 48 to line 412, col 54 of module ServicesConsistencyPlusCal>: 2
+<stockAvailable line 513, col 11 to line 513, col 24 of module ServicesConsistencyPlusCal>: 2
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2779:0 @!@!@
-<paymentStatus line 388, col 49 to line 388, col 61 of module ServicesConsistencyPlusCal>: 3
+<anyRestarted line 515, col 22 to line 515, col 33 of module ServicesConsistencyPlusCal>: 2
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<checkoutStatus line 538, col 11 to line 538, col 24 of module ServicesConsistencyPlusCal>: 10
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<message line 538, col 57 to line 538, col 63 of module ServicesConsistencyPlusCal>: 3
+@!@!@ENDMSG 2779 @!@!@
+@!@!@STARTMSG 2779:0 @!@!@
+<paymentStatus line 513, col 49 to line 513, col 61 of module ServicesConsistencyPlusCal>: 2
 @!@!@ENDMSG 2779 @!@!@
 @!@!@STARTMSG 2773:0 @!@!@
-<Init line 421, col 1 to line 421, col 4 of module ServicesConsistencyPlusCal>: 1:1
+<Init line 548, col 1 to line 548, col 4 of module ServicesConsistencyPlusCal>: 1:1
 @!@!@ENDMSG 2773 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 422, col 12 to line 422, col 23 of module ServicesConsistencyPlusCal: 1
+  line 549, col 12 to line 549, col 23 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 423, col 12 to line 423, col 39 of module ServicesConsistencyPlusCal: 1
+  line 550, col 12 to line 550, col 39 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 426, col 12 to line 426, col 40 of module ServicesConsistencyPlusCal: 1
+  line 553, col 12 to line 553, col 40 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 431, col 12 to line 431, col 33 of module ServicesConsistencyPlusCal: 1
+  line 558, col 12 to line 558, col 33 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 432, col 12 to line 432, col 33 of module ServicesConsistencyPlusCal: 1
+  line 559, col 12 to line 559, col 33 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 433, col 12 to line 433, col 33 of module ServicesConsistencyPlusCal: 1
+  line 560, col 12 to line 560, col 33 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 434, col 12 to line 434, col 33 of module ServicesConsistencyPlusCal: 1
+  line 561, col 12 to line 561, col 33 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 436, col 12 to line 436, col 32 of module ServicesConsistencyPlusCal: 1
+  line 562, col 12 to line 562, col 46 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 442, col 12 to line 444, col 68 of module ServicesConsistencyPlusCal: 1
+  line 563, col 12 to line 563, col 31 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2775:0 @!@!@
-  |line 442, col 17 to line 444, col 68 of module ServicesConsistencyPlusCal: 1:3
+  line 565, col 29 to line 565, col 51 of module ServicesConsistencyPlusCal: 1:1
 @!@!@ENDMSG 2775 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  ||line 442, col 39 to line 444, col 67 of module ServicesConsistencyPlusCal: 3
+  |line 565, col 47 to line 565, col 50 of module ServicesConsistencyPlusCal: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 565, col 39 to line 565, col 41 of module ServicesConsistencyPlusCal: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 566, col 23 to line 566, col 43 of module ServicesConsistencyPlusCal: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 566, col 33 to line 566, col 35 of module ServicesConsistencyPlusCal: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 567, col 22 to line 567, col 44 of module ServicesConsistencyPlusCal: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 567, col 40 to line 567, col 43 of module ServicesConsistencyPlusCal: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 567, col 32 to line 567, col 34 of module ServicesConsistencyPlusCal: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 569, col 24 to line 569, col 44 of module ServicesConsistencyPlusCal: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 569, col 34 to line 569, col 36 of module ServicesConsistencyPlusCal: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  line 571, col 22 to line 571, col 42 of module ServicesConsistencyPlusCal: 1:1
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 571, col 32 to line 571, col 34 of module ServicesConsistencyPlusCal: 1:2
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 572, col 12 to line 574, col 67 of module ServicesConsistencyPlusCal: 1
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2775:0 @!@!@
+  |line 572, col 17 to line 574, col 67 of module ServicesConsistencyPlusCal: 1:3
+@!@!@ENDMSG 2775 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  ||line 572, col 39 to line 574, col 66 of module ServicesConsistencyPlusCal: 3
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |||line 442, col 44 to line 442, col 62 of module ServicesConsistencyPlusCal: 3
+  |||line 572, col 44 to line 572, col 67 of module ServicesConsistencyPlusCal: 3
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |||line 443, col 44 to line 443, col 69 of module ServicesConsistencyPlusCal: 2
+  |||line 573, col 44 to line 573, col 68 of module ServicesConsistencyPlusCal: 2
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |||line 444, col 44 to line 444, col 67 of module ServicesConsistencyPlusCal: 1
+  |||line 574, col 44 to line 574, col 66 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  ||line 442, col 27 to line 442, col 33 of module ServicesConsistencyPlusCal: 1
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2772:0 @!@!@
-<Start line 446, col 1 to line 446, col 5 of module ServicesConsistencyPlusCal>: 1:1
-@!@!@ENDMSG 2772 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 446, col 13 to line 446, col 27 of module ServicesConsistencyPlusCal: 214
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 446, col 13 to line 446, col 17 of module ServicesConsistencyPlusCal: 213
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 447, col 13 to line 447, col 60 of module ServicesConsistencyPlusCal: 1
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 448, col 16 to line 448, col 27 of module ServicesConsistencyPlusCal: 1
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 449, col 24 to line 449, col 61 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 450, col 21 to line 450, col 62 of module ServicesConsistencyPlusCal: 1
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 451, col 13 to line 455, col 35 of module ServicesConsistencyPlusCal: 1
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2772:0 @!@!@
-<Checkout2PC line 457, col 1 to line 457, col 11 of module ServicesConsistencyPlusCal>: 0:0
-@!@!@ENDMSG 2772 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 457, col 19 to line 457, col 39 of module ServicesConsistencyPlusCal: 213
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 458, col 19 to line 458, col 63 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 459, col 19 to line 464, col 78 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2772:0 @!@!@
-<CheckoutPayment2PC line 466, col 1 to line 466, col 18 of module ServicesConsistencyPlusCal>: 0:0
-@!@!@ENDMSG 2772 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 466, col 26 to line 466, col 53 of module ServicesConsistencyPlusCal: 213
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 467, col 26 to line 467, col 78 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 468, col 26 to line 468, col 83 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 469, col 26 to line 469, col 68 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 470, col 26 to line 475, col 69 of module ServicesConsistencyPlusCal: 0
+  ||line 572, col 27 to line 572, col 33 of module ServicesConsistencyPlusCal: 1
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutStock2PC line 477, col 1 to line 477, col 16 of module ServicesConsistencyPlusCal>: 0:0
+<Start_ line 576, col 1 to line 576, col 12 of module ServicesConsistencyPlusCal>: 41:345
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 477, col 24 to line 477, col 49 of module ServicesConsistencyPlusCal: 213
+  line 576, col 20 to line 576, col 38 of module ServicesConsistencyPlusCal: 16792
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 478, col 24 to line 478, col 76 of module ServicesConsistencyPlusCal: 0
+  |line 576, col 20 to line 576, col 27 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 479, col 24 to line 479, col 81 of module ServicesConsistencyPlusCal: 0
+  line 577, col 20 to line 577, col 101 of module ServicesConsistencyPlusCal: 345
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 480, col 24 to line 480, col 65 of module ServicesConsistencyPlusCal: 0
+  line 578, col 20 to line 578, col 73 of module ServicesConsistencyPlusCal: 345
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 481, col 24 to line 486, col 46 of module ServicesConsistencyPlusCal: 0
+  line 579, col 23 to line 579, col 34 of module ServicesConsistencyPlusCal: 345
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 580, col 28 to line 580, col 71 of module ServicesConsistencyPlusCal: 345
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 581, col 31 to line 581, col 72 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 582, col 20 to line 587, col 77 of module ServicesConsistencyPlusCal: 345
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutProcess line 488, col 1 to line 488, col 15 of module ServicesConsistencyPlusCal>: 0:0
+<Checkout2PC line 589, col 1 to line 589, col 17 of module ServicesConsistencyPlusCal>: 61:297
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 488, col 23 to line 488, col 47 of module ServicesConsistencyPlusCal: 213
+  line 589, col 25 to line 589, col 48 of module ServicesConsistencyPlusCal: 16744
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 490, col 34 to line 490, col 66 of module ServicesConsistencyPlusCal: 0
+  |line 589, col 25 to line 589, col 32 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 491, col 34 to line 491, col 73 of module ServicesConsistencyPlusCal: 0
+  line 590, col 25 to line 590, col 72 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 492, col 34 to line 492, col 82 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 493, col 34 to line 494, col 80 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 496, col 45 to line 496, col 77 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 497, col 45 to line 497, col 84 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 498, col 45 to line 498, col 98 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 499, col 45 to line 501, col 74 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 503, col 56 to line 503, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 504, col 56 to line 504, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 505, col 56 to line 505, col 103 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 506, col 56 to line 506, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 508, col 67 to line 508, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 509, col 67 to line 509, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 510, col 67 to line 510, col 110 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 511, col 67 to line 511, col 108 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 513, col 78 to line 513, col 128 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 514, col 78 to line 514, col 128 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 515, col 78 to line 515, col 121 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 516, col 78 to line 516, col 119 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 518, col 89 to line 518, col 121 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 519, col 89 to line 519, col 130 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 520, col 78 to line 522, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 523, col 45 to line 524, col 68 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 525, col 34 to line 525, col 58 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 526, col 23 to line 529, col 56 of module ServicesConsistencyPlusCal: 0
+  line 591, col 25 to line 598, col 58 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ProcessMessageCheckout line 531, col 1 to line 531, col 22 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutPayment2PC line 600, col 1 to line 600, col 24 of module ServicesConsistencyPlusCal>: 66:297
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 531, col 30 to line 531, col 61 of module ServicesConsistencyPlusCal: 213
+  line 600, col 32 to line 600, col 62 of module ServicesConsistencyPlusCal: 16744
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 534, col 52 to line 534, col 110 of module ServicesConsistencyPlusCal: 0
+  |line 600, col 32 to line 600, col 39 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 536, col 52 to line 536, col 75 of module ServicesConsistencyPlusCal: 0
+  line 601, col 32 to line 601, col 84 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 539, col 63 to line 539, col 119 of module ServicesConsistencyPlusCal: 0
+  line 602, col 32 to line 602, col 95 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 541, col 63 to line 541, col 86 of module ServicesConsistencyPlusCal: 0
+  line 603, col 32 to line 603, col 77 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 544, col 74 to line 544, col 133 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 546, col 74 to line 546, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 549, col 85 to line 549, col 142 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 551, col 85 to line 551, col 108 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 553, col 74 to line 553, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 554, col 30 to line 554, col 71 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 555, col 30 to line 561, col 52 of module ServicesConsistencyPlusCal: 0
+  line 604, col 32 to line 611, col 65 of module ServicesConsistencyPlusCal: 297
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ProcessMessageCheckoutStock line 563, col 1 to line 563, col 27 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutStock2PC line 613, col 1 to line 613, col 22 of module ServicesConsistencyPlusCal>: 78:491
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 563, col 35 to line 563, col 71 of module ServicesConsistencyPlusCal: 213
+  line 613, col 30 to line 613, col 58 of module ServicesConsistencyPlusCal: 16931
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 566, col 57 to line 566, col 115 of module ServicesConsistencyPlusCal: 0
+  |line 613, col 30 to line 613, col 37 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 568, col 57 to line 568, col 80 of module ServicesConsistencyPlusCal: 0
+  line 614, col 33 to line 614, col 79 of module ServicesConsistencyPlusCal: 484
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 571, col 68 to line 571, col 124 of module ServicesConsistencyPlusCal: 0
+  |line 614, col 33 to line 614, col 55 of module ServicesConsistencyPlusCal: 484
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 573, col 68 to line 573, col 91 of module ServicesConsistencyPlusCal: 0
+  |line 614, col 60 to line 614, col 79 of module ServicesConsistencyPlusCal: 9
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 576, col 79 to line 576, col 138 of module ServicesConsistencyPlusCal: 0
+  line 615, col 47 to line 615, col 50 of module ServicesConsistencyPlusCal: 7
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 578, col 79 to line 578, col 102 of module ServicesConsistencyPlusCal: 0
+  line 616, col 47 to line 616, col 104 of module ServicesConsistencyPlusCal: 7
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 581, col 90 to line 581, col 147 of module ServicesConsistencyPlusCal: 0
+  line 617, col 47 to line 617, col 83 of module ServicesConsistencyPlusCal: 7
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 583, col 90 to line 583, col 113 of module ServicesConsistencyPlusCal: 0
+  line 618, col 44 to line 620, col 82 of module ServicesConsistencyPlusCal: 7
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 585, col 79 to line 585, col 102 of module ServicesConsistencyPlusCal: 0
+  line 621, col 41 to line 621, col 98 of module ServicesConsistencyPlusCal: 477
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 586, col 35 to line 586, col 76 of module ServicesConsistencyPlusCal: 0
+  line 622, col 41 to line 622, col 79 of module ServicesConsistencyPlusCal: 477
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 587, col 35 to line 596, col 68 of module ServicesConsistencyPlusCal: 0
+  line 623, col 30 to line 630, col 52 of module ServicesConsistencyPlusCal: 491
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<2pcEnd line 598, col 1 to line 598, col 6 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutStock2PCContinuation line 632, col 1 to line 632, col 34 of module ServicesConsistencyPlusCal>: 67:485
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 598, col 14 to line 598, col 29 of module ServicesConsistencyPlusCal: 213
+  line 632, col 42 to line 632, col 82 of module ServicesConsistencyPlusCal: 16932
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 599, col 14 to line 599, col 25 of module ServicesConsistencyPlusCal: 0
+  |line 632, col 42 to line 632, col 49 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 600, col 14 to line 600, col 44 of module ServicesConsistencyPlusCal: 0
+  line 633, col 42 to line 633, col 94 of module ServicesConsistencyPlusCal: 485
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 601, col 14 to line 605, col 57 of module ServicesConsistencyPlusCal: 0
+  line 634, col 42 to line 634, col 105 of module ServicesConsistencyPlusCal: 485
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 635, col 42 to line 635, col 86 of module ServicesConsistencyPlusCal: 485
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 636, col 42 to line 648, col 75 of module ServicesConsistencyPlusCal: 485
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutSaga line 607, col 1 to line 607, col 12 of module ServicesConsistencyPlusCal>: 1:1
+<CheckoutProcess line 650, col 1 to line 650, col 21 of module ServicesConsistencyPlusCal>: 658:4227
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 607, col 20 to line 607, col 41 of module ServicesConsistencyPlusCal: 214
+  line 650, col 29 to line 650, col 56 of module ServicesConsistencyPlusCal: 20674
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 607, col 20 to line 607, col 24 of module ServicesConsistencyPlusCal: 213
+  |line 650, col 29 to line 650, col 36 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 608, col 20 to line 608, col 65 of module ServicesConsistencyPlusCal: 1
+  line 651, col 32 to line 651, col 53 of module ServicesConsistencyPlusCal: 4227
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 609, col 20 to line 614, col 79 of module ServicesConsistencyPlusCal: 1
+  line 652, col 40 to line 652, col 100 of module ServicesConsistencyPlusCal: 630
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 653, col 40 to line 653, col 79 of module ServicesConsistencyPlusCal: 630
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 654, col 40 to line 654, col 91 of module ServicesConsistencyPlusCal: 630
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 655, col 40 to line 658, col 78 of module ServicesConsistencyPlusCal: 630
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 659, col 43 to line 659, col 64 of module ServicesConsistencyPlusCal: 3597
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 660, col 51 to line 660, col 111 of module ServicesConsistencyPlusCal: 1424
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 661, col 51 to line 661, col 90 of module ServicesConsistencyPlusCal: 1424
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 662, col 51 to line 662, col 107 of module ServicesConsistencyPlusCal: 1424
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 663, col 51 to line 666, col 73 of module ServicesConsistencyPlusCal: 1424
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 667, col 54 to line 667, col 102 of module ServicesConsistencyPlusCal: 2173
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 668, col 62 to line 668, col 113 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 669, col 62 to line 669, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 670, col 62 to line 672, col 84 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 673, col 65 to line 673, col 153 of module ServicesConsistencyPlusCal: 2173
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 673, col 65 to line 673, col 98 of module ServicesConsistencyPlusCal: 2173
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 673, col 103 to line 673, col 153 of module ServicesConsistencyPlusCal: 254
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 674, col 73 to line 674, col 123 of module ServicesConsistencyPlusCal: 250
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 675, col 73 to line 675, col 106 of module ServicesConsistencyPlusCal: 250
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 676, col 73 to line 678, col 95 of module ServicesConsistencyPlusCal: 250
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 679, col 76 to line 679, col 164 of module ServicesConsistencyPlusCal: 1923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 679, col 76 to line 679, col 109 of module ServicesConsistencyPlusCal: 1923
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 679, col 114 to line 679, col 164 of module ServicesConsistencyPlusCal: 20
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 680, col 84 to line 680, col 134 of module ServicesConsistencyPlusCal: 16
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 681, col 84 to line 681, col 117 of module ServicesConsistencyPlusCal: 16
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 682, col 84 to line 684, col 106 of module ServicesConsistencyPlusCal: 16
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 685, col 87 to line 685, col 137 of module ServicesConsistencyPlusCal: 1907
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 686, col 95 to line 686, col 130 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 687, col 95 to line 690, col 117 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 691, col 98 to line 691, col 130 of module ServicesConsistencyPlusCal: 1907
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 691, col 98 to line 691, col 114 of module ServicesConsistencyPlusCal: 1907
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 691, col 119 to line 691, col 130 of module ServicesConsistencyPlusCal: 1718
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 692, col 109 to line 692, col 161 of module ServicesConsistencyPlusCal: 33
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 693, col 114 to line 695, col 161 of module ServicesConsistencyPlusCal: 14
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 696, col 120 to line 696, col 157 of module ServicesConsistencyPlusCal: 19
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 697, col 128 to line 697, col 179 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 698, col 128 to line 698, col 172 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 699, col 131 to line 699, col 166 of module ServicesConsistencyPlusCal: 19
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 700, col 136 to line 701, col 183 of module ServicesConsistencyPlusCal: 19
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 703, col 139 to line 704, col 161 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 705, col 117 to line 705, col 140 of module ServicesConsistencyPlusCal: 19
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 706, col 106 to line 706, col 150 of module ServicesConsistencyPlusCal: 33
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 707, col 106 to line 707, col 130 of module ServicesConsistencyPlusCal: 33
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 708, col 109 to line 708, col 141 of module ServicesConsistencyPlusCal: 1874
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 708, col 109 to line 708, col 125 of module ServicesConsistencyPlusCal: 1874
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 708, col 130 to line 708, col 141 of module ServicesConsistencyPlusCal: 1536
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 709, col 120 to line 709, col 172 of module ServicesConsistencyPlusCal: 106
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 710, col 125 to line 712, col 172 of module ServicesConsistencyPlusCal: 10
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 713, col 131 to line 713, col 168 of module ServicesConsistencyPlusCal: 96
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 714, col 139 to line 714, col 190 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 715, col 139 to line 715, col 183 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 716, col 142 to line 716, col 177 of module ServicesConsistencyPlusCal: 96
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 717, col 147 to line 718, col 194 of module ServicesConsistencyPlusCal: 84
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 719, col 150 to line 719, col 153 of module ServicesConsistencyPlusCal: 12
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 720, col 150 to line 721, col 172 of module ServicesConsistencyPlusCal: 12
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 722, col 128 to line 722, col 151 of module ServicesConsistencyPlusCal: 96
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 723, col 117 to line 723, col 161 of module ServicesConsistencyPlusCal: 106
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 724, col 117 to line 724, col 161 of module ServicesConsistencyPlusCal: 1768
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 725, col 117 to line 727, col 139 of module ServicesConsistencyPlusCal: 1768
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 728, col 106 to line 728, col 130 of module ServicesConsistencyPlusCal: 1874
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 729, col 51 to line 730, col 74 of module ServicesConsistencyPlusCal: 2173
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 731, col 40 to line 731, col 64 of module ServicesConsistencyPlusCal: 3597
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 732, col 29 to line 736, col 62 of module ServicesConsistencyPlusCal: 4227
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutPaymentSaga line 616, col 1 to line 616, col 19 of module ServicesConsistencyPlusCal>: 1:2
+<ProcessMessageCheckout line 738, col 1 to line 738, col 28 of module ServicesConsistencyPlusCal>: 103:548
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 616, col 27 to line 616, col 55 of module ServicesConsistencyPlusCal: 215
+  line 738, col 36 to line 738, col 70 of module ServicesConsistencyPlusCal: 16977
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 616, col 27 to line 616, col 31 of module ServicesConsistencyPlusCal: 213
+  |line 738, col 36 to line 738, col 43 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 617, col 27 to line 617, col 80 of module ServicesConsistencyPlusCal: 2
+  line 739, col 39 to line 739, col 85 of module ServicesConsistencyPlusCal: 530
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 618, col 27 to line 618, col 70 of module ServicesConsistencyPlusCal: 2
+  |line 739, col 39 to line 739, col 61 of module ServicesConsistencyPlusCal: 530
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 619, col 27 to line 625, col 49 of module ServicesConsistencyPlusCal: 2
+  |line 739, col 66 to line 739, col 85 of module ServicesConsistencyPlusCal: 64
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 740, col 53 to line 740, col 56 of module ServicesConsistencyPlusCal: 18
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 741, col 53 to line 741, col 116 of module ServicesConsistencyPlusCal: 18
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 742, col 53 to line 742, col 89 of module ServicesConsistencyPlusCal: 18
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 743, col 50 to line 745, col 88 of module ServicesConsistencyPlusCal: 18
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 746, col 47 to line 746, col 110 of module ServicesConsistencyPlusCal: 512
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 747, col 47 to line 748, col 74 of module ServicesConsistencyPlusCal: 512
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 749, col 36 to line 759, col 78 of module ServicesConsistencyPlusCal: 548
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutStockSaga line 627, col 1 to line 627, col 17 of module ServicesConsistencyPlusCal>: 3:7
+<ProcessMessageCheckoutContinuation line 761, col 1 to line 761, col 40 of module ServicesConsistencyPlusCal>: 93:530
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 627, col 25 to line 627, col 51 of module ServicesConsistencyPlusCal: 220
+  line 761, col 48 to line 761, col 94 of module ServicesConsistencyPlusCal: 16977
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 627, col 25 to line 627, col 29 of module ServicesConsistencyPlusCal: 213
+  |line 761, col 48 to line 761, col 55 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 628, col 25 to line 628, col 78 of module ServicesConsistencyPlusCal: 7
+  line 762, col 51 to line 762, col 78 of module ServicesConsistencyPlusCal: 530
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 629, col 25 to line 629, col 70 of module ServicesConsistencyPlusCal: 7
+  line 764, col 70 to line 764, col 134 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 630, col 25 to line 636, col 47 of module ServicesConsistencyPlusCal: 7
+  line 766, col 70 to line 766, col 93 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 767, col 62 to line 767, col 93 of module ServicesConsistencyPlusCal: 530
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 768, col 73 to line 768, col 107 of module ServicesConsistencyPlusCal: 530
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 769, col 78 to line 769, col 143 of module ServicesConsistencyPlusCal: 306
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 770, col 81 to line 770, col 84 of module ServicesConsistencyPlusCal: 224
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 771, col 81 to line 771, col 104 of module ServicesConsistencyPlusCal: 224
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 774, col 92 to line 774, col 157 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 776, col 92 to line 776, col 115 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 779, col 103 to line 779, col 166 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 781, col 103 to line 781, col 126 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 783, col 92 to line 783, col 115 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 784, col 48 to line 784, col 92 of module ServicesConsistencyPlusCal: 530
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 785, col 48 to line 800, col 81 of module ServicesConsistencyPlusCal: 530
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<CheckoutSagaProcess line 638, col 1 to line 638, col 19 of module ServicesConsistencyPlusCal>: 35:158
+<ProcessMessageCheckoutStock line 802, col 1 to line 802, col 33 of module ServicesConsistencyPlusCal>: 514:1360
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 638, col 27 to line 638, col 55 of module ServicesConsistencyPlusCal: 371
+  line 802, col 41 to line 802, col 80 of module ServicesConsistencyPlusCal: 17729
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 638, col 27 to line 638, col 31 of module ServicesConsistencyPlusCal: 213
+  |line 802, col 41 to line 802, col 48 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 639, col 30 to line 639, col 51 of module ServicesConsistencyPlusCal: 158
+  line 803, col 44 to line 803, col 90 of module ServicesConsistencyPlusCal: 1282
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 640, col 38 to line 640, col 70 of module ServicesConsistencyPlusCal: 57
+  |line 803, col 44 to line 803, col 66 of module ServicesConsistencyPlusCal: 1282
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 641, col 38 to line 641, col 77 of module ServicesConsistencyPlusCal: 57
+  |line 803, col 71 to line 803, col 90 of module ServicesConsistencyPlusCal: 312
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 642, col 41 to line 642, col 64 of module ServicesConsistencyPlusCal: 57
+  line 804, col 58 to line 804, col 61 of module ServicesConsistencyPlusCal: 78
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 643, col 46 to line 643, col 108 of module ServicesConsistencyPlusCal: 27
+  line 805, col 58 to line 805, col 126 of module ServicesConsistencyPlusCal: 78
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 644, col 52 to line 644, col 79 of module ServicesConsistencyPlusCal: 30
+  line 806, col 58 to line 806, col 94 of module ServicesConsistencyPlusCal: 78
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 645, col 60 to line 645, col 116 of module ServicesConsistencyPlusCal: 0
+  line 807, col 55 to line 809, col 93 of module ServicesConsistencyPlusCal: 78
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 646, col 63 to line 646, col 88 of module ServicesConsistencyPlusCal: 30
+  line 810, col 52 to line 810, col 120 of module ServicesConsistencyPlusCal: 1204
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 647, col 74 to line 647, col 107 of module ServicesConsistencyPlusCal: 30
+  line 811, col 52 to line 812, col 79 of module ServicesConsistencyPlusCal: 1204
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 648, col 79 to line 648, col 143 of module ServicesConsistencyPlusCal: 22
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 649, col 82 to line 649, col 85 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 650, col 82 to line 650, col 105 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 652, col 71 to line 652, col 94 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 653, col 38 to line 653, col 83 of module ServicesConsistencyPlusCal: 57
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 654, col 38 to line 656, col 68 of module ServicesConsistencyPlusCal: 57
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 657, col 41 to line 657, col 62 of module ServicesConsistencyPlusCal: 101
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 658, col 49 to line 658, col 81 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 659, col 49 to line 659, col 88 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 660, col 52 to line 660, col 75 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 661, col 60 to line 661, col 119 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 662, col 63 to line 662, col 90 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 663, col 68 to line 663, col 127 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 666, col 93 to line 666, col 154 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 668, col 93 to line 668, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 670, col 82 to line 670, col 105 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 671, col 49 to line 671, col 94 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 672, col 49 to line 673, col 79 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 674, col 52 to line 674, col 96 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 675, col 60 to line 675, col 93 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 676, col 60 to line 678, col 89 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 679, col 63 to line 679, col 143 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 680, col 71 to line 680, col 126 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 681, col 71 to line 681, col 133 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 682, col 71 to line 682, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 683, col 71 to line 683, col 95 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 684, col 74 to line 684, col 154 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 684, col 74 to line 684, col 101 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 684, col 106 to line 684, col 154 of module ServicesConsistencyPlusCal: 74
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 685, col 79 to line 687, col 127 of module ServicesConsistencyPlusCal: 27
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 688, col 85 to line 688, col 182 of module ServicesConsistencyPlusCal: 64
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 688, col 85 to line 688, col 131 of module ServicesConsistencyPlusCal: 64
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 688, col 136 to line 688, col 182 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 689, col 90 to line 689, col 126 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 690, col 90 to line 690, col 138 of module ServicesConsistencyPlusCal: 54
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 691, col 82 to line 692, col 111 of module ServicesConsistencyPlusCal: 64
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 693, col 71 to line 693, col 95 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 694, col 49 to line 695, col 72 of module ServicesConsistencyPlusCal: 91
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 696, col 38 to line 696, col 62 of module ServicesConsistencyPlusCal: 101
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 697, col 27 to line 700, col 73 of module ServicesConsistencyPlusCal: 158
+  line 813, col 41 to line 825, col 63 of module ServicesConsistencyPlusCal: 1360
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<SagaEnd line 702, col 1 to line 702, col 7 of module ServicesConsistencyPlusCal>: 5:14
+<ProcessMessageCheckoutStockContinuation line 827, col 1 to line 827, col 45 of module ServicesConsistencyPlusCal>: 461:1282
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 702, col 15 to line 702, col 31 of module ServicesConsistencyPlusCal: 227
+  line 827, col 53 to line 827, col 104 of module ServicesConsistencyPlusCal: 17729
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 702, col 15 to line 702, col 19 of module ServicesConsistencyPlusCal: 213
+  |line 827, col 53 to line 827, col 60 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 703, col 15 to line 703, col 26 of module ServicesConsistencyPlusCal: 14
+  line 828, col 56 to line 828, col 83 of module ServicesConsistencyPlusCal: 1282
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 704, col 15 to line 704, col 45 of module ServicesConsistencyPlusCal: 14
+  line 829, col 67 to line 829, col 101 of module ServicesConsistencyPlusCal: 850
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 705, col 15 to line 709, col 58 of module ServicesConsistencyPlusCal: 14
+  line 830, col 72 to line 830, col 139 of module ServicesConsistencyPlusCal: 354
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 831, col 75 to line 831, col 78 of module ServicesConsistencyPlusCal: 496
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 832, col 75 to line 832, col 98 of module ServicesConsistencyPlusCal: 496
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 833, col 67 to line 833, col 98 of module ServicesConsistencyPlusCal: 432
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 834, col 78 to line 834, col 112 of module ServicesConsistencyPlusCal: 120
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 835, col 83 to line 835, col 148 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 836, col 86 to line 836, col 89 of module ServicesConsistencyPlusCal: 96
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 837, col 86 to line 837, col 109 of module ServicesConsistencyPlusCal: 96
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 838, col 78 to line 838, col 104 of module ServicesConsistencyPlusCal: 312
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 840, col 97 to line 840, col 162 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 842, col 97 to line 842, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 843, col 89 to line 843, col 114 of module ServicesConsistencyPlusCal: 312
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 844, col 100 to line 844, col 135 of module ServicesConsistencyPlusCal: 312
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 845, col 105 to line 845, col 171 of module ServicesConsistencyPlusCal: 168
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 846, col 108 to line 846, col 111 of module ServicesConsistencyPlusCal: 144
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 847, col 108 to line 847, col 131 of module ServicesConsistencyPlusCal: 144
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 849, col 97 to line 849, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 850, col 53 to line 850, col 97 of module ServicesConsistencyPlusCal: 1282
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 851, col 53 to line 869, col 75 of module ServicesConsistencyPlusCal: 1282
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PaymentStart line 717, col 1 to line 717, col 12 of module ServicesConsistencyPlusCal>: 20:41
+<Int1 line 871, col 1 to line 871, col 10 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 717, col 20 to line 717, col 41 of module ServicesConsistencyPlusCal: 251
+  line 871, col 18 to line 871, col 34 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 717, col 20 to line 717, col 24 of module ServicesConsistencyPlusCal: 213
+  line 874, col 35 to line 874, col 69 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 718, col 20 to line 718, col 41 of module ServicesConsistencyPlusCal: 114
+  line 875, col 35 to line 875, col 71 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 718, col 20 to line 718, col 34 of module ServicesConsistencyPlusCal: 82
+  line 876, col 35 to line 876, col 80 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 718, col 38 to line 718, col 41 of module ServicesConsistencyPlusCal: 82
+  line 877, col 35 to line 877, col 54 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 718, col 46 to line 718, col 49 of module ServicesConsistencyPlusCal: 9
+  line 878, col 35 to line 878, col 70 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 719, col 23 to line 719, col 26 of module ServicesConsistencyPlusCal: 41
+  line 879, col 29 to line 879, col 63 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 720, col 31 to line 720, col 61 of module ServicesConsistencyPlusCal: 12
+  line 880, col 29 to line 880, col 67 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 721, col 31 to line 721, col 72 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 722, col 28 to line 724, col 77 of module ServicesConsistencyPlusCal: 29
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 725, col 20 to line 730, col 42 of module ServicesConsistencyPlusCal: 41
+  line 881, col 18 to line 886, col 70 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PaymentReqProcessing line 732, col 1 to line 732, col 20 of module ServicesConsistencyPlusCal>: 19:33
+<Cont1 line 888, col 1 to line 888, col 11 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 732, col 28 to line 732, col 57 of module ServicesConsistencyPlusCal: 246
+  line 888, col 19 to line 888, col 36 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 732, col 28 to line 732, col 32 of module ServicesConsistencyPlusCal: 213
+  line 889, col 19 to line 889, col 70 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 733, col 31 to line 733, col 51 of module ServicesConsistencyPlusCal: 33
+  line 890, col 19 to line 890, col 52 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 736, col 61 to line 736, col 109 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 737, col 61 to line 737, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 738, col 61 to line 738, col 87 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 739, col 61 to line 739, col 110 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 740, col 61 to line 740, col 85 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 741, col 61 to line 741, col 109 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 742, col 61 to line 743, col 91 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 744, col 50 to line 744, col 74 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 746, col 61 to line 746, col 115 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 748, col 61 to line 748, col 85 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 749, col 50 to line 749, col 81 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 750, col 50 to line 752, col 78 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 753, col 39 to line 753, col 63 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 754, col 42 to line 754, col 61 of module ServicesConsistencyPlusCal: 33
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 756, col 61 to line 756, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 757, col 61 to line 757, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 758, col 61 to line 758, col 88 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 759, col 61 to line 759, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 761, col 72 to line 761, col 119 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 762, col 72 to line 762, col 103 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 763, col 61 to line 765, col 89 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 766, col 50 to line 767, col 80 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 768, col 53 to line 768, col 71 of module ServicesConsistencyPlusCal: 33
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 770, col 72 to line 770, col 128 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 771, col 72 to line 771, col 120 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 772, col 72 to line 772, col 96 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 773, col 72 to line 773, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 775, col 83 to line 775, col 121 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 776, col 83 to line 776, col 114 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 777, col 72 to line 779, col 100 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 780, col 61 to line 781, col 91 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 782, col 64 to line 782, col 85 of module ServicesConsistencyPlusCal: 33
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 783, col 75 to line 783, col 99 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 784, col 86 to line 784, col 120 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 785, col 91 to line 788, col 142 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 789, col 94 to line 789, col 118 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 790, col 94 to line 790, col 143 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 791, col 94 to line 792, col 124 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 793, col 83 to line 793, col 107 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 795, col 94 to line 795, col 149 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 797, col 94 to line 797, col 118 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 798, col 83 to line 798, col 114 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 799, col 83 to line 801, col 111 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 802, col 75 to line 802, col 98 of module ServicesConsistencyPlusCal: 23
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 803, col 86 to line 803, col 112 of module ServicesConsistencyPlusCal: 23
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 804, col 94 to line 804, col 142 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 805, col 94 to line 805, col 150 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 806, col 94 to line 806, col 123 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 807, col 94 to line 807, col 144 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 808, col 94 to line 808, col 118 of module ServicesConsistencyPlusCal: 12
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 809, col 97 to line 809, col 139 of module ServicesConsistencyPlusCal: 11
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 810, col 102 to line 810, col 162 of module ServicesConsistencyPlusCal: 11
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 812, col 105 to line 812, col 129 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 813, col 94 to line 813, col 125 of module ServicesConsistencyPlusCal: 11
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 814, col 94 to line 816, col 122 of module ServicesConsistencyPlusCal: 11
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 817, col 83 to line 817, col 114 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 818, col 83 to line 821, col 113 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 822, col 61 to line 822, col 85 of module ServicesConsistencyPlusCal: 33
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 823, col 28 to line 827, col 71 of module ServicesConsistencyPlusCal: 33
+  line 891, col 19 to line 897, col 41 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PrepareSuccessResponse_ line 829, col 1 to line 829, col 23 of module ServicesConsistencyPlusCal>: 0:0
+<Int2 line 899, col 1 to line 899, col 10 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 829, col 31 to line 829, col 63 of module ServicesConsistencyPlusCal: 213
+  line 899, col 18 to line 899, col 34 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 830, col 31 to line 830, col 85 of module ServicesConsistencyPlusCal: 0
+  line 902, col 35 to line 902, col 69 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 831, col 31 to line 831, col 62 of module ServicesConsistencyPlusCal: 0
+  line 903, col 35 to line 903, col 71 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 832, col 31 to line 838, col 53 of module ServicesConsistencyPlusCal: 0
+  line 904, col 35 to line 904, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 905, col 35 to line 905, col 54 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 906, col 35 to line 906, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 907, col 29 to line 907, col 63 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 908, col 29 to line 908, col 67 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 909, col 18 to line 914, col 70 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PrepareFailedResponse_ line 840, col 1 to line 840, col 22 of module ServicesConsistencyPlusCal>: 0:0
+<Cont2 line 916, col 1 to line 916, col 11 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 840, col 30 to line 840, col 61 of module ServicesConsistencyPlusCal: 213
+  line 916, col 19 to line 916, col 36 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 841, col 30 to line 841, col 88 of module ServicesConsistencyPlusCal: 0
+  line 917, col 19 to line 917, col 100 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 842, col 30 to line 842, col 61 of module ServicesConsistencyPlusCal: 0
+  line 918, col 19 to line 918, col 63 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 843, col 30 to line 849, col 52 of module ServicesConsistencyPlusCal: 0
+  line 919, col 19 to line 925, col 41 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCommitResponse_ line 851, col 1 to line 851, col 20 of module ServicesConsistencyPlusCal>: 0:0
+<Int3 line 927, col 1 to line 927, col 10 of module ServicesConsistencyPlusCal>: 112:1157
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 851, col 28 to line 851, col 57 of module ServicesConsistencyPlusCal: 213
+  line 927, col 18 to line 927, col 34 of module ServicesConsistencyPlusCal: 17538
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 852, col 28 to line 852, col 81 of module ServicesConsistencyPlusCal: 0
+  |line 927, col 18 to line 927, col 25 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 853, col 28 to line 853, col 59 of module ServicesConsistencyPlusCal: 0
+  line 928, col 21 to line 928, col 67 of module ServicesConsistencyPlusCal: 1091
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 854, col 28 to line 860, col 50 of module ServicesConsistencyPlusCal: 0
+  |line 928, col 21 to line 928, col 43 of module ServicesConsistencyPlusCal: 1091
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 928, col 48 to line 928, col 67 of module ServicesConsistencyPlusCal: 239
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 929, col 35 to line 929, col 38 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 930, col 35 to line 930, col 69 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 931, col 35 to line 931, col 71 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 932, col 32 to line 934, col 70 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 935, col 29 to line 935, col 63 of module ServicesConsistencyPlusCal: 1025
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 936, col 29 to line 936, col 67 of module ServicesConsistencyPlusCal: 1025
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 937, col 18 to line 942, col 70 of module ServicesConsistencyPlusCal: 1157
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCommitResponse2_ line 862, col 1 to line 862, col 21 of module ServicesConsistencyPlusCal>: 0:0
+<Cont3 line 944, col 1 to line 944, col 11 of module ServicesConsistencyPlusCal>: 116:1091
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 862, col 29 to line 862, col 59 of module ServicesConsistencyPlusCal: 213
+  line 944, col 19 to line 944, col 36 of module ServicesConsistencyPlusCal: 17538
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 863, col 29 to line 863, col 82 of module ServicesConsistencyPlusCal: 0
+  |line 944, col 19 to line 944, col 26 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 864, col 29 to line 864, col 60 of module ServicesConsistencyPlusCal: 0
+  line 945, col 19 to line 945, col 69 of module ServicesConsistencyPlusCal: 1091
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 865, col 29 to line 871, col 51 of module ServicesConsistencyPlusCal: 0
+  line 946, col 19 to line 946, col 52 of module ServicesConsistencyPlusCal: 1091
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 947, col 19 to line 953, col 41 of module ServicesConsistencyPlusCal: 1091
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyAbortMessage_ line 873, col 1 to line 873, col 18 of module ServicesConsistencyPlusCal>: 0:0
+<Int4 line 955, col 1 to line 955, col 10 of module ServicesConsistencyPlusCal>: 143:2315
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 873, col 26 to line 873, col 53 of module ServicesConsistencyPlusCal: 213
+  line 955, col 18 to line 955, col 34 of module ServicesConsistencyPlusCal: 18588
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 874, col 26 to line 874, col 78 of module ServicesConsistencyPlusCal: 0
+  |line 955, col 18 to line 955, col 25 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 875, col 26 to line 875, col 57 of module ServicesConsistencyPlusCal: 0
+  line 956, col 21 to line 956, col 67 of module ServicesConsistencyPlusCal: 2141
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 876, col 26 to line 882, col 48 of module ServicesConsistencyPlusCal: 0
+  |line 956, col 21 to line 956, col 43 of module ServicesConsistencyPlusCal: 2141
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 956, col 48 to line 956, col 67 of module ServicesConsistencyPlusCal: 677
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 957, col 35 to line 957, col 38 of module ServicesConsistencyPlusCal: 174
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 958, col 35 to line 958, col 69 of module ServicesConsistencyPlusCal: 174
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 959, col 35 to line 959, col 71 of module ServicesConsistencyPlusCal: 174
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 960, col 32 to line 962, col 70 of module ServicesConsistencyPlusCal: 174
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 963, col 29 to line 963, col 63 of module ServicesConsistencyPlusCal: 1967
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 964, col 29 to line 964, col 67 of module ServicesConsistencyPlusCal: 1967
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 965, col 18 to line 970, col 70 of module ServicesConsistencyPlusCal: 2315
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyAbort2_ line 884, col 1 to line 884, col 12 of module ServicesConsistencyPlusCal>: 0:0
+<Cont4 line 972, col 1 to line 972, col 11 of module ServicesConsistencyPlusCal>: 103:2141
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 884, col 20 to line 884, col 41 of module ServicesConsistencyPlusCal: 213
+  line 972, col 19 to line 972, col 36 of module ServicesConsistencyPlusCal: 18588
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 885, col 20 to line 885, col 72 of module ServicesConsistencyPlusCal: 0
+  |line 972, col 19 to line 972, col 26 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 886, col 20 to line 886, col 51 of module ServicesConsistencyPlusCal: 0
+  line 973, col 19 to line 973, col 96 of module ServicesConsistencyPlusCal: 2141
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 887, col 20 to line 892, col 53 of module ServicesConsistencyPlusCal: 0
+  line 974, col 19 to line 974, col 63 of module ServicesConsistencyPlusCal: 2141
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 975, col 19 to line 981, col 41 of module ServicesConsistencyPlusCal: 2141
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCheckoutResponse_ line 894, col 1 to line 894, col 22 of module ServicesConsistencyPlusCal>: 8:10
+<Int5 line 983, col 1 to line 983, col 10 of module ServicesConsistencyPlusCal>: 12:28
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 894, col 30 to line 894, col 61 of module ServicesConsistencyPlusCal: 223
+  line 983, col 18 to line 983, col 34 of module ServicesConsistencyPlusCal: 16475
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 894, col 30 to line 894, col 34 of module ServicesConsistencyPlusCal: 213
+  |line 983, col 18 to line 983, col 25 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 895, col 30 to line 895, col 85 of module ServicesConsistencyPlusCal: 10
+  line 984, col 21 to line 984, col 67 of module ServicesConsistencyPlusCal: 28
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 896, col 30 to line 896, col 61 of module ServicesConsistencyPlusCal: 10
+  line 986, col 35 to line 986, col 69 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 897, col 30 to line 903, col 52 of module ServicesConsistencyPlusCal: 10
+  line 987, col 35 to line 987, col 71 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 988, col 35 to line 988, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 989, col 35 to line 989, col 54 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 990, col 35 to line 990, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 991, col 29 to line 991, col 63 of module ServicesConsistencyPlusCal: 28
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 992, col 29 to line 992, col 67 of module ServicesConsistencyPlusCal: 28
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 993, col 18 to line 998, col 70 of module ServicesConsistencyPlusCal: 28
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<FailedCheckoutResponse_ line 905, col 1 to line 905, col 23 of module ServicesConsistencyPlusCal>: 0:0
+<Cont5 line 1000, col 1 to line 1000, col 11 of module ServicesConsistencyPlusCal>: 12:28
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 905, col 31 to line 905, col 63 of module ServicesConsistencyPlusCal: 213
+  line 1000, col 19 to line 1000, col 36 of module ServicesConsistencyPlusCal: 16475
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 906, col 31 to line 906, col 90 of module ServicesConsistencyPlusCal: 0
+  |line 1000, col 19 to line 1000, col 26 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 907, col 31 to line 907, col 62 of module ServicesConsistencyPlusCal: 0
+  line 1001, col 19 to line 1001, col 69 of module ServicesConsistencyPlusCal: 28
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 908, col 31 to line 914, col 53 of module ServicesConsistencyPlusCal: 0
+  line 1002, col 19 to line 1002, col 52 of module ServicesConsistencyPlusCal: 28
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1003, col 19 to line 1009, col 41 of module ServicesConsistencyPlusCal: 28
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCompensateResponse_ line 916, col 1 to line 916, col 24 of module ServicesConsistencyPlusCal>: 8:10
+<Int6 line 1011, col 1 to line 1011, col 10 of module ServicesConsistencyPlusCal>: 30:84
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 916, col 32 to line 916, col 65 of module ServicesConsistencyPlusCal: 223
+  line 1011, col 18 to line 1011, col 34 of module ServicesConsistencyPlusCal: 16531
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 916, col 32 to line 916, col 36 of module ServicesConsistencyPlusCal: 213
+  |line 1011, col 18 to line 1011, col 25 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 917, col 32 to line 917, col 89 of module ServicesConsistencyPlusCal: 10
+  line 1012, col 21 to line 1012, col 67 of module ServicesConsistencyPlusCal: 84
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 918, col 32 to line 918, col 63 of module ServicesConsistencyPlusCal: 10
+  line 1014, col 35 to line 1014, col 69 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 919, col 32 to line 925, col 75 of module ServicesConsistencyPlusCal: 10
+  line 1015, col 35 to line 1015, col 71 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1016, col 35 to line 1016, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1017, col 35 to line 1017, col 54 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1018, col 35 to line 1018, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1019, col 29 to line 1019, col 63 of module ServicesConsistencyPlusCal: 84
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1020, col 29 to line 1020, col 67 of module ServicesConsistencyPlusCal: 84
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1021, col 18 to line 1026, col 70 of module ServicesConsistencyPlusCal: 84
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<step_ line 927, col 1 to line 927, col 5 of module ServicesConsistencyPlusCal>: 35:69
+<Cont6 line 1028, col 1 to line 1028, col 11 of module ServicesConsistencyPlusCal>: 29:84
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 927, col 13 to line 927, col 27 of module ServicesConsistencyPlusCal: 282
+  line 1028, col 19 to line 1028, col 36 of module ServicesConsistencyPlusCal: 16531
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 927, col 13 to line 927, col 17 of module ServicesConsistencyPlusCal: 213
+  |line 1028, col 19 to line 1028, col 26 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 928, col 13 to line 928, col 51 of module ServicesConsistencyPlusCal: 69
+  line 1029, col 19 to line 1029, col 96 of module ServicesConsistencyPlusCal: 84
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 929, col 13 to line 933, col 56 of module ServicesConsistencyPlusCal: 69
+  line 1030, col 19 to line 1030, col 63 of module ServicesConsistencyPlusCal: 84
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1031, col 19 to line 1037, col 41 of module ServicesConsistencyPlusCal: 84
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<StockStart line 942, col 1 to line 942, col 10 of module ServicesConsistencyPlusCal>: 7:18
+<2pcEnd line 1039, col 1 to line 1039, col 12 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 942, col 18 to line 942, col 37 of module ServicesConsistencyPlusCal: 231
+  line 1039, col 20 to line 1039, col 38 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 942, col 18 to line 942, col 22 of module ServicesConsistencyPlusCal: 213
+  line 1040, col 20 to line 1040, col 31 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 943, col 18 to line 943, col 39 of module ServicesConsistencyPlusCal: 112
+  line 1041, col 20 to line 1041, col 53 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 943, col 18 to line 943, col 32 of module ServicesConsistencyPlusCal: 104
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  |line 943, col 36 to line 943, col 39 of module ServicesConsistencyPlusCal: 104
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 943, col 44 to line 943, col 47 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 944, col 21 to line 944, col 24 of module ServicesConsistencyPlusCal: 18
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 945, col 29 to line 945, col 59 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 946, col 29 to line 946, col 68 of module ServicesConsistencyPlusCal: 10
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 947, col 26 to line 949, col 73 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 950, col 18 to line 955, col 42 of module ServicesConsistencyPlusCal: 18
+  line 1042, col 20 to line 1048, col 42 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<StockReqProcessing line 957, col 1 to line 957, col 18 of module ServicesConsistencyPlusCal>: 5:8
+<CheckoutSaga line 1050, col 1 to line 1050, col 18 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 957, col 26 to line 957, col 53 of module ServicesConsistencyPlusCal: 221
+  line 1050, col 26 to line 1050, col 50 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 957, col 26 to line 957, col 30 of module ServicesConsistencyPlusCal: 213
+  line 1051, col 26 to line 1051, col 74 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 958, col 29 to line 958, col 47 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 961, col 59 to line 961, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 962, col 59 to line 962, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 963, col 59 to line 963, col 83 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 964, col 59 to line 964, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 965, col 59 to line 965, col 81 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 966, col 59 to line 966, col 106 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 967, col 59 to line 968, col 83 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 969, col 48 to line 969, col 72 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 971, col 59 to line 971, col 113 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 973, col 59 to line 973, col 83 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 974, col 48 to line 974, col 78 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 975, col 48 to line 977, col 74 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 978, col 37 to line 978, col 55 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 979, col 40 to line 979, col 57 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 981, col 59 to line 981, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 982, col 59 to line 982, col 97 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 983, col 59 to line 983, col 84 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 984, col 59 to line 984, col 104 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 986, col 70 to line 986, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 987, col 70 to line 987, col 100 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 988, col 59 to line 990, col 85 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 991, col 48 to line 992, col 78 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 993, col 51 to line 993, col 67 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 995, col 70 to line 995, col 108 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 996, col 70 to line 996, col 118 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 997, col 70 to line 997, col 92 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 998, col 70 to line 998, col 113 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1000, col 81 to line 1000, col 118 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1001, col 81 to line 1001, col 111 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1002, col 70 to line 1004, col 96 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1005, col 59 to line 1006, col 89 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1007, col 62 to line 1007, col 81 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1008, col 73 to line 1008, col 95 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1009, col 84 to line 1009, col 115 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1010, col 92 to line 1010, col 140 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1011, col 92 to line 1011, col 130 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1012, col 92 to line 1012, col 117 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1013, col 92 to line 1013, col 139 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1014, col 92 to line 1014, col 114 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1015, col 92 to line 1015, col 140 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1016, col 92 to line 1017, col 116 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1018, col 81 to line 1018, col 105 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1020, col 92 to line 1020, col 147 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1022, col 92 to line 1022, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1023, col 81 to line 1023, col 111 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1024, col 81 to line 1026, col 107 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1029, col 92 to line 1029, col 140 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1030, col 92 to line 1030, col 130 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1031, col 92 to line 1031, col 119 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1032, col 92 to line 1032, col 141 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1033, col 92 to line 1033, col 116 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1035, col 103 to line 1035, col 160 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1037, col 103 to line 1037, col 127 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1038, col 92 to line 1038, col 122 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1039, col 92 to line 1041, col 118 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1042, col 81 to line 1042, col 111 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1043, col 81 to line 1046, col 111 of module ServicesConsistencyPlusCal: 0
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1047, col 59 to line 1047, col 77 of module ServicesConsistencyPlusCal: 8
-@!@!@ENDMSG 2221 @!@!@
-@!@!@STARTMSG 2221:0 @!@!@
-  line 1048, col 26 to line 1052, col 69 of module ServicesConsistencyPlusCal: 8
+  line 1052, col 26 to line 1059, col 59 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PrepareSuccessResponse line 1054, col 1 to line 1054, col 22 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutPaymentSaga line 1061, col 1 to line 1061, col 25 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1054, col 30 to line 1054, col 61 of module ServicesConsistencyPlusCal: 213
+  line 1061, col 33 to line 1061, col 64 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1055, col 30 to line 1055, col 84 of module ServicesConsistencyPlusCal: 0
+  line 1062, col 33 to line 1062, col 86 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1056, col 30 to line 1056, col 60 of module ServicesConsistencyPlusCal: 0
+  line 1063, col 33 to line 1063, col 79 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1057, col 30 to line 1063, col 52 of module ServicesConsistencyPlusCal: 0
+  line 1064, col 33 to line 1072, col 66 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<PrepareFailedResponse line 1065, col 1 to line 1065, col 21 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutStockSaga line 1074, col 1 to line 1074, col 23 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1065, col 29 to line 1065, col 59 of module ServicesConsistencyPlusCal: 213
+  line 1074, col 31 to line 1074, col 60 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1066, col 29 to line 1066, col 87 of module ServicesConsistencyPlusCal: 0
+  line 1075, col 31 to line 1075, col 84 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1067, col 29 to line 1067, col 59 of module ServicesConsistencyPlusCal: 0
+  line 1076, col 31 to line 1076, col 79 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1068, col 29 to line 1074, col 51 of module ServicesConsistencyPlusCal: 0
+  line 1077, col 31 to line 1084, col 64 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCommitResponse line 1076, col 1 to line 1076, col 19 of module ServicesConsistencyPlusCal>: 0:0
+<CheckoutSagaProcess line 1086, col 1 to line 1086, col 25 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1076, col 27 to line 1076, col 55 of module ServicesConsistencyPlusCal: 213
+  line 1086, col 33 to line 1086, col 64 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1077, col 27 to line 1077, col 80 of module ServicesConsistencyPlusCal: 0
+  line 1088, col 44 to line 1088, col 104 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1078, col 27 to line 1078, col 57 of module ServicesConsistencyPlusCal: 0
+  line 1089, col 44 to line 1089, col 83 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1079, col 27 to line 1085, col 49 of module ServicesConsistencyPlusCal: 0
+  line 1091, col 55 to line 1091, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1093, col 66 to line 1093, col 128 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1096, col 88 to line 1096, col 155 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1098, col 88 to line 1098, col 111 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1100, col 77 to line 1100, col 100 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1101, col 44 to line 1101, col 92 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1102, col 44 to line 1104, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1106, col 55 to line 1106, col 115 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1107, col 55 to line 1107, col 94 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1109, col 66 to line 1109, col 131 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1111, col 77 to line 1111, col 139 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1114, col 99 to line 1114, col 166 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1116, col 99 to line 1116, col 122 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1118, col 88 to line 1118, col 111 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1119, col 55 to line 1119, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1120, col 55 to line 1121, col 85 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1123, col 66 to line 1123, col 102 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1124, col 66 to line 1126, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1128, col 77 to line 1128, col 132 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1129, col 77 to line 1129, col 145 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1130, col 77 to line 1130, col 125 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1131, col 77 to line 1131, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1133, col 88 to line 1133, col 143 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1134, col 88 to line 1134, col 156 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1135, col 88 to line 1135, col 136 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1137, col 99 to line 1137, col 135 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1138, col 99 to line 1138, col 147 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1139, col 88 to line 1140, col 117 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1141, col 77 to line 1141, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1142, col 55 to line 1143, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1144, col 44 to line 1144, col 68 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1145, col 33 to line 1151, col 55 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCommitResponse2 line 1087, col 1 to line 1087, col 20 of module ServicesConsistencyPlusCal>: 0:0
+<SagaEnd line 1153, col 1 to line 1153, col 13 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1087, col 28 to line 1087, col 57 of module ServicesConsistencyPlusCal: 213
+  line 1153, col 21 to line 1153, col 40 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1088, col 28 to line 1088, col 81 of module ServicesConsistencyPlusCal: 0
+  line 1154, col 21 to line 1154, col 32 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1089, col 28 to line 1089, col 58 of module ServicesConsistencyPlusCal: 0
+  line 1155, col 21 to line 1155, col 54 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1090, col 28 to line 1096, col 50 of module ServicesConsistencyPlusCal: 0
+  line 1156, col 21 to line 1162, col 43 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyAbortMessage line 1098, col 1 to line 1098, col 17 of module ServicesConsistencyPlusCal>: 0:0
+<Start_P line 1182, col 1 to line 1182, col 13 of module ServicesConsistencyPlusCal>: 740:2784
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1098, col 25 to line 1098, col 51 of module ServicesConsistencyPlusCal: 213
+  line 1182, col 21 to line 1182, col 40 of module ServicesConsistencyPlusCal: 19231
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1099, col 25 to line 1099, col 77 of module ServicesConsistencyPlusCal: 0
+  |line 1182, col 21 to line 1182, col 28 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1100, col 25 to line 1100, col 55 of module ServicesConsistencyPlusCal: 0
+  line 1183, col 21 to line 1183, col 42 of module ServicesConsistencyPlusCal: 8428
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1101, col 25 to line 1107, col 47 of module ServicesConsistencyPlusCal: 0
+  |line 1183, col 21 to line 1183, col 35 of module ServicesConsistencyPlusCal: 5644
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1183, col 39 to line 1183, col 42 of module ServicesConsistencyPlusCal: 5644
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1184, col 24 to line 1184, col 27 of module ServicesConsistencyPlusCal: 2784
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1185, col 32 to line 1185, col 65 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1186, col 32 to line 1186, col 73 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1187, col 29 to line 1189, col 63 of module ServicesConsistencyPlusCal: 2784
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1190, col 21 to line 1195, col 78 of module ServicesConsistencyPlusCal: 2784
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyAbort2 line 1109, col 1 to line 1109, col 11 of module ServicesConsistencyPlusCal>: 0:0
+<R_ line 1197, col 1 to line 1197, col 8 of module ServicesConsistencyPlusCal>: 858:2802
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1109, col 19 to line 1109, col 39 of module ServicesConsistencyPlusCal: 213
+  line 1197, col 16 to line 1197, col 30 of module ServicesConsistencyPlusCal: 19103
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1110, col 19 to line 1110, col 71 of module ServicesConsistencyPlusCal: 0
+  |line 1197, col 16 to line 1197, col 23 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1111, col 19 to line 1111, col 49 of module ServicesConsistencyPlusCal: 0
+  line 1198, col 19 to line 1198, col 65 of module ServicesConsistencyPlusCal: 2656
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1112, col 19 to line 1117, col 52 of module ServicesConsistencyPlusCal: 0
+  |line 1198, col 19 to line 1198, col 41 of module ServicesConsistencyPlusCal: 2656
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1198, col 46 to line 1198, col 65 of module ServicesConsistencyPlusCal: 2499
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1199, col 33 to line 1199, col 36 of module ServicesConsistencyPlusCal: 146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1200, col 33 to line 1200, col 82 of module ServicesConsistencyPlusCal: 146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1201, col 33 to line 1201, col 69 of module ServicesConsistencyPlusCal: 146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1202, col 30 to line 1204, col 69 of module ServicesConsistencyPlusCal: 146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1205, col 27 to line 1205, col 76 of module ServicesConsistencyPlusCal: 2510
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1206, col 27 to line 1206, col 65 of module ServicesConsistencyPlusCal: 2510
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1207, col 16 to line 1212, col 49 of module ServicesConsistencyPlusCal: 2802
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCheckoutResponse line 1119, col 1 to line 1119, col 21 of module ServicesConsistencyPlusCal>: 0:0
+<PaymentReqProcessing line 1214, col 1 to line 1214, col 26 of module ServicesConsistencyPlusCal>: 893:2656
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1119, col 29 to line 1119, col 59 of module ServicesConsistencyPlusCal: 213
+  line 1214, col 34 to line 1214, col 66 of module ServicesConsistencyPlusCal: 19103
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1120, col 29 to line 1120, col 84 of module ServicesConsistencyPlusCal: 0
+  |line 1214, col 34 to line 1214, col 41 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1121, col 29 to line 1121, col 59 of module ServicesConsistencyPlusCal: 0
+  line 1215, col 37 to line 1215, col 63 of module ServicesConsistencyPlusCal: 2656
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1122, col 29 to line 1128, col 51 of module ServicesConsistencyPlusCal: 0
+  line 1216, col 48 to line 1216, col 72 of module ServicesConsistencyPlusCal: 596
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1217, col 59 to line 1217, col 93 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1218, col 67 to line 1218, col 115 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1219, col 67 to line 1219, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1220, col 67 to line 1220, col 93 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1221, col 67 to line 1221, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1222, col 67 to line 1222, col 91 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1223, col 67 to line 1223, col 119 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1224, col 67 to line 1225, col 97 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1226, col 56 to line 1226, col 80 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1227, col 59 to line 1227, col 101 of module ServicesConsistencyPlusCal: 516
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1228, col 67 to line 1228, col 121 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1229, col 70 to line 1229, col 93 of module ServicesConsistencyPlusCal: 516
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1230, col 75 to line 1230, col 136 of module ServicesConsistencyPlusCal: 516
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1232, col 78 to line 1232, col 102 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1233, col 56 to line 1233, col 90 of module ServicesConsistencyPlusCal: 516
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1234, col 56 to line 1236, col 84 of module ServicesConsistencyPlusCal: 516
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1237, col 45 to line 1237, col 69 of module ServicesConsistencyPlusCal: 596
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1238, col 48 to line 1238, col 73 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1240, col 67 to line 1240, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1241, col 67 to line 1241, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1242, col 67 to line 1242, col 94 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1243, col 67 to line 1243, col 117 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1245, col 78 to line 1245, col 128 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1246, col 78 to line 1246, col 112 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1247, col 67 to line 1249, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1250, col 56 to line 1251, col 86 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1252, col 59 to line 1252, col 83 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1253, col 70 to line 1253, col 94 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1254, col 78 to line 1254, col 102 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1255, col 78 to line 1255, col 125 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1256, col 78 to line 1257, col 108 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1258, col 81 to line 1258, col 106 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1259, col 89 to line 1259, col 145 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1260, col 89 to line 1260, col 137 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1261, col 89 to line 1261, col 113 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1262, col 89 to line 1262, col 137 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1263, col 92 to line 1263, col 118 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1264, col 100 to line 1264, col 141 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1265, col 97 to line 1265, col 134 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1266, col 89 to line 1268, col 117 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1269, col 67 to line 1270, col 97 of module ServicesConsistencyPlusCal: 2060
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1274, col 100 to line 1274, col 148 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1275, col 100 to line 1275, col 156 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1276, col 100 to line 1276, col 127 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1277, col 100 to line 1277, col 152 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1278, col 100 to line 1278, col 124 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1279, col 100 to line 1279, col 153 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1280, col 100 to line 1281, col 130 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1282, col 89 to line 1282, col 113 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1284, col 100 to line 1284, col 155 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1286, col 100 to line 1286, col 124 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1287, col 89 to line 1287, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1288, col 89 to line 1290, col 117 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1293, col 100 to line 1293, col 148 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1294, col 100 to line 1294, col 156 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1295, col 100 to line 1295, col 129 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1296, col 100 to line 1296, col 154 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1297, col 100 to line 1297, col 124 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1299, col 111 to line 1299, col 168 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1301, col 111 to line 1301, col 135 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1302, col 100 to line 1302, col 134 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1303, col 100 to line 1305, col 128 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1306, col 89 to line 1306, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1307, col 89 to line 1310, col 119 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1311, col 67 to line 1311, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1312, col 34 to line 1318, col 56 of module ServicesConsistencyPlusCal: 2656
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<FailedCheckoutResponse line 1130, col 1 to line 1130, col 22 of module ServicesConsistencyPlusCal>: 7:7
+<PrepareSuccessResponseR_ line 1320, col 1 to line 1320, col 30 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1130, col 30 to line 1130, col 61 of module ServicesConsistencyPlusCal: 220
+  line 1320, col 38 to line 1320, col 74 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 1130, col 30 to line 1130, col 34 of module ServicesConsistencyPlusCal: 213
+  line 1323, col 55 to line 1323, col 107 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1131, col 30 to line 1131, col 89 of module ServicesConsistencyPlusCal: 7
+  line 1324, col 55 to line 1324, col 91 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1132, col 30 to line 1132, col 60 of module ServicesConsistencyPlusCal: 7
+  line 1325, col 55 to line 1325, col 100 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1133, col 30 to line 1139, col 52 of module ServicesConsistencyPlusCal: 7
+  line 1326, col 55 to line 1326, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1327, col 55 to line 1327, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1328, col 49 to line 1328, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1329, col 49 to line 1330, col 76 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1331, col 38 to line 1341, col 80 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<ReplyCompensateResponse line 1141, col 1 to line 1141, col 23 of module ServicesConsistencyPlusCal>: 0:0
+<PrepareSuccessResponse_ line 1343, col 1 to line 1343, col 29 of module ServicesConsistencyPlusCal>: 0:0
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1141, col 31 to line 1141, col 63 of module ServicesConsistencyPlusCal: 213
+  line 1343, col 37 to line 1343, col 72 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1142, col 31 to line 1142, col 88 of module ServicesConsistencyPlusCal: 0
+  line 1344, col 37 to line 1344, col 91 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1143, col 31 to line 1143, col 61 of module ServicesConsistencyPlusCal: 0
+  line 1345, col 37 to line 1345, col 71 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1144, col 31 to line 1150, col 53 of module ServicesConsistencyPlusCal: 0
+  line 1346, col 37 to line 1356, col 59 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<step line 1152, col 1 to line 1152, col 4 of module ServicesConsistencyPlusCal>: 49:84
+<PrepareFailedResponseR_ line 1358, col 1 to line 1358, col 29 of module ServicesConsistencyPlusCal>: 24:95
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1152, col 12 to line 1152, col 25 of module ServicesConsistencyPlusCal: 297
+  line 1358, col 37 to line 1358, col 72 of module ServicesConsistencyPlusCal: 16527
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 1152, col 12 to line 1152, col 16 of module ServicesConsistencyPlusCal: 213
+  |line 1358, col 37 to line 1358, col 44 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1153, col 12 to line 1153, col 48 of module ServicesConsistencyPlusCal: 84
+  line 1359, col 40 to line 1359, col 86 of module ServicesConsistencyPlusCal: 80
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1154, col 12 to line 1158, col 55 of module ServicesConsistencyPlusCal: 84
+  |line 1359, col 40 to line 1359, col 62 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1359, col 67 to line 1359, col 86 of module ServicesConsistencyPlusCal: 67
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1360, col 54 to line 1360, col 57 of module ServicesConsistencyPlusCal: 15
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1361, col 54 to line 1361, col 105 of module ServicesConsistencyPlusCal: 15
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1362, col 54 to line 1362, col 90 of module ServicesConsistencyPlusCal: 15
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1363, col 51 to line 1365, col 90 of module ServicesConsistencyPlusCal: 15
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1366, col 48 to line 1366, col 99 of module ServicesConsistencyPlusCal: 65
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1367, col 48 to line 1368, col 75 of module ServicesConsistencyPlusCal: 65
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1369, col 37 to line 1379, col 79 of module ServicesConsistencyPlusCal: 95
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2772:0 @!@!@
-<Terminating line 1168, col 1 to line 1168, col 11 of module ServicesConsistencyPlusCal>: 0:3
+<PrepareFailedResponse_ line 1381, col 1 to line 1381, col 28 of module ServicesConsistencyPlusCal>: 35:80
 @!@!@ENDMSG 2772 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1168, col 40 to line 1168, col 56 of module ServicesConsistencyPlusCal: 262
+  line 1381, col 36 to line 1381, col 70 of module ServicesConsistencyPlusCal: 16527
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  |line 1168, col 40 to line 1168, col 47 of module ServicesConsistencyPlusCal: 253
+  |line 1381, col 36 to line 1381, col 43 of module ServicesConsistencyPlusCal: 16447
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1168, col 31 to line 1168, col 37 of module ServicesConsistencyPlusCal: 213
+  line 1382, col 36 to line 1382, col 94 of module ServicesConsistencyPlusCal: 80
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 1169, col 19 to line 1169, col 32 of module ServicesConsistencyPlusCal: 3
+  line 1383, col 36 to line 1383, col 70 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1384, col 36 to line 1394, col 58 of module ServicesConsistencyPlusCal: 80
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponseR_ line 1396, col 1 to line 1396, col 27 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1396, col 35 to line 1396, col 68 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1399, col 52 to line 1399, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1400, col 52 to line 1400, col 88 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1401, col 52 to line 1401, col 97 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1402, col 52 to line 1402, col 71 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1403, col 52 to line 1403, col 88 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1404, col 46 to line 1404, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1405, col 46 to line 1406, col 73 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1407, col 35 to line 1417, col 57 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponse_ line 1419, col 1 to line 1419, col 26 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1419, col 34 to line 1419, col 66 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1420, col 34 to line 1420, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1421, col 34 to line 1421, col 68 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1422, col 34 to line 1430, col 76 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponse2_ line 1432, col 1 to line 1432, col 27 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1432, col 35 to line 1432, col 68 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1433, col 35 to line 1433, col 88 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1434, col 35 to line 1434, col 69 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1435, col 35 to line 1445, col 57 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortPendingR line 1447, col 1 to line 1447, col 24 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1447, col 32 to line 1447, col 62 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1450, col 49 to line 1450, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1451, col 49 to line 1451, col 85 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1452, col 49 to line 1452, col 94 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1453, col 49 to line 1453, col 68 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1454, col 49 to line 1454, col 85 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1455, col 43 to line 1455, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1456, col 43 to line 1456, col 81 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1457, col 32 to line 1464, col 65 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortPending line 1466, col 1 to line 1466, col 23 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1466, col 31 to line 1466, col 60 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1467, col 31 to line 1467, col 83 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1468, col 31 to line 1468, col 65 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1469, col 31 to line 1476, col 64 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortMessageR_ line 1478, col 1 to line 1478, col 25 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1478, col 33 to line 1478, col 64 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1481, col 50 to line 1481, col 97 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1482, col 50 to line 1482, col 86 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1483, col 50 to line 1483, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1484, col 50 to line 1484, col 69 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1485, col 50 to line 1485, col 86 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1486, col 44 to line 1486, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1487, col 44 to line 1488, col 71 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1489, col 33 to line 1497, col 55 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortMessage_ line 1499, col 1 to line 1499, col 24 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1499, col 32 to line 1499, col 62 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1500, col 32 to line 1500, col 84 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1501, col 32 to line 1501, col 66 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1502, col 32 to line 1510, col 54 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbort2_ line 1512, col 1 to line 1512, col 18 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1512, col 26 to line 1512, col 50 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1513, col 26 to line 1513, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1514, col 26 to line 1514, col 60 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1515, col 26 to line 1521, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCheckoutResponseR_ line 1523, col 1 to line 1523, col 29 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1523, col 37 to line 1523, col 72 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1526, col 54 to line 1526, col 105 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1527, col 54 to line 1527, col 90 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1528, col 54 to line 1528, col 99 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1529, col 54 to line 1529, col 73 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1530, col 54 to line 1530, col 90 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1531, col 48 to line 1531, col 99 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1532, col 48 to line 1533, col 75 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1534, col 37 to line 1544, col 79 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCheckoutResponse_ line 1546, col 1 to line 1546, col 28 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1546, col 36 to line 1546, col 70 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1547, col 36 to line 1547, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1548, col 36 to line 1548, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1549, col 36 to line 1559, col 58 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<FailedCheckoutResponseR_ line 1561, col 1 to line 1561, col 30 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1561, col 38 to line 1561, col 74 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1564, col 55 to line 1564, col 107 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1565, col 55 to line 1565, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1566, col 55 to line 1566, col 100 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1567, col 55 to line 1567, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1568, col 55 to line 1568, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1569, col 49 to line 1569, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1570, col 49 to line 1571, col 76 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1572, col 38 to line 1582, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<FailedCheckoutResponse_ line 1584, col 1 to line 1584, col 29 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1584, col 37 to line 1584, col 72 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1585, col 37 to line 1585, col 96 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1586, col 37 to line 1586, col 71 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1587, col 37 to line 1597, col 59 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCompensateResponseR_ line 1599, col 1 to line 1599, col 31 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1599, col 39 to line 1599, col 76 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1602, col 56 to line 1602, col 109 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1603, col 56 to line 1603, col 92 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1604, col 56 to line 1604, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1605, col 56 to line 1605, col 75 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1606, col 56 to line 1606, col 92 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1607, col 50 to line 1607, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1608, col 50 to line 1609, col 77 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1610, col 39 to line 1621, col 81 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCompensateResponse_ line 1623, col 1 to line 1623, col 30 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1623, col 38 to line 1623, col 74 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1624, col 38 to line 1624, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1625, col 38 to line 1625, col 72 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1626, col 38 to line 1636, col 60 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<step_ line 1638, col 1 to line 1638, col 11 of module ServicesConsistencyPlusCal>: 1067:5331
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1638, col 19 to line 1638, col 36 of module ServicesConsistencyPlusCal: 21778
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1638, col 19 to line 1638, col 26 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1639, col 19 to line 1639, col 55 of module ServicesConsistencyPlusCal: 5331
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1640, col 19 to line 1646, col 52 of module ServicesConsistencyPlusCal: 5331
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<Start line 1668, col 1 to line 1668, col 11 of module ServicesConsistencyPlusCal>: 1683:2386
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1668, col 19 to line 1668, col 36 of module ServicesConsistencyPlusCal: 18833
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1668, col 19 to line 1668, col 26 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1669, col 19 to line 1669, col 40 of module ServicesConsistencyPlusCal: 7344
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1669, col 19 to line 1669, col 33 of module ServicesConsistencyPlusCal: 4958
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1669, col 37 to line 1669, col 40 of module ServicesConsistencyPlusCal: 4958
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1670, col 22 to line 1670, col 25 of module ServicesConsistencyPlusCal: 2386
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1671, col 30 to line 1671, col 63 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1672, col 30 to line 1672, col 69 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1673, col 27 to line 1675, col 60 of module ServicesConsistencyPlusCal: 2386
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1676, col 19 to line 1681, col 78 of module ServicesConsistencyPlusCal: 2386
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<R line 1683, col 1 to line 1683, col 7 of module ServicesConsistencyPlusCal>: 1940:2482
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1683, col 15 to line 1683, col 28 of module ServicesConsistencyPlusCal: 18820
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1683, col 15 to line 1683, col 22 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1684, col 18 to line 1684, col 64 of module ServicesConsistencyPlusCal: 2373
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1684, col 18 to line 1684, col 40 of module ServicesConsistencyPlusCal: 2373
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1684, col 45 to line 1684, col 64 of module ServicesConsistencyPlusCal: 2137
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1685, col 32 to line 1685, col 35 of module ServicesConsistencyPlusCal: 109
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1686, col 32 to line 1686, col 79 of module ServicesConsistencyPlusCal: 109
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1687, col 32 to line 1687, col 68 of module ServicesConsistencyPlusCal: 109
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1688, col 29 to line 1690, col 66 of module ServicesConsistencyPlusCal: 109
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1691, col 26 to line 1691, col 73 of module ServicesConsistencyPlusCal: 2264
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1692, col 26 to line 1692, col 64 of module ServicesConsistencyPlusCal: 2264
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1693, col 15 to line 1697, col 67 of module ServicesConsistencyPlusCal: 2482
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<StockReqProcessing line 1699, col 1 to line 1699, col 24 of module ServicesConsistencyPlusCal>: 1772:2373
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1699, col 32 to line 1699, col 62 of module ServicesConsistencyPlusCal: 18820
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1699, col 32 to line 1699, col 39 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1700, col 35 to line 1700, col 59 of module ServicesConsistencyPlusCal: 2373
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1701, col 46 to line 1701, col 68 of module ServicesConsistencyPlusCal: 1227
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1702, col 57 to line 1702, col 88 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1703, col 62 to line 1706, col 117 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1707, col 65 to line 1707, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1708, col 65 to line 1708, col 116 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1709, col 65 to line 1710, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1711, col 54 to line 1711, col 78 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1712, col 57 to line 1712, col 97 of module ServicesConsistencyPlusCal: 780
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1713, col 62 to line 1713, col 119 of module ServicesConsistencyPlusCal: 360
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1714, col 68 to line 1714, col 89 of module ServicesConsistencyPlusCal: 420
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1715, col 73 to line 1715, col 134 of module ServicesConsistencyPlusCal: 420
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1717, col 76 to line 1717, col 100 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1718, col 54 to line 1718, col 87 of module ServicesConsistencyPlusCal: 780
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1719, col 54 to line 1721, col 80 of module ServicesConsistencyPlusCal: 780
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1722, col 43 to line 1722, col 61 of module ServicesConsistencyPlusCal: 1227
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1723, col 46 to line 1723, col 69 of module ServicesConsistencyPlusCal: 1146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1725, col 65 to line 1725, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1726, col 65 to line 1726, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1727, col 65 to line 1727, col 90 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1728, col 65 to line 1728, col 114 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1730, col 76 to line 1730, col 125 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1731, col 76 to line 1731, col 109 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1732, col 65 to line 1734, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1735, col 54 to line 1736, col 84 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1737, col 57 to line 1737, col 79 of module ServicesConsistencyPlusCal: 1146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1738, col 68 to line 1738, col 90 of module ServicesConsistencyPlusCal: 1146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1739, col 76 to line 1739, col 98 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1740, col 76 to line 1740, col 118 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1741, col 76 to line 1742, col 100 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1743, col 79 to line 1743, col 102 of module ServicesConsistencyPlusCal: 1122
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1744, col 84 to line 1747, col 134 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1748, col 90 to line 1748, col 114 of module ServicesConsistencyPlusCal: 294
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1749, col 98 to line 1749, col 138 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1750, col 95 to line 1750, col 131 of module ServicesConsistencyPlusCal: 294
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1751, col 87 to line 1753, col 113 of module ServicesConsistencyPlusCal: 294
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1754, col 65 to line 1755, col 95 of module ServicesConsistencyPlusCal: 1146
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1759, col 98 to line 1759, col 146 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1760, col 98 to line 1760, col 136 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1761, col 98 to line 1761, col 123 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1762, col 98 to line 1762, col 149 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1763, col 98 to line 1763, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1764, col 98 to line 1764, col 150 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1765, col 98 to line 1766, col 122 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1767, col 87 to line 1767, col 111 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1769, col 98 to line 1769, col 153 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1771, col 98 to line 1771, col 122 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1772, col 87 to line 1772, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1773, col 87 to line 1775, col 113 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1778, col 98 to line 1778, col 146 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1779, col 98 to line 1779, col 136 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1780, col 98 to line 1780, col 125 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1781, col 98 to line 1781, col 151 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1782, col 98 to line 1782, col 122 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1784, col 109 to line 1784, col 166 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1786, col 109 to line 1786, col 133 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1787, col 98 to line 1787, col 131 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1788, col 98 to line 1790, col 124 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1791, col 87 to line 1791, col 120 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1792, col 87 to line 1795, col 117 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1796, col 65 to line 1796, col 83 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1797, col 32 to line 1803, col 54 of module ServicesConsistencyPlusCal: 2373
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<PrepareSuccessResponseR line 1805, col 1 to line 1805, col 29 of module ServicesConsistencyPlusCal>: 413:490
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1805, col 37 to line 1805, col 72 of module ServicesConsistencyPlusCal: 16894
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1805, col 37 to line 1805, col 44 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1806, col 40 to line 1806, col 86 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1806, col 40 to line 1806, col 62 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1806, col 67 to line 1806, col 86 of module ServicesConsistencyPlusCal: 404
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1807, col 54 to line 1807, col 57 of module ServicesConsistencyPlusCal: 43
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1808, col 54 to line 1808, col 105 of module ServicesConsistencyPlusCal: 43
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1809, col 54 to line 1809, col 90 of module ServicesConsistencyPlusCal: 43
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1810, col 51 to line 1812, col 88 of module ServicesConsistencyPlusCal: 43
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1813, col 48 to line 1813, col 99 of module ServicesConsistencyPlusCal: 404
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1814, col 48 to line 1815, col 75 of module ServicesConsistencyPlusCal: 404
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1816, col 37 to line 1826, col 79 of module ServicesConsistencyPlusCal: 490
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<PrepareSuccessResponse line 1828, col 1 to line 1828, col 28 of module ServicesConsistencyPlusCal>: 364:447
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1828, col 36 to line 1828, col 70 of module ServicesConsistencyPlusCal: 16894
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1828, col 36 to line 1828, col 43 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1829, col 36 to line 1829, col 90 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1830, col 36 to line 1830, col 69 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1831, col 36 to line 1841, col 58 of module ServicesConsistencyPlusCal: 447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<PrepareFailedResponseR line 1843, col 1 to line 1843, col 28 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1843, col 36 to line 1843, col 70 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1846, col 53 to line 1846, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1847, col 53 to line 1847, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1848, col 53 to line 1848, col 98 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1849, col 53 to line 1849, col 72 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1850, col 53 to line 1850, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1851, col 47 to line 1851, col 97 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1852, col 47 to line 1853, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1854, col 36 to line 1864, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<PrepareFailedResponse line 1866, col 1 to line 1866, col 27 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1866, col 35 to line 1866, col 68 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1867, col 35 to line 1867, col 93 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1868, col 35 to line 1868, col 68 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1869, col 35 to line 1879, col 57 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponseR line 1881, col 1 to line 1881, col 26 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1881, col 34 to line 1881, col 66 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1884, col 51 to line 1884, col 99 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1885, col 51 to line 1885, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1886, col 51 to line 1886, col 96 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1887, col 51 to line 1887, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1888, col 51 to line 1888, col 85 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1889, col 45 to line 1889, col 93 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1890, col 45 to line 1891, col 72 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1892, col 34 to line 1900, col 56 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponse line 1902, col 1 to line 1902, col 25 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1902, col 33 to line 1902, col 64 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1903, col 33 to line 1903, col 86 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1904, col 33 to line 1904, col 66 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1905, col 33 to line 1913, col 66 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCommitResponse2 line 1915, col 1 to line 1915, col 26 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1915, col 34 to line 1915, col 66 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1916, col 34 to line 1916, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1917, col 34 to line 1917, col 67 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1918, col 34 to line 1926, col 76 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<AbortPendingR line 1928, col 1 to line 1928, col 19 of module ServicesConsistencyPlusCal>: 23:24
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1928, col 27 to line 1928, col 52 of module ServicesConsistencyPlusCal: 16471
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1928, col 27 to line 1928, col 34 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1929, col 30 to line 1929, col 76 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1931, col 44 to line 1931, col 85 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1932, col 44 to line 1932, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1933, col 44 to line 1933, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1934, col 44 to line 1934, col 63 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1935, col 44 to line 1935, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1936, col 38 to line 1936, col 79 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1937, col 38 to line 1937, col 76 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1938, col 27 to line 1944, col 79 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<AbortPending line 1946, col 1 to line 1946, col 18 of module ServicesConsistencyPlusCal>: 23:24
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1946, col 26 to line 1946, col 50 of module ServicesConsistencyPlusCal: 16471
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1946, col 26 to line 1946, col 33 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1947, col 26 to line 1947, col 78 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1948, col 26 to line 1948, col 59 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1949, col 26 to line 1955, col 78 of module ServicesConsistencyPlusCal: 24
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortMessageR line 1957, col 1 to line 1957, col 24 of module ServicesConsistencyPlusCal>: 706:894
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1957, col 32 to line 1957, col 62 of module ServicesConsistencyPlusCal: 17275
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1957, col 32 to line 1957, col 39 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1958, col 35 to line 1958, col 81 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1958, col 35 to line 1958, col 57 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1958, col 62 to line 1958, col 81 of module ServicesConsistencyPlusCal: 738
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1959, col 49 to line 1959, col 52 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1960, col 49 to line 1960, col 95 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1961, col 49 to line 1961, col 85 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1962, col 46 to line 1964, col 83 of module ServicesConsistencyPlusCal: 66
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1965, col 43 to line 1965, col 89 of module ServicesConsistencyPlusCal: 762
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1966, col 43 to line 1966, col 81 of module ServicesConsistencyPlusCal: 762
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1967, col 32 to line 1974, col 65 of module ServicesConsistencyPlusCal: 894
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbortMessage line 1976, col 1 to line 1976, col 23 of module ServicesConsistencyPlusCal>: 637:828
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1976, col 31 to line 1976, col 60 of module ServicesConsistencyPlusCal: 17275
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 1976, col 31 to line 1976, col 38 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1977, col 31 to line 1977, col 83 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1978, col 31 to line 1978, col 64 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1979, col 31 to line 1986, col 64 of module ServicesConsistencyPlusCal: 828
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyAbort2 line 1988, col 1 to line 1988, col 17 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1988, col 25 to line 1988, col 48 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1989, col 25 to line 1989, col 77 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1990, col 25 to line 1990, col 58 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1991, col 25 to line 1997, col 77 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCheckoutResponseR line 1999, col 1 to line 1999, col 28 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 1999, col 36 to line 1999, col 70 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2002, col 53 to line 2002, col 103 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2003, col 53 to line 2003, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2004, col 53 to line 2004, col 98 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2005, col 53 to line 2005, col 72 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2006, col 53 to line 2006, col 87 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2007, col 47 to line 2007, col 97 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2008, col 47 to line 2009, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2010, col 36 to line 2020, col 78 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCheckoutResponse line 2022, col 1 to line 2022, col 27 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2022, col 35 to line 2022, col 68 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2023, col 35 to line 2023, col 90 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2024, col 35 to line 2024, col 68 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2025, col 35 to line 2035, col 57 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<FailedCheckoutResponseR line 2037, col 1 to line 2037, col 29 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2037, col 37 to line 2037, col 72 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2040, col 54 to line 2040, col 105 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2041, col 54 to line 2041, col 90 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2042, col 54 to line 2042, col 99 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2043, col 54 to line 2043, col 73 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2044, col 54 to line 2044, col 88 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2045, col 48 to line 2045, col 99 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2046, col 48 to line 2047, col 75 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2048, col 37 to line 2058, col 79 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<FailedCheckoutResponse line 2060, col 1 to line 2060, col 28 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2060, col 36 to line 2060, col 70 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2061, col 36 to line 2061, col 95 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2062, col 36 to line 2062, col 69 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2063, col 36 to line 2073, col 58 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCompensateResponseR line 2075, col 1 to line 2075, col 30 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2075, col 38 to line 2075, col 74 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2078, col 55 to line 2078, col 107 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2079, col 55 to line 2079, col 91 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2080, col 55 to line 2080, col 100 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2081, col 55 to line 2081, col 74 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2082, col 55 to line 2082, col 89 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2083, col 49 to line 2083, col 101 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2084, col 49 to line 2085, col 76 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2086, col 38 to line 2096, col 80 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<ReplyCompensateResponse line 2098, col 1 to line 2098, col 29 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2098, col 37 to line 2098, col 72 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2099, col 37 to line 2099, col 94 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2100, col 37 to line 2100, col 70 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2101, col 37 to line 2111, col 59 of module ServicesConsistencyPlusCal: 0
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<step line 2113, col 1 to line 2113, col 10 of module ServicesConsistencyPlusCal>: 2564:4145
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2113, col 18 to line 2113, col 34 of module ServicesConsistencyPlusCal: 20592
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  |line 2113, col 18 to line 2113, col 25 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2114, col 18 to line 2114, col 52 of module ServicesConsistencyPlusCal: 4145
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2115, col 18 to line 2121, col 51 of module ServicesConsistencyPlusCal: 4145
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2772:0 @!@!@
+<Terminating line 2142, col 1 to line 2142, col 11 of module ServicesConsistencyPlusCal>: 0:0
+@!@!@ENDMSG 2772 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2142, col 19 to line 2142, col 56 of module ServicesConsistencyPlusCal: 16447
+@!@!@ENDMSG 2221 @!@!@
+@!@!@STARTMSG 2221:0 @!@!@
+  line 2143, col 19 to line 2143, col 32 of module ServicesConsistencyPlusCal: 0
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2774:0 @!@!@
-<TypeInvariant line 392, col 1 to line 392, col 13 of module ServicesConsistencyPlusCal>
+<TypeInvariant line 518, col 1 to line 518, col 13 of module ServicesConsistencyPlusCal>
 @!@!@ENDMSG 2774 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 393, col 5 to line 401, col 24 of module ServicesConsistencyPlusCal: 205
+  line 519, col 5 to line 527, col 24 of module ServicesConsistencyPlusCal: 16442
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2774:0 @!@!@
-<UserCreditsConsistent line 403, col 1 to line 403, col 21 of module ServicesConsistencyPlusCal>
+<UserCreditsConsistent line 529, col 1 to line 529, col 21 of module ServicesConsistencyPlusCal>
 @!@!@ENDMSG 2774 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 403, col 26 to line 403, col 89 of module ServicesConsistencyPlusCal: 205
+  line 529, col 26 to line 529, col 89 of module ServicesConsistencyPlusCal: 16442
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2774:0 @!@!@
-<StockConsistent line 404, col 1 to line 404, col 15 of module ServicesConsistencyPlusCal>
+<StockConsistent line 530, col 1 to line 530, col 15 of module ServicesConsistencyPlusCal>
 @!@!@ENDMSG 2774 @!@!@
 @!@!@STARTMSG 2221:0 @!@!@
-  line 404, col 20 to line 404, col 72 of module ServicesConsistencyPlusCal: 205
+  line 530, col 20 to line 530, col 72 of module ServicesConsistencyPlusCal: 16442
 @!@!@ENDMSG 2221 @!@!@
 @!@!@STARTMSG 2202:0 @!@!@
 End of statistics.
 @!@!@ENDMSG 2202 @!@!@
 @!@!@STARTMSG 2200:0 @!@!@
-Progress(29) at 2026-04-01 02:49:35: 450 states generated (25,471 s/min), 205 distinct states found (11,603 ds/min), 0 states left on queue.
+Progress(73) at 2026-04-01 14:12:57: 44,622 states generated (1,644,545 s/min), 16,442 distinct states found (605,970 ds/min), 0 states left on queue.
 @!@!@ENDMSG 2200 @!@!@
 @!@!@STARTMSG 2199:0 @!@!@
-450 states generated, 205 distinct states found, 0 states left on queue.
+44622 states generated, 16442 distinct states found, 0 states left on queue.
 @!@!@ENDMSG 2199 @!@!@
 @!@!@STARTMSG 2194:0 @!@!@
-The depth of the complete state graph search is 29.
+The depth of the complete state graph search is 73.
 @!@!@ENDMSG 2194 @!@!@
 @!@!@STARTMSG 2268:0 @!@!@
-The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 3 and the 95th percentile is 2).
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 4 and the 95th percentile is 2).
 @!@!@ENDMSG 2268 @!@!@
 @!@!@STARTMSG 2186:0 @!@!@
-Finished in 1062ms at (2026-04-01 02:49:35)
+Finished in 1630ms at (2026-04-01 14:12:57)
 @!@!@ENDMSG 2186 @!@!@
