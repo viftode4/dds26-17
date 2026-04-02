@@ -9,6 +9,9 @@ from redis.exceptions import ConnectionError, TimeoutError
 
 logger = structlog.get_logger(__name__)
 
+_MASTER_POOL = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "64"))
+_REPLICA_POOL = int(os.environ.get("REDIS_REPLICA_POOL_SIZE", "32"))
+
 
 def get_redis_config(prefix: str = "") -> dict:
     """Get Redis connection config from environment variables.
@@ -73,7 +76,7 @@ def create_redis_connection(
         if not sentinel_service_name:
             # Fall back to direct connection
             config = get_redis_config(prefix)
-            return aioredis.Redis(**config, max_connections=1024, **merged)
+            return aioredis.Redis(**config, max_connections=_MASTER_POOL, **merged)
 
         password = os.environ.get(f"{prefix}REDIS_PASSWORD", "redis")
         sentinel = Sentinel(
@@ -83,14 +86,14 @@ def create_redis_connection(
             # password: auth for the actual Redis master/replica connections
             password=password,
             db=int(os.environ.get(f"{prefix}REDIS_DB", 0)),
-            max_connections=1024,
+            max_connections=_MASTER_POOL,
             **merged,
         )
         return sentinel.master_for(sentinel_service_name)
 
     # Direct connection fallback
     config = get_redis_config(prefix)
-    return aioredis.Redis(**config, max_connections=1024, **merged)
+    return aioredis.Redis(**config, max_connections=_MASTER_POOL, **merged)
 
 
 def create_replica_connection(
@@ -130,7 +133,7 @@ def create_replica_connection(
                 sentinel_kwargs={},
                 password=password,
                 db=int(os.environ.get(f"{prefix}REDIS_DB", 0)),
-                max_connections=512,
+                max_connections=_REPLICA_POOL,
                 **merged,
             )
             return sentinel.slave_for(sentinel_service_name)

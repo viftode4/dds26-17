@@ -5,6 +5,9 @@
 x-order-service: &order-service
   image: order:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  environment:
+    - REDIS_MASTER_POOL_SIZE=2048
+    - REDIS_REPLICA_POOL_SIZE=1024
   env_file:
     - env/order_redis.env
   volumes:
@@ -15,6 +18,8 @@ x-order-service: &order-service
     order-db:
       condition: service_started
     order-db-replica:
+      condition: service_started
+    order-db-replica-2:
       condition: service_started
     nats:
       condition: service_started
@@ -40,6 +45,9 @@ x-order-service: &order-service
 x-stock-service: &stock-service
   image: stock:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  environment:
+    - REDIS_MASTER_POOL_SIZE=2048
+    - REDIS_REPLICA_POOL_SIZE=1024
   env_file:
     - env/stock_redis.env
   volumes:
@@ -50,6 +58,8 @@ x-stock-service: &stock-service
     stock-db:
       condition: service_started
     stock-db-replica:
+      condition: service_started
+    stock-db-replica-2:
       condition: service_started
     nats:
       condition: service_started
@@ -75,6 +85,9 @@ x-stock-service: &stock-service
 x-payment-service: &payment-service
   image: payment:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  environment:
+    - REDIS_MASTER_POOL_SIZE=2048
+    - REDIS_REPLICA_POOL_SIZE=1024
   env_file:
     - env/payment_redis.env
   volumes:
@@ -85,6 +98,8 @@ x-payment-service: &payment-service
     payment-db:
       condition: service_started
     payment-db-replica:
+      condition: service_started
+    payment-db-replica-2:
       condition: service_started
     nats:
       condition: service_started
@@ -117,13 +132,19 @@ x-sentinel: &sentinel
       condition: service_started
     order-db-replica:
       condition: service_started
+    order-db-replica-2:
+      condition: service_started
     stock-db:
       condition: service_started
     stock-db-replica:
       condition: service_started
+    stock-db-replica-2:
+      condition: service_started
     payment-db:
       condition: service_started
     payment-db-replica:
+      condition: service_started
+    payment-db-replica-2:
       condition: service_started
   deploy:
     resources:
@@ -263,16 +284,17 @@ services:
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 400mb
+        --maxmemory 800mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 6
+        --io-threads 8
         --io-threads-do-reads yes
+        --maxclients 16384
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 512M
+          cpus: "7.0"
+          memory: 1G
 
   stock-db:
     image: valkey/valkey:8.1-bookworm
@@ -280,16 +302,17 @@ services:
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 300mb
+        --maxmemory 600mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 6
+        --io-threads 8
         --io-threads-do-reads yes
+        --maxclients 16384
     deploy:
       resources:
         limits:
-          cpus: "3.0"
-          memory: 384M
+          cpus: "5.0"
+          memory: 768M
 
   payment-db:
     image: valkey/valkey:8.1-bookworm
@@ -297,16 +320,17 @@ services:
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 300mb
+        --maxmemory 600mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 6
+        --io-threads 8
         --io-threads-do-reads yes
+        --maxclients 16384
     deploy:
       resources:
         limits:
-          cpus: "3.0"
-          memory: 384M
+          cpus: "5.0"
+          memory: 768M
 
   # ---- Redis Replicas ----
 
@@ -315,7 +339,7 @@ services:
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 400mb
         --replicaof order-db 6379
         --masterauth redis
     depends_on:
@@ -324,15 +348,32 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.5"
+          memory: 512M
+
+  order-db-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 400mb
+        --replicaof order-db 6379
+        --masterauth redis
+    depends_on:
+      order-db:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 512M
 
   stock-db-replica:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 300mb
         --replicaof stock-db 6379
         --masterauth redis
     depends_on:
@@ -341,15 +382,32 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 384M
+
+  stock-db-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 300mb
+        --replicaof stock-db 6379
+        --masterauth redis
+    depends_on:
+      stock-db:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
 
   payment-db-replica:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 300mb
         --replicaof payment-db 6379
         --masterauth redis
     depends_on:
@@ -358,8 +416,25 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 256M
+          cpus: "1.0"
+          memory: 384M
+
+  payment-db-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: >
+      redis-server
+        --requirepass redis
+        --maxmemory 300mb
+        --replicaof payment-db 6379
+        --masterauth redis
+    depends_on:
+      payment-db:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 384M
 
   # ---- NATS ----
 
