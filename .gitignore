@@ -49,6 +49,9 @@ _template/
 # tla/tla2tools.jar
 tla/states/
 tla/*_TTrace_*
+tla/ServicesConsistencyPlusCal.cfg
+tla/ServicesConsistencyPlusCal.out
+tla/ServicesConsistencyPlusCal.old
 
 # Benchmark results
 *.csv
