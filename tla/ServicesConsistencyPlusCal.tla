@@ -4,6 +4,10 @@ EXTENDS Naturals, Sequences, TLC
 CONSTANT Mode, PPU, CheckoutAmount, InitialStock, InitialCredits
 
 ASSUME Mode \in {"2pc", "saga"}
+ASSUME PPU \in Nat
+ASSUME CheckoutAmount \in Nat
+ASSUME InitialStock \in Nat
+ASSUME InitialCredits \in Nat
 
 PAYMENT_STATUS == {"pending", "prepared", "completed", "failed", "compensated"}
 STOCK_STATUS == {"pending", "prepared", "completed", "failed", "compensated"}

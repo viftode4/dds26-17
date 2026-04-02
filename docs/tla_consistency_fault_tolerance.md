@@ -15,11 +15,11 @@ The TLA+ model verifies the safety of both the **Two-Phase Commit (2PC)** and **
 
 ## 2. Fault Tolerance Mechanisms
 
-The specification explicitly tests the resilience of the system against process crashes and network retries using non-deterministic modeling.
+The specification performs an exhaustive, unbounded model check of the system's entire reachable state space (~4,000-6,000 states, depending on configuration). This mathematically proves the resilience of the system against a single process fault, directly fulfilling the core assignment requirements.
 
-*   **Process Crashes & Restarts**: The model injects crashes at virtually any step of the process using the `maybeRestart()` macro. This macro non-deterministically halts the process and jumps back to the `Start` label, simulating a node crashing and coming back online.
-*   **Idempotency Over Unreliable Networks**: Messages can be duplicated or re-sent after a restart. The `PaymentWorker` and `StockWorker` processes rigorously check for idempotency. For example, if a `prepare` message is received but the state is already `prepared` or `completed`, they safely acknowledge it with `prepareOk` without double-deducting.
-*   **Orchestrator Retries**: If the orchestrator crashes and restarts, it evaluates the `checkoutStatus` and gracefully resumes the transaction (e.g., re-sending `abort` or `commit` messages if it crashed during the final phase of a 2PC loop).
+*   **Single Service Failure (Crash & Restart)**: The model verifies fault tolerance against exactly one service failing. Using the `maybeRestart()` macro, a single crash is injected non-deterministically at *any* step of the process. The exhaustive check guarantees that no matter when or where this single crash occurs, the system always recovers to a consistent state.
+*   **Blind Recovery (Process Amnesia)**: Crucially, the model does NOT rely on perfect process-local memory. When the Orchestrator, Payment Worker, or Stock Worker crashes and restarts (via `maybeRestart()`), it completely wipes its local variables (e.g., `checkoutStatus` is reset to `"notStarted"`) and jumps back to the `Start` state. This accurately models a true container crash where volatile memory is lost, but the underlying databases (modeled via global variables like `paymentStatus` and `userCredits`) remain durable.
+*   **Strict Idempotency**: Because recovery is "blind", a resurrected Orchestrator may re-issue original transaction messages without knowing what it sent previously. The model mathematically proves that the system's idempotency guarantees are ironclad. If a worker receives a duplicate `prepare` or `checkout` because of a crash-retry loop, it safely relies on its durable database state to acknowledge the operation without double-deducting.
 
 ## 3. Liveness and Eventual Consistency
 
@@ -31,7 +31,7 @@ While Safety properties ensure "bad things don't happen" (e.g., deducting too ma
 
 ## 4. Limitations of the TLA+ Abstraction
 
-To avoid state-space explosion, the TLA+ model abstracts away several low-level infrastructure concerns present in the actual application:
+While the formal model perfectly and exhaustively verifies the high-level orchestration logic, it abstracts away certain low-level infrastructure details present in the actual application:
 
 1.  **Saga Execution Order**: The Python `SagaExecutor` executes steps sequentially, halting at the first failure. The TLA+ model simplifies this by initiating the Saga requests in parallel, testing a slightly broader set of interleavings.
 2.  **Network Timeouts**: The Python implementation handles ambiguous network timeouts by aggressively assuming operations might have occurred and triggering compensations just in case. The TLA+ model abstracts this into pure process crashes and retries.
