@@ -144,7 +144,8 @@ async def test_sentinel_failover_stock_master():
 
         # Restart app services to force connection pool refresh after topology change
         _docker_compose("restart", "stock-service", "stock-service-2",
-                        "order-service-1", "order-service-2")
+                        "order-service-1", "order-service-2",
+                        "checkout-service-1", "checkout-service-2")
         await asyncio.sleep(15)
 
         await wait_gateway_healthy(client)
@@ -180,10 +181,10 @@ async def test_sentinel_failover_stock_master():
 
 @pytest.mark.asyncio
 async def test_haproxy_failover_order_service():
-    """Kill order-service-1, verify order-service-2 takes over via HAProxy.
+    """Kill checkout-service-1; verify checkout-service-2 serves checkouts via HAProxy.
 
-    Renamed from test_leader_election_takeover — checkouts don't depend on
-    leader election (active-active architecture). This tests HAProxy failover.
+    Checkouts are routed to the checkout coordinator pool; order CRUD stays on
+    order-service instances. This tests HAProxy failover for the coordinator tier.
 
     Fixes (task 5.2 + task 1.7):
     - Use OutcomeTracker instead of silent pass/continue (3 silent paths fixed)
@@ -202,23 +203,23 @@ async def test_haproxy_failover_order_service():
             client, stock=initial_stock, credit=initial_credit,
         )
 
-        # Kill one order instance
-        _docker_compose("kill", "order-service-1")
+        # Kill one checkout coordinator instance
+        _docker_compose("kill", "checkout-service-1")
 
         # HAProxy uses `check inter 5s` with default `fall 3` — needs at least
         # 3 × 5s = 15s to mark the dead backend down. Wait 20s to be safe,
-        # then poll until order-service-2 is actually accepting requests.
+        # then poll until checkout-service-2 is actually accepting requests.
         await asyncio.sleep(20)
 
-        async def _order_service_ready() -> bool:
+        async def _checkout_service_ready() -> bool:
             try:
-                r = await client.get(f"{GATEWAY}/orders/health")
+                r = await client.get(f"{GATEWAY}/orders/__checkout_health")
                 return r.status_code == 200
             except Exception:
                 return False
 
-        await wait_until(_order_service_ready, timeout=30.0, interval=1.0,
-                         msg="order-service-2 not healthy after 30s")
+        await wait_until(_checkout_service_ready, timeout=30.0, interval=1.0,
+                         msg="checkout-service-2 not healthy after 30s")
 
         # Issue 10 checkouts using OutcomeTracker — no silent swallowing.
         # Retry orders/create up to 3 times with 1s backoff to handle any
@@ -253,12 +254,12 @@ async def test_haproxy_failover_order_service():
                 tracker.record_exception(e)
 
         # Restart killed container
-        _docker_compose("start", "order-service-1")
+        _docker_compose("start", "checkout-service-1")
         await asyncio.sleep(10)
 
         await wait_gateway_healthy(client)
 
-        # With one order instance alive and HAProxy fully failed over, all
+        # With one checkout instance alive and HAProxy fully failed over, all
         # checkouts should succeed or fail with clean business-logic errors.
         # Allow at most 1 transient server error for the HAProxy transition window.
         assert tracker.server_errors <= 1, (
@@ -267,7 +268,7 @@ async def test_haproxy_failover_order_service():
             f"Details: {tracker.outcomes}"
         )
         assert tracker.successes > 0, (
-            f"No successful checkouts — order-service-2 did not handle traffic.\n"
+            f"No successful checkouts — checkout-service-2 did not handle traffic.\n"
             f"Summary: {tracker.summary()}\n"
             f"Details: {tracker.outcomes}"
         )

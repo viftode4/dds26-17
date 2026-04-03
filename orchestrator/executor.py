@@ -112,7 +112,7 @@ class _BaseExecutor:
         """Execute action on all steps with infinite retry until all succeed."""
         pending = list(steps)
         backoff = 0.5
-        max_backoff = 60.0
+        max_backoff = 5.0
         while pending:
             results = await asyncio.gather(*[
                 self._try_step(step, saga_id, action, context) for step in pending

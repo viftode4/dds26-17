@@ -94,9 +94,26 @@ async def test_network_partition_stock_db():
         # A mid-2PC-commit saga (payment committed, stock commit pending) can be stuck
         # for up to 60s before the next retry fires after reconnect.
         _docker_network_connect("distributed-data-systems-stock-db-1")
-        await asyncio.sleep(5.0)  # DB reconnect settle
+        await asyncio.sleep(10.0)  # DB reconnect + Sentinel re-evaluation
+
+        # Restart stock services + gateway to force fresh connections + Lua reload
+        # on whichever node Sentinel now considers master.
+        import subprocess
+        subprocess.run(["docker", "compose", "restart",
+                        "stock-service", "stock-service-2", "gateway"],
+                       capture_output=True, text=True, timeout=60, check=False)
+        await asyncio.sleep(20.0)  # healthcheck start_period
+
         await wait_gateway_healthy(client)
-        await asyncio.sleep(75.0)  # cover the full 60s max backoff + retry overhead
+        await asyncio.sleep(30.0)  # cover retry backoff for in-flight abort retries
+
+        # Diagnostics before conservation check
+        print(f"Partition outcomes: {tracker.summary()}")
+        print(f"Partition details: {tracker.outcomes}")
+        r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
+        print(f"Stock after partition: status={r.status_code} body={r.text}")
+        r2 = await client.get(f"{GATEWAY}/payment/find_user/{user_id}")
+        print(f"Payment after partition: status={r2.status_code} body={r2.text}")
 
         # Verify conservation — all partitioned requests should have been rolled back
         await assert_conservation(
@@ -106,9 +123,6 @@ async def test_network_partition_stock_db():
             price=item_price,
             label="partition_stock_db",
         )
-
-        # At least verify no successes during partition (stock was unreachable)
-        print(f"Partition outcomes: {tracker.summary()}")
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +347,8 @@ async def test_redis_failover_data_loss_detection():
         _docker_compose("start", "stock-db")
         await asyncio.sleep(10.0)
         _docker_compose("restart", "stock-service", "stock-service-2",
-                        "order-service-1", "order-service-2", "gateway")
+                        "order-service-1", "order-service-2",
+                        "checkout-service-1", "checkout-service-2", "gateway")
         await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 
@@ -362,12 +377,12 @@ async def test_redis_failover_data_loss_detection():
 
 
 # ---------------------------------------------------------------------------
-# 4.7 – WAL survives order-db Redis failover
+# 4.7 – WAL survives checkout-db Redis failover
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_wal_survives_redis_failover():
-    """Kill order-db master during in-flight checkouts → WAL recovers on new master (task 4.7)."""
+    """Kill checkout-db master during in-flight checkouts → WAL recovers on new master (task 4.7)."""
     item_price = 75
     initial_stock = 30
     initial_credit = 100_000
@@ -391,18 +406,18 @@ async def test_wal_survives_redis_failover():
         tasks = [asyncio.create_task(_do_checkout()) for _ in range(10)]
         await asyncio.sleep(0.2)
 
-        # Kill the order-db master
-        _docker_compose("kill", "order-db")
+        # Kill the checkout coordinator Redis master (WAL lives here)
+        _docker_compose("kill", "checkout-db")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
         # Wait for Sentinel failover
         await asyncio.sleep(20.0)
-        _docker_compose("start", "order-db")
+        _docker_compose("start", "checkout-db")
         await asyncio.sleep(10.0)
 
-        # Restart order services + gateway to reconnect to new master
-        _docker_compose("restart", "order-service-1", "order-service-2", "gateway")
+        # Restart checkout coordinators + gateway to reconnect to new master
+        _docker_compose("restart", "checkout-service-1", "checkout-service-2", "gateway")
         await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 

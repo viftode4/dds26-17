@@ -188,7 +188,7 @@ def _ensure_clean_topology(request):
         print(f"\n[topology] Drift detected: {drifted}, restoring...")
         restore_topology()
         restart_app_services()
-        wait_stack_healthy(timeout=60)
+    wait_stack_healthy(timeout=60)
     yield
 
 
@@ -219,6 +219,8 @@ def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
         ("stock-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
         ("payment-db",        "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
         ("payment-db-replica","redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("checkout-db",       "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        ("checkout-db-replica", "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
     ]
     for container, *cmd in db_containers:
         subprocess.run(

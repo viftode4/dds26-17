@@ -230,24 +230,32 @@ Install Locust:
 pip install locust
 ```
 
-Use the included locust file or one from `wdm-project-benchmark`:
+Use the included locust file or one from `wdm-project-benchmark`.
+
+Default load profile (10k users, 500/s spawn, 4 workers, distributed master/worker):
 
 ```bash
-locust -f test/locustfile.py --host=http://localhost:8000 --users 200 --spawn-rate 20
+bash test/run_distributed_benchmark.sh
+```
+
+Quick local headless smoke (single process):
+
+```bash
+locust -f test/locustfile.py --host=http://localhost:8000 --headless -u 10000 -r 500 --run-time 60s
 ```
 
 Open http://localhost:8089 for the Locust web UI with live throughput/latency charts.
 
 ### Viewing metrics
 
-The order service exposes Prometheus-compatible metrics:
+Checkout coordinator (saga / WAL) metrics:
 
 ```bash
-curl http://localhost:8000/orders/metrics
+# Through HAProxy you only hit order routes; call a checkout instance directly, e.g.:
+docker compose exec checkout-service-1 curl -sf http://localhost:5000/metrics | head
 ```
 
-Includes: saga success/failure counts, abort rate, current protocol (2pc/saga),
-leader status, and per-protocol latency histograms (p50/p95/p99).
+Order service exposes a minimal `/orders/metrics` gauge; saga histograms live on checkout.
 
 ### Generating benchmark charts
 

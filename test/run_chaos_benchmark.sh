@@ -11,6 +11,8 @@
 # Usage:
 #   bash test/run_chaos_benchmark.sh [scenario] [users] [workers]
 #
+# Defaults: 10000 users, 4 workers, 500/s spawn (override spawn with LOCUST_SPAWN_RATE).
+#
 # Scenarios:
 #   all          Run all scenarios sequentially (default)
 #   service      Kill service instances only
@@ -20,8 +22,8 @@
 #
 # Examples:
 #   bash test/run_chaos_benchmark.sh
-#   bash test/run_chaos_benchmark.sh redis 500 4
-#   bash test/run_chaos_benchmark.sh all 300 4
+#   bash test/run_chaos_benchmark.sh redis 10000 8
+#   bash test/run_chaos_benchmark.sh all 500 4   # smaller load
 # =============================================================================
 set -euo pipefail
 
@@ -32,9 +34,9 @@ RESULTS_DIR="$SCRIPT_DIR/benchmark_results"
 mkdir -p "$RESULTS_DIR"
 
 SCENARIO="${1:-all}"
-USERS="${2:-300}"
-WORKERS="${3:-4}"
-RAMPUP=$(( USERS / 10 ))
+USERS="${2:-10000}"
+WORKERS="${3:-8}"
+RAMPUP="${LOCUST_SPAWN_RATE:-500}"
 
 # Colors
 RED='\033[0;31m'
@@ -157,10 +159,10 @@ run_kill_scenario() {
 # Init data
 # -------------------------------------------------------------------
 init_data() {
-    log_info "Initializing data..."
-    curl -sf -X POST "$GATEWAY/stock/batch_init/1000/1000/10" > /dev/null
-    curl -sf -X POST "$GATEWAY/payment/batch_init/1000/1000000" > /dev/null
-    curl -sf -X POST "$GATEWAY/orders/batch_init/1000/1000/1000/10" > /dev/null
+    log_info "Initializing data (10000 items, 10000 users, pre-seeded orders)..."
+    curl -sf -X POST "$GATEWAY/stock/batch_init/10000/1000/10" > /dev/null
+    curl -sf -X POST "$GATEWAY/payment/batch_init/10000/1000000" > /dev/null
+    curl -sf -X POST "$GATEWAY/orders/batch_init/10000/10000/10000/10" > /dev/null
     sleep 2
     log_info "Data ready"
 }
@@ -171,12 +173,16 @@ init_data() {
 echo ""
 echo "=================================================="
 echo "  DDS26 Chaos Benchmark"
-echo "  Scenario: $SCENARIO | Users: $USERS | Workers: $WORKERS"
+echo "  Scenario: $SCENARIO | Users: $USERS | Workers: $WORKERS | Spawn: ${RAMPUP}/s"
 echo "=================================================="
 
-log_info "Checking gateway health..."
+log_info "Checking gateway health (order + checkout coordinator)..."
 for i in $(seq 1 30); do
-    curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && log_info "Gateway healthy" && break
+    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && \
+       curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1; then
+        log_info "Gateway healthy"
+        break
+    fi
     [ "$i" -eq 30 ] && echo "ERROR: gateway not up" && exit 1
     sleep 1
 done
@@ -190,7 +196,7 @@ run_scenario_service() {
     echo ""
     echo "=================================================="
     echo "  SCENARIO 1: Service Instance Kills Under Load"
-    echo "  (HAProxy leastconn should route around dead instance)"
+    echo "  (HAProxy leastconn routes around dead checkout/order/stock/payment replicas)"
     echo "=================================================="
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -199,9 +205,10 @@ run_scenario_service() {
     MASTER_PID=$(start_load "$CSV")
     sleep 15  # let load ramp up
 
-    run_kill_scenario "order-service-1 killed"  \
-        "distributed-data-systems-order-service-1-1" \
-        "$GATEWAY/orders/health"
+    # Checkouts hit checkout-service pool; health via dedicated gateway path
+    run_kill_scenario "checkout-service-1 killed"  \
+        "distributed-data-systems-checkout-service-1-1" \
+        "$GATEWAY/orders/__checkout_health"
 
     run_kill_scenario "stock-service killed" \
         "distributed-data-systems-stock-service-1" \
@@ -211,9 +218,9 @@ run_scenario_service() {
         "distributed-data-systems-payment-service-1" \
         "$GATEWAY/payment/find_user/1"
 
-    run_kill_scenario "order-service-2 killed" \
-        "distributed-data-systems-order-service-2-1" \
-        "$GATEWAY/orders/health"
+    run_kill_scenario "checkout-service-2 killed" \
+        "distributed-data-systems-checkout-service-2-1" \
+        "$GATEWAY/orders/__checkout_health"
 
     sleep 10
     stop_load "$MASTER_PID"
@@ -244,9 +251,10 @@ run_scenario_redis() {
     MASTER_PID=$(start_load "$CSV")
     sleep 15
 
-    run_kill_scenario "order-db (Redis master) killed" \
-        "distributed-data-systems-order-db-1" \
-        "$GATEWAY/orders/health"
+    # Saga WAL lives on checkout-db (not order-db)
+    run_kill_scenario "checkout-db (Redis master) killed" \
+        "distributed-data-systems-checkout-db-1" \
+        "$GATEWAY/orders/__checkout_health"
 
     # Check sentinel promoted replica
     log_info "Sentinel failover log:"
@@ -280,7 +288,7 @@ run_scenario_multi() {
     echo ""
     echo "=================================================="
     echo "  SCENARIO 3: Simultaneous Multi-Container Kill"
-    echo "  (Kill order-service-1 + stock-service-2 at same time)"
+    echo "  (Kill checkout-service-1 + stock-service-2 at same time)"
     echo "=================================================="
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -290,16 +298,16 @@ run_scenario_multi() {
     sleep 15
 
     echo ""
-    log_kill "Killing order-service-1 + stock-service-2 simultaneously..."
+    log_kill "Killing checkout-service-1 + stock-service-2 simultaneously..."
     local t_kill=$(date +%s%3N)
-    docker stop distributed-data-systems-order-service-1-1 \
+    docker stop distributed-data-systems-checkout-service-1-1 \
                  distributed-data-systems-stock-service-2-1 > /dev/null
     log_kill "Both containers stopped"
 
     # Wait for recovery
     local recovered=false
     for i in $(seq 1 20); do
-        if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && \
+        if curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1 && \
            curl -sf "$GATEWAY/stock/find/1" > /dev/null 2>&1; then
             local ms=$(( $(date +%s%3N) - t_kill ))
             log_recover "Both services healthy again in ${ms}ms"
@@ -311,19 +319,19 @@ run_scenario_multi() {
     [ "$recovered" = false ] && log_fail "Multi-kill: did not recover within 10s!"
 
     sleep 3
-    docker start distributed-data-systems-order-service-1-1 \
+    docker start distributed-data-systems-checkout-service-1-1 \
                   distributed-data-systems-stock-service-2-1 > /dev/null
     sleep 5
 
     echo ""
-    log_kill "Killing payment-service + order-service-2 simultaneously..."
+    log_kill "Killing payment-service + checkout-service-2 simultaneously..."
     t_kill=$(date +%s%3N)
     docker stop distributed-data-systems-payment-service-1 \
-                 distributed-data-systems-order-service-2-1 > /dev/null
+                 distributed-data-systems-checkout-service-2-1 > /dev/null
 
     for i in $(seq 1 20); do
         if curl -sf "$GATEWAY/payment/find_user/1" > /dev/null 2>&1 && \
-           curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
+           curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1; then
             local ms=$(( $(date +%s%3N) - t_kill ))
             log_recover "Both services healthy again in ${ms}ms"
             break
@@ -333,7 +341,7 @@ run_scenario_multi() {
 
     sleep 3
     docker start distributed-data-systems-payment-service-1 \
-                  distributed-data-systems-order-service-2-1 > /dev/null
+                  distributed-data-systems-checkout-service-2-1 > /dev/null
     sleep 5
 
     sleep 10
@@ -356,7 +364,7 @@ run_scenario_cascade() {
     echo ""
     echo "=================================================="
     echo "  SCENARIO 4: Cascade Kill — Service + DB Together"
-    echo "  (Worst case: both the service and its Redis master die)"
+    echo "  (Checkout coordinator + checkout-db WAL master — Sentinel failover)"
     echo "=================================================="
 
     TIMESTAMP=$(date +%Y%m%d_%H%M%S)
@@ -366,17 +374,17 @@ run_scenario_cascade() {
     sleep 15
 
     echo ""
-    log_kill "Cascade: killing order-service-1 + order-db simultaneously..."
+    log_kill "Cascade: killing checkout-service-1 + checkout-db simultaneously..."
     local t_kill=$(date +%s%3N)
-    docker stop distributed-data-systems-order-service-1-1 \
-                 distributed-data-systems-order-db-1 > /dev/null
-    log_kill "order-service-1 + order-db stopped (Sentinel should promote replica)"
+    docker stop distributed-data-systems-checkout-service-1-1 \
+                 distributed-data-systems-checkout-db-1 > /dev/null
+    log_kill "checkout-service-1 + checkout-db stopped (Sentinel should promote replica)"
 
     local cascade_recovered=false
     for i in $(seq 1 30); do
-        if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
+        if curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1; then
             local ms=$(( $(date +%s%3N) - t_kill ))
-            log_recover "Order service healthy again in ${ms}ms"
+            log_recover "Checkout coordinator healthy again in ${ms}ms"
             cascade_recovered=true
             break
         fi
@@ -388,8 +396,8 @@ run_scenario_cascade() {
     docker logs distributed-data-systems-sentinel-1-1 2>&1 | grep "switch-master" | tail -2 || true
 
     sleep 5
-    docker start distributed-data-systems-order-service-1-1 \
-                  distributed-data-systems-order-db-1 > /dev/null || true
+    docker start distributed-data-systems-checkout-service-1-1 \
+                  distributed-data-systems-checkout-db-1 > /dev/null || true
     sleep 10
 
     sleep 10

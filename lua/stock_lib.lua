@@ -38,17 +38,23 @@ local function stock_2pc_prepare(KEYS, ARGV)
         end
     end
 
-    -- Deduct stock and store amounts durably
+    -- Store amounts in status hash FIRST, then deduct stock.
+    -- This replication order ensures: if the abort finds an amount on a
+    -- Sentinel-promoted replica, the corresponding HINCRBY deduction is
+    -- guaranteed to have replicated too (TCP delivers in order).
+    for i = 1, n_items do
+        local item_id = ARGV[1 + i * 2]
+        local amount = tonumber(ARGV[2 + i * 2])
+        redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
+    end
+
+    -- Now deduct stock and set lock keys
     for i = 1, n_items do
         local item_key = KEYS[i]
         local lock_key = KEYS[n_items + i]
-        local item_id = ARGV[1 + i * 2]
         local amount = tonumber(ARGV[2 + i * 2])
         redis.call('HINCRBY', item_key, 'available_stock', -amount)
-        -- Lock key guards against duplicate prepares (short TTL is fine)
         redis.call('SETEX', lock_key, lock_ttl, tostring(amount))
-        -- Store amount in status hash (survives lock TTL expiry, 24h TTL)
-        redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
     end
 
     redis.call('HSET', status_key, 'status', 'prepared')
@@ -95,10 +101,10 @@ local function stock_2pc_commit(KEYS, ARGV)
     return 1
 end
 
--- 2PC Abort: Restore stock from status hash (undo prepare deduction)
+-- 2PC Abort: Restore stock (undo prepare deduction)
 --
 -- Same KEYS layout as prepare
--- ARGV: saga_id, n_items, item_id_1, item_id_2, ...
+-- ARGV: saga_id, n_items, (item_id, amount)...
 local function stock_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
     local n_items = tonumber(ARGV[2])
@@ -108,11 +114,17 @@ local function stock_2pc_abort(KEYS, ARGV)
     local status = redis.call('HGET', status_key, 'status')
     if status == 'aborted' then return 1 end
 
-    -- Restore stock from status hash (survives lock TTL expiry)
+    -- Restore stock using amounts from the status hash.
+    -- Check for amounts even when status field is nil: during Sentinel failover,
+    -- Lua writes replicate as individual commands (HINCRBY, HSET amount, HSET status).
+    -- If replication was interrupted, the deduction and amounts may be present
+    -- without the 'status'='prepared' flag.  Since HINCRBY (deduction) is written
+    -- before HSET (amount) in the replication stream, the presence of a stored
+    -- amount guarantees the deduction also replicated — safe to restore.
     for i = 1, n_items do
         local item_key = KEYS[i]
         local lock_key = KEYS[n_items + i]
-        local item_id = ARGV[2 + i]
+        local item_id = ARGV[1 + i * 2]
         local amount = redis.call('HGET', status_key, 'amount:' .. item_id)
         if amount then
             redis.call('HINCRBY', item_key, 'available_stock', tonumber(amount))

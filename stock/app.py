@@ -142,7 +142,13 @@ async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    return await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+    result = await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+    if result == 1:
+        try:
+            await db.execute_command("WAIT", 1, 5000)
+        except Exception:
+            pass
+    return result
 
 
 async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
@@ -162,8 +168,8 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
     keys += [f"saga:{saga_id}:stock:status"]
     args = [saga_id, str(n)]
-    for item_id, _ in items:
-        args.append(item_id)
+    for item_id, amount in items:
+        args += [item_id, str(amount)]
     await db.fcall("stock_2pc_abort", len(keys), *keys, *args)
 
 
@@ -231,12 +237,17 @@ async def batch_init_users(request: Request):
 
 async def find_item(request: Request):
     item_id = request.path_params["item_id"]
-    conn = db_read or db
-    try:
-        entry = await conn.hgetall(f"item:{item_id}")
-    except Exception:
+    key = f"item:{item_id}"
+    entry = None
+    # Try replica first, fall back to master on error or empty result
+    if db_read:
         try:
-            entry = await db.hgetall(f"item:{item_id}")
+            entry = await db_read.hgetall(key)
+        except Exception:
+            entry = None
+    if not entry:
+        try:
+            entry = await db.hgetall(key)
         except aioredis.RedisError:
             raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:

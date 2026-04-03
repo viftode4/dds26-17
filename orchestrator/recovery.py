@@ -106,7 +106,7 @@ class RecoveryWorker:
             return
 
         backoff = 0.5
-        max_backoff = 60.0
+        max_backoff = 5.0
         pending_steps = list(tx_def.steps)
 
         while pending_steps:
@@ -147,7 +147,7 @@ class RecoveryWorker:
             return
 
         backoff = 0.5
-        max_backoff = 60.0
+        max_backoff = 5.0
         pending_steps = list(tx_def.steps)
 
         while pending_steps:
@@ -198,7 +198,7 @@ class RecoveryWorker:
         # Compensate in reverse order, infinite retry per step
         for step in reversed(steps_to_compensate):
             backoff = 0.5
-            max_backoff = 60.0
+            max_backoff = 5.0
             while True:
                 try:
                     payload = {"saga_id": saga_id, "action": "compensate"}
