@@ -95,7 +95,7 @@ async def test_sentinel_failover_stock_master():
             capture_output=True, text=True, timeout=10,
         )
         replicas_confirmed = result.stdout.strip()
-        if replicas_confirmed != "1":
+        if not replicas_confirmed.isdigit() or int(replicas_confirmed) < 1:
             pytest.skip(
                 f"Replication not confirmed before kill (WAIT returned {replicas_confirmed!r}). "
                 "Sentinel failover test requires at least 1 replica in sync."
