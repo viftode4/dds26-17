@@ -188,6 +188,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   order-service-2:
     <<: *order-service
@@ -195,6 +197,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   # ---- Stock Services (2 instances) ----
 
@@ -204,12 +208,16 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   stock-service-2:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   # ---- Payment Services (2 instances) ----
 
@@ -219,12 +227,16 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   payment-service-2:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=1024
+      - REDIS_REPLICA_POOL_SIZE=512
 
   # ---- Redis Masters ----
 
@@ -258,6 +270,8 @@ services:
         --io-threads 3
         --io-threads-do-reads yes
         --maxclients 8192
+        --min-replicas-to-write 1
+        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
@@ -276,6 +290,8 @@ services:
         --io-threads 3
         --io-threads-do-reads yes
         --maxclients 8192
+        --min-replicas-to-write 1
+        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:

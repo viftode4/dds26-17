@@ -183,6 +183,8 @@ services:
         --io-threads 2
         --io-threads-do-reads yes
         --maxclients 2048
+        --min-replicas-to-write 1
+        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
@@ -201,6 +203,8 @@ services:
         --io-threads 2
         --io-threads-do-reads yes
         --maxclients 2048
+        --min-replicas-to-write 1
+        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:

@@ -152,7 +152,7 @@ async def lifespan(app):
         order_db=db,
         transport=orch_transport,
         definitions=[checkout_tx],
-        protocol="auto",
+        protocol="saga",
     )
     await orchestrator.start()
 

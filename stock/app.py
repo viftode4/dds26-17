@@ -109,21 +109,7 @@ async def handle_nats_message(msg):
     fields = json.loads(msg.data.decode())
     saga_id = fields.get("saga_id", "")
     try:
-        # Force Sentinel to re-resolve the master before each transaction step.
-        # Without this, a stale pooled connection can reconnect to the old master
-        # if it comes back before Sentinel has fully rewired it as a replica.
-        await db.connection_pool.disconnect()
         event = await handle_command(fields)
-        # Ensure mutating writes reach at least one replica before confirming.
-        # Prevents data loss during Sentinel failover between our response and
-        # the orchestrator's next action (e.g. commit after prepare).
-        if event in ("prepared", "committed", "executed", "aborted", "compensated"):
-            try:
-                info = await db.info("replication")
-                if info.get("connected_slaves", 0) > 0:
-                    await db.execute_command("WAIT", 1, 5000)
-            except Exception:
-                log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":
             response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
         else:
@@ -204,10 +190,6 @@ async def create_item(request: Request):
         })
         # Ensure replica has the item before responding — prevents stale reads
         # when addItem immediately reads the item price via the replica.
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"item_id": key})
@@ -226,10 +208,6 @@ async def batch_init_users(request: Request):
                     "price": item_price,
                 })
             await pipe.execute()
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for stock successful"})
@@ -270,10 +248,6 @@ async def add_stock(request: Request):
         raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
-    try:
-        await db.execute_command("WAIT", 1, 5000)
-    except Exception:
-        pass
     return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
 

@@ -9,8 +9,8 @@ from redis.exceptions import ConnectionError, TimeoutError
 
 logger = structlog.get_logger(__name__)
 
-_MASTER_POOL = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "64"))
-_REPLICA_POOL = int(os.environ.get("REDIS_REPLICA_POOL_SIZE", "32"))
+_MASTER_POOL = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))
+_REPLICA_POOL = int(os.environ.get("REDIS_REPLICA_POOL_SIZE", "256"))
 
 
 def get_redis_config(prefix: str = "") -> dict:
