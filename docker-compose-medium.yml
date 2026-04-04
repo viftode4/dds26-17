@@ -200,6 +200,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-2:
     <<: *order-service
@@ -207,6 +209,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-3:
     <<: *order-service
@@ -214,6 +218,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-4:
     <<: *order-service
@@ -221,6 +227,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Stock Services (4 instances) ----
 
@@ -230,24 +238,32 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-2:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-3:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-4:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Payment Services (4 instances) ----
 
@@ -257,24 +273,32 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-2:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-3:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-4:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Redis Masters ----
 
