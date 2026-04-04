@@ -5,12 +5,9 @@ Tasks with realistic checkout flow:
 - find_item (weight=3) — read-only stock lookup
 - add_funds (weight=2) — credit top-up
 
-Usage (matches test/run_distributed_benchmark.sh defaults):
-    bash test/run_distributed_benchmark.sh   # 10000 users, 500/s ramp, 4 workers
-
-    Manual headless example:
-    locust -f test/locustfile.py --host http://127.0.0.1:8000 --headless \\
-           -u 10000 -r 500 --run-time 60s
+Usage:
+    locust -f test/locustfile.py --host http://127.0.0.1:8000 --headless \
+           -u 100 -r 10 --run-time 60s
 """
 from __future__ import annotations
 
@@ -19,9 +16,9 @@ import random
 from locust import HttpUser, between, task
 
 
-# Pre-allocated ID ranges — use batch_init with same bounds (see run_distributed_benchmark.sh)
-NUM_ITEMS = 10000
-NUM_USERS = 10000
+# Pre-allocated ID ranges (set by batch_init: 1000 items, 1000 users)
+NUM_ITEMS = 1000
+NUM_USERS = 1000
 
 
 class CheckoutUser(HttpUser):

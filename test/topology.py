@@ -15,14 +15,12 @@ MASTER_MAP = {
     "stock-master": ("stock-db", "stock-db-replica"),
     "order-master": ("order-db", "order-db-replica"),
     "payment-master": ("payment-db", "payment-db-replica"),
-    "checkout-master": ("checkout-db", "checkout-db-replica"),
 }
 
 ALL_APP_SERVICES = [
     "stock-service", "stock-service-2",
     "payment-service", "payment-service-2",
     "order-service-1", "order-service-2",
-    "checkout-service-1", "checkout-service-2",
     "gateway",
 ]
 
@@ -30,7 +28,6 @@ DB_CONTAINERS = [
     "stock-db", "stock-db-replica",
     "order-db", "order-db-replica",
     "payment-db", "payment-db-replica",
-    "checkout-db", "checkout-db-replica",
 ]
 
 SENTINEL_CONTAINERS = ["sentinel-1", "sentinel-2", "sentinel-3"]
@@ -90,8 +87,8 @@ def is_topology_drifted() -> dict[str, bool]:
 
 
 def ensure_containers_running():
-    """Start all DB, sentinel, NATS, and app containers in case a prior test left one dead."""
-    containers = DB_CONTAINERS + SENTINEL_CONTAINERS + ["nats"] + ALL_APP_SERVICES
+    """Start all DB, sentinel, and NATS containers in case a prior test left one dead."""
+    containers = DB_CONTAINERS + SENTINEL_CONTAINERS + ["nats"]
     _docker_compose("start", *containers)
     # Brief pause for containers to initialize
     time.sleep(3)
@@ -170,18 +167,10 @@ def restart_app_services():
 def wait_stack_healthy(timeout: float = 60):
     """Poll the gateway until all backend health endpoints return 200.
 
-    After health checks pass, waits a brief settle period to allow
-    connection pools and Lua functions to fully initialize.
-
     If health checks fail after initial attempts, restarts the gateway
     (HAProxy can get stuck with stale backend states after service restarts).
     """
-    endpoints = [
-        "/orders/health",
-        "/orders/__checkout_health",
-        "/stock/health",
-        "/payment/health",
-    ]
+    endpoints = ["/orders/health", "/stock/health", "/payment/health"]
     deadline = time.monotonic() + timeout
     gateway_restarted = False
 

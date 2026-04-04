@@ -16,8 +16,7 @@ docker compose up -d
 
 echo ">>> Waiting for services to be healthy..."
 for i in $(seq 1 60); do
-    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && \
-       curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1; then
+    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
         echo "    Services healthy after ${i}s"
         break
     fi
@@ -32,10 +31,10 @@ done
 # 2. Batch init
 # -------------------------------------------------------------------
 echo ""
-echo ">>> Initializing data: 10000 items x 1000 stock, 10000 users x 1M credit"
-curl -sf -X POST "$GATEWAY/stock/batch_init/10000/1000/10" > /dev/null
-curl -sf -X POST "$GATEWAY/payment/batch_init/10000/1000000" > /dev/null
-curl -sf -X POST "$GATEWAY/orders/batch_init/10000/10000/10000/10" > /dev/null
+echo ">>> Initializing data: 1000 items x 1000 stock, 1000 users x 10000 credit"
+curl -sf -X POST "$GATEWAY/stock/batch_init/1000/1000/10" > /dev/null
+curl -sf -X POST "$GATEWAY/payment/batch_init/1000/10000" > /dev/null
+curl -sf -X POST "$GATEWAY/orders/batch_init/1000/1000/1000/10" > /dev/null
 echo "    Batch init complete, waiting for propagation..."
 sleep 3
 

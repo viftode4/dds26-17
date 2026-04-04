@@ -50,52 +50,5 @@ local function order_load_and_claim(KEYS, ARGV)
     return {1, cjson.encode(entry), cjson.encode(items), acquired and 1 or 0}
 end
 
--- Finalize checkout: idempotency success + mark order paid (atomic)
--- KEYS[1] = order:{id}, KEYS[2] = idempotency:checkout:{id}
--- ARGV[1] = saga_id, ARGV[2] = success JSON for idempotency key
--- Returns {ok, reason} — ok 1 = done or already success, ok 0 = skip/mismatch
-local function order_complete_checkout(KEYS, ARGV)
-    local order_key = KEYS[1]
-    local idem_key = KEYS[2]
-    local saga_id = ARGV[1]
-    local success_json = ARGV[2]
-
-    local raw = redis.call('GET', idem_key)
-    if not raw then
-        return {0, 'no_key'}
-    end
-    local data = cjson.decode(raw)
-    if data.status == 'success' then
-        return {1, 'already'}
-    end
-    if data.status ~= 'processing' or data.saga_id ~= saga_id then
-        return {0, 'mismatch'}
-    end
-    redis.call('SET', idem_key, success_json, 'EX', 86400)
-    redis.call('HSET', order_key, 'paid', 'true')
-    return {1, 'done'}
-end
-
--- Release processing claim (failed saga / retry)
--- KEYS[1] = idempotency:checkout:{id}, ARGV[1] = saga_id
--- Returns {ok, reason}
-local function order_release_checkout(KEYS, ARGV)
-    local idem_key = KEYS[1]
-    local saga_id = ARGV[1]
-
-    local raw = redis.call('GET', idem_key)
-    if not raw then
-        return {1, 'noop'}
-    end
-    local data = cjson.decode(raw)
-    if data.status == 'processing' and data.saga_id == saga_id then
-        redis.call('DEL', idem_key)
-        return {1, 'released'}
-    end
-    return {0, 'skip'}
-end
-
 redis.register_function('order_add_item', add_item_atomic)
 redis.register_function('order_load_and_claim', order_load_and_claim)
-redis.register_function('order_complete_checkout', order_complete_checkout)
-redis.register_function('order_release_checkout', order_release_checkout)

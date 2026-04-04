@@ -84,7 +84,7 @@ async def handle_command(fields: dict) -> str:
         await _2pc_commit(saga_id, user_id, int(amount))
         outcome = "committed"
     elif action == "abort":
-        await _2pc_abort(saga_id, user_id, int(amount))
+        await _2pc_abort(saga_id, user_id)
         outcome = "aborted"
     elif action == "execute":
         result = await _saga_execute(saga_id, user_id, int(amount))
@@ -130,13 +130,7 @@ async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -
         f"saga:{saga_id}:payment:status",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
-    result = await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
-    if result == 1:
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
-    return result
+    return await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
 
 
 async def _2pc_commit(saga_id: str, user_id: str, amount: int):
@@ -148,7 +142,7 @@ async def _2pc_commit(saga_id: str, user_id: str, amount: int):
     await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, str(amount), user_id)
 
 
-async def _2pc_abort(saga_id: str, user_id: str, amount: int = 0):
+async def _2pc_abort(saga_id: str, user_id: str):
     if not user_id:
         return
     keys = [
@@ -156,7 +150,7 @@ async def _2pc_abort(saga_id: str, user_id: str, amount: int = 0):
         f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
     ]
-    await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id, str(amount), user_id)
+    await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id)
 
 
 async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
@@ -218,17 +212,12 @@ async def batch_init_users(request: Request):
 
 async def find_user(request: Request):
     user_id = request.path_params["user_id"]
-    key = f"user:{user_id}"
-    entry = None
-    # Try replica first, fall back to master on error or empty result
-    if db_read:
+    conn = db_read or db
+    try:
+        entry = await conn.hgetall(f"user:{user_id}")
+    except Exception:
         try:
-            entry = await db_read.hgetall(key)
-        except Exception:
-            entry = None
-    if not entry:
-        try:
-            entry = await db.hgetall(key)
+            entry = await db.hgetall(f"user:{user_id}")
         except aioredis.RedisError:
             raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:

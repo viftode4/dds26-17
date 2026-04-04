@@ -44,10 +44,7 @@ def _restart_container(name: str):
 
 @pytest.mark.asyncio
 async def test_order_crash_mid_checkout():
-    """Kill checkout-service-1 during checkout, wait for recovery → full conservation maintained.
-
-    Checkout coordinator runs the saga; killing one checkout instance exercises
-    HAProxy failover + WAL recovery on the surviving coordinator.
+    """Kill order-service-1 during checkout, wait for recovery → full conservation maintained.
 
     Tasks 1.4:
     - Replaces sleep(10)/sleep(5) with wait_until-based polling
@@ -82,7 +79,7 @@ async def test_order_crash_mid_checkout():
 
         tasks = [asyncio.create_task(_checkout(oid)) for oid in order_ids]
         await asyncio.sleep(0.3)
-        _kill_container("checkout-service-1")
+        _kill_container("order-service-1")
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         checkout_results = [
@@ -91,22 +88,22 @@ async def test_order_crash_mid_checkout():
         ]
         n_confirmed = len(checkout_results)
 
-        # Wait for checkout HAProxy + stack to stabilize (checkout-service-2)
-        async def _checkout_stack_healthy():
+        # Wait for recovery (order-service-2 takes over leadership)
+        # Task 1.4: use polling instead of hardcoded sleep
+        async def _service_healthy():
             try:
-                r1 = await client.get(f"{GATEWAY}/orders/health")
-                r2 = await client.get(f"{GATEWAY}/orders/__checkout_health")
-                return r1.status_code == 200 and r2.status_code == 200
+                r = await client.get(f"{GATEWAY}/orders/health")
+                return r.status_code == 200
             except (httpx.ConnectError, httpx.ReadError):
                 return False
 
-        await wait_until(_checkout_stack_healthy, timeout=30.0, interval=1.0,
-                         msg="Checkout stack did not recover within 30s")
+        await wait_until(_service_healthy, timeout=30.0, interval=1.0,
+                         msg="order-service-2 did not take over within 30s")
 
-        _restart_container("checkout-service-1")
+        _restart_container("order-service-1")
 
         # Allow recovery worker time to complete in-flight sagas
-        await asyncio.sleep(30.0)
+        await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 
         # Task 1.4a: stock bounds

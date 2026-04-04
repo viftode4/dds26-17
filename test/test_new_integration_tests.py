@@ -367,7 +367,7 @@ async def test_concurrent_duplicate_checkout():
 
 @pytest.mark.asyncio
 async def test_idempotency_after_crash_recovery():
-    """Start checkout → crash checkout coordinator → restart → retry same checkout → no double deduction (task 3.10)."""
+    """Start checkout → crash order service → restart → retry same checkout → no double deduction (task 3.10)."""
     item_price = 100
     initial_stock = 10
     initial_credit = 10_000
@@ -384,7 +384,7 @@ async def test_idempotency_after_crash_recovery():
             client.post(f"{GATEWAY}/orders/checkout/{order_id}")
         )
         await asyncio.sleep(0.2)
-        _docker_compose("kill", "checkout-service-1")
+        _docker_compose("kill", "order-service-1")
 
         first_result = None
         try:
@@ -392,13 +392,11 @@ async def test_idempotency_after_crash_recovery():
         except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
             pass  # Expected — service died
 
-        _docker_compose("start", "checkout-service-1")
+        _docker_compose("start", "order-service-1")
 
         async def _healthy():
             try:
-                r1 = await client.get(f"{GATEWAY}/orders/health")
-                r2 = await client.get(f"{GATEWAY}/orders/__checkout_health")
-                return r1.status_code == 200 and r2.status_code == 200
+                return (await client.get(f"{GATEWAY}/orders/health")).status_code == 200
             except Exception:
                 return False
 

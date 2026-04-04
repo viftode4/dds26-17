@@ -6,18 +6,12 @@
 # Uses our internal locustfile (realistic mix: create+checkout, reads, funds).
 #
 # Usage:
-#   bash test/run_distributed_benchmark.sh [users] [workers] [duration] [spawn_rate]
+#   bash test/run_distributed_benchmark.sh [users] [workers] [duration]
 #
 # Examples:
-#   bash test/run_distributed_benchmark.sh                      # 10000u, 8w, 60s, 500/s ramp
-#   bash test/run_distributed_benchmark.sh 500 4 90 100       # small run, lower ramp
-#
-# Locust warns if spawn rate per worker is very high (~>100/s). Use enough workers:
-#   workers >= ceil(spawn_rate / 80). For 500/s use at least 8 workers.
-#
-# On one machine, many workers can *increase* aggregate client RPS vs one process and
-# overload the gateway before the server is steady — if you see mass 503/0 failures,
-# reduce users, reduce spawn rate, or use a single Locust process (see README).
+#   bash test/run_distributed_benchmark.sh              # 500u, 4 workers, 60s
+#   bash test/run_distributed_benchmark.sh 1000 6 90   # 1000u, 6 workers, 90s
+#   bash test/run_distributed_benchmark.sh 200 2 60    # 200u, 2 workers, 60s
 # =============================================================================
 set -euo pipefail
 
@@ -26,22 +20,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOCUSTFILE="$SCRIPT_DIR/locustfile.py"
 RESULTS_DIR="$SCRIPT_DIR/benchmark_results"
 
-USERS="${1:-10000}"
-WORKERS="${2:-8}"
+USERS="${1:-500}"
+WORKERS="${2:-4}"
 DURATION="${3:-60}"
-RAMPUP="${4:-500}"
-
-# ~80 users/s per worker avoids Locust heartbeat / spawn warnings in practice
-MAX_SPAWN_PER_WORKER=80
-if [ "$WORKERS" -gt 0 ] && [ "$(( RAMPUP / WORKERS ))" -gt "$MAX_SPAWN_PER_WORKER" ] 2>/dev/null; then
-    echo "WARNING: spawn rate $RAMPUP/s across $WORKERS workers is ~$(( RAMPUP / WORKERS ))/s per worker." >&2
-    echo "         Prefer at least $(( (RAMPUP + MAX_SPAWN_PER_WORKER - 1) / MAX_SPAWN_PER_WORKER )) workers, or lower RAMPUP (4th arg)." >&2
-    echo "" >&2
-fi
+RAMPUP=$(( USERS / 10 ))
 
 echo "=================================================="
 echo "  DDS26 Distributed Benchmark"
-echo "  Users: $USERS | Workers: $WORKERS | Spawn: ${RAMPUP}/s | Duration: ${DURATION}s"
+echo "  Users: $USERS | Workers: $WORKERS | Duration: ${DURATION}s"
 echo "=================================================="
 echo ""
 
@@ -50,8 +36,7 @@ echo ""
 # -------------------------------------------------------------------
 echo ">>> Checking gateway health..."
 for i in $(seq 1 30); do
-    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && \
-       curl -sf "$GATEWAY/orders/__checkout_health" > /dev/null 2>&1; then
+    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
         echo "    Gateway healthy"
         break
     fi
@@ -66,10 +51,10 @@ done
 # 2. Batch init
 # -------------------------------------------------------------------
 echo ""
-echo ">>> Initializing data (10000 items x 1000 stock, 10000 users x 1M credit)..."
-curl -sf -X POST "$GATEWAY/stock/batch_init/10000/1000/10" > /dev/null
-curl -sf -X POST "$GATEWAY/payment/batch_init/10000/1000000" > /dev/null
-curl -sf -X POST "$GATEWAY/orders/batch_init/10000/10000/10000/10" > /dev/null
+echo ">>> Initializing data (1000 items x 1000 stock, 1000 users x 1M credit)..."
+curl -sf -X POST "$GATEWAY/stock/batch_init/1000/1000/10" > /dev/null
+curl -sf -X POST "$GATEWAY/payment/batch_init/1000/1000000" > /dev/null
+curl -sf -X POST "$GATEWAY/orders/batch_init/1000/1000/1000/10" > /dev/null
 sleep 2
 echo "    Done"
 
@@ -126,7 +111,7 @@ done
 # -------------------------------------------------------------------
 echo ""
 echo "=================================================="
-echo "  Results — ${USERS} users, ${WORKERS} workers, ${RAMPUP}/s ramp, ${DURATION}s"
+echo "  Results — ${USERS} users, ${WORKERS} workers, ${DURATION}s"
 echo "=================================================="
 echo ""
 

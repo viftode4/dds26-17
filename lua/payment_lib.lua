@@ -30,15 +30,12 @@ local function payment_2pc_prepare(KEYS, ARGV)
         return 0
     end
 
-    -- Store amount in status hash FIRST, then deduct credit.
-    -- This replication order ensures: if the abort finds the amount on a
-    -- Sentinel-promoted replica, the corresponding HINCRBY deduction is
-    -- guaranteed to have replicated too (TCP delivers in order).
-    redis.call('HSET', KEYS[3], 'amount', tostring(amount))
-
-    -- Now deduct credit and set lock key
+    -- Deduct credit and store amount durably
     redis.call('HINCRBY', KEYS[1], 'available_credit', -amount)
+    -- Lock key guards against duplicate prepares (short TTL is fine)
     redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
+    -- Store amount in status hash (survives lock TTL expiry, 24h TTL)
+    redis.call('HSET', KEYS[3], 'amount', tostring(amount))
 
     redis.call('HSET', KEYS[3], 'status', 'prepared')
     redis.call('EXPIRE', KEYS[3], 86400)
@@ -78,12 +75,12 @@ local function payment_2pc_commit(KEYS, ARGV)
     return 1
 end
 
--- 2PC Abort: Restore credit (undo prepare deduction)
+-- 2PC Abort: Restore credit from lock key (undo prepare deduction)
 --
 -- KEYS[1] = user:{user_id}
 -- KEYS[2] = lock:2pc:{saga_id}:{user_id}
 -- KEYS[3] = saga:{saga_id}:payment:status
--- ARGV: saga_id, amount, user_id
+-- ARGV: saga_id
 local function payment_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
 
@@ -91,9 +88,7 @@ local function payment_2pc_abort(KEYS, ARGV)
     local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'aborted' then return 1 end
 
-    -- Restore credit from status hash.  Check for amount even when status is nil:
-    -- partial Lua replication during Sentinel failover may have written the amount
-    -- without the status flag (see stock_2pc_abort comment for details).
+    -- Restore credit from status hash (survives lock TTL expiry)
     local amount = redis.call('HGET', KEYS[3], 'amount')
     if amount then
         redis.call('HINCRBY', KEYS[1], 'available_credit', tonumber(amount))
