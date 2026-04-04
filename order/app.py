@@ -23,6 +23,7 @@ from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
 from common.tracing import setup_tracing, shutdown_tracing
+from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 from orchestrator import (
     Orchestrator, TransactionDefinition, Step,
     LeaderElection, RecoveryWorker,
@@ -490,3 +491,4 @@ app = Starlette(
     lifespan=lifespan,
     exception_handlers={HTTPException: http_exception_handler},
 )
+StarletteInstrumentor().instrument_app(app)

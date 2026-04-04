@@ -9,7 +9,6 @@ import os
 from opentelemetry import propagate, trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.redis import RedisInstrumentor
-from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 from opentelemetry.sdk.resources import SERVICE_INSTANCE_ID, SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -30,7 +29,6 @@ def setup_tracing(service_name: str) -> None:
     trace.set_tracer_provider(provider)
 
     RedisInstrumentor().instrument()
-    StarletteInstrumentor().instrument()
 
 
 def get_tracer(name: str) -> trace.Tracer:

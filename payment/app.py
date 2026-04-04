@@ -16,6 +16,7 @@ from common.config import create_redis_connection, create_replica_connection, wa
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
 from common.tracing import setup_tracing, shutdown_tracing, extract_trace_context, get_tracer
+from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 
 DB_ERROR_STR = "DB error"
@@ -301,3 +302,4 @@ app = Starlette(
     lifespan=lifespan,
     exception_handlers={HTTPException: http_exception_handler},
 )
+StarletteInstrumentor().instrument_app(app)
