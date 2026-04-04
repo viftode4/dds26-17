@@ -14,7 +14,7 @@ from orchestrator.metrics import MetricsCollector
 logger = structlog.get_logger("orchestrator.core")
 
 
-MAX_CONCURRENT_CHECKOUTS = 200
+MAX_CONCURRENT_CHECKOUTS = 500
 
 
 class Orchestrator:
