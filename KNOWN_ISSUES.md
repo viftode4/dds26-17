@@ -45,13 +45,33 @@ The discrepancy between order-db (4283 clients) and stock/payment-db (~15) is be
 
 ---
 
-## YAML Anchor Env Override Bug (Unresolved)
+## YAML Anchor Env Override Bug (Workaround Applied)
 
 In compose files that use YAML anchors (`x-order-service: &order-service`), concrete service definitions that include their own `environment:` block **completely replace** the anchor's `environment:` — they do not merge. This means env vars added to anchors (e.g., `REDIS_MASTER_POOL_SIZE`) are silently dropped for any service that overrides `environment:`.
 
 Affected files: `docker-compose-medium.yml`, `docker-compose-large.yml`, `docker-compose-6cpu.yml`.
 
-Workaround: Pool size defaults in `config.py` are now set to the right values for medium/large configs (64/32). A proper fix would use `env_file:` at the anchor level or set the vars directly in each concrete service block.
+**Workaround:** Each concrete service block in medium/large/6cpu now explicitly sets pool size env vars (`REDIS_MASTER_POOL_SIZE`, `REDIS_REPLICA_POOL_SIZE`). The anchor's env vars are still silently dropped, but the per-service overrides cover it. A proper fix would use `env_file:` at the anchor level.
+
+---
+
+### 4. `min-replicas-to-write 1` Startup Race
+
+**Symptom:** On cold boot (`docker compose up`), stock and payment services crash with `NOREPLICAS` errors during `FUNCTION LOAD`, then self-heal via `restart: on-failure` after ~5-10 seconds.
+
+**Root cause:** `stock-db` and `payment-db` are configured with `--min-replicas-to-write 1` in all compose files. On startup, the replicas haven't synced yet, so the master rejects writes. `order-db` does **not** have this setting and starts cleanly.
+
+**Impact:** Low — services self-heal after replicas sync. However, `docker compose up` exits with an error because the gateway's `depends_on` expects healthy services. Workaround: wait for restarts to complete, then `docker start` the gateway manually if needed.
+
+---
+
+### 5. WSL2 / Docker Desktop Performance Ceiling
+
+**Symptom:** Redis SET benchmark shows ~4.6k ops/sec on WSL2 vs 50-100k+ on native Linux.
+
+**Root cause:** Redis AOF writes go through the Hyper-V virtualization layer on Windows/macOS. Every `appendfsync everysec` flush is significantly slower than on bare metal.
+
+**Recommendation:** Use `small` or `6cpu` configs for Docker Desktop / WSL2. The `medium` and `large` configs are designed for dedicated Linux machines and will be oversubscribed on virtualized environments.
 
 ---
 
@@ -59,7 +79,7 @@ Workaround: Pool size defaults in `config.py` are now set to the right values fo
 
 | File | Change |
 |---|---|
-| `common/config.py` | Pool defaults: master=64, replica=32; env-var driven |
+| `common/config.py` | Pool defaults: master=512, replica=256; env-var driven (compose files override via `REDIS_MASTER_POOL_SIZE` / `REDIS_REPLICA_POOL_SIZE` env vars) |
 | `haproxy.cfg` / `haproxy-small.cfg` / `haproxy-medium.cfg` / `haproxy-large.cfg` / `haproxy-6cpu.cfg` | `timeout queue 30s`, `timeout check 10s`; per-server `maxconn` |
 | All `docker-compose-*.yml` | DB masters: more CPU/RAM/io-threads/maxclients; 2nd read replica per cluster; `depends_on` updated |
 
@@ -67,15 +87,16 @@ Workaround: Pool size defaults in `config.py` are now set to the right values fo
 
 ## What Has NOT Been Tested Yet
 
-- Medium stack with all fixes applied simultaneously (pool fix + HAProxy fix + scaled DBs + 2nd replicas)
-- Throughput above 3k/s after fixes
-- Whether `pool.disconnect()` churn in stock/payment is still a bottleneck after the other fixes
+- **Medium config at target concurrency** — tested locally on 16-CPU WSL2 (works but oversubscribed due to virtualization overhead)
+- **Large config at target concurrency** — untested; requires ~90 CPU dedicated Linux machine
+- **Throughput ceiling on native Linux** — all benchmarks so far are on Docker Desktop / WSL2
+- **Sentinel failover under sustained load** on the optimize branch (unit tests pass; integration failover tests have known issues — see `test_analysis_report.md` Section 4.4)
 
 ---
 
 ## Next Steps When Picking Up
 
-1. `docker compose -f docker-compose-medium.yml up -d` to pick up all pending changes
-2. Verify `docker exec <project>-order-db-1 redis-cli -a redis INFO clients` → `connected_clients` should be ~250 (was 4283)
-3. Run stress test and check if p50/p95 latency improved
-4. If stock/payment-db CPU is still high, the `pool.disconnect()` reconnect churn may need a different Sentinel re-resolution strategy
+1. Run benchmarks on a native Linux machine with the default or medium config to establish true throughput ceiling
+2. Re-run the full test suite (`112 tests`) on the optimize branch and update `test_analysis_report.md` with results
+3. Fix the `min-replicas-to-write` startup race (Issue #4) — either remove the flag, add a startup delay, or use `WAIT` in the entrypoint
+4. Test Sentinel failover under sustained load (the two failing tests in `test_sentinel_failover.py` need the fixes described in the test analysis report)
