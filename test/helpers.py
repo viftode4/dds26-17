@@ -268,16 +268,27 @@ async def wait_gateway_healthy(
     client: httpx.AsyncClient,
     max_wait: float = 60.0,
 ) -> None:
-    """Poll until the gateway is healthy (orders health endpoint returns 200)."""
+    """Poll until the gateway can reach every backend health endpoint."""
+    endpoints = [
+        "/orders/health",
+        "/stock/health",
+        "/payment/health",
+    ]
+
     async def _healthy():
-        try:
-            r = await client.get(f"{GATEWAY}/orders/health")
-            if r.status_code != 200:
-                print(f"wait_gateway_healthy status={r.status_code} text={r.text}")
-            return r.status_code == 200
-        except Exception as e:
-            print(f"wait_gateway_healthy exception: {e!r}")
-            return False
+        for endpoint in endpoints:
+            try:
+                r = await client.get(f"{GATEWAY}{endpoint}")
+                if r.status_code != 200:
+                    print(
+                        f"wait_gateway_healthy endpoint={endpoint} "
+                        f"status={r.status_code} text={r.text}"
+                    )
+                    return False
+            except Exception as e:
+                print(f"wait_gateway_healthy endpoint={endpoint} exception: {e!r}")
+                return False
+        return True
 
     await wait_until(_healthy, timeout=max_wait, interval=1.0,
                      msg=f"Gateway {GATEWAY} did not become healthy within {max_wait}s")

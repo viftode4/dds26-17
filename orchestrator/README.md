@@ -121,6 +121,10 @@ from orchestrator import (
                Stock Service ×2             Payment Service ×2
                (queue group:                (queue group:
                 stock-workers)              payment-workers)
+
+Note: "×2" reflects the default compose config. Other configs scale
+differently (1× for small, 4× for medium, up to 9/7/7 for large).
+See the root README for all deployment configurations.
 ```
 
 ## Features

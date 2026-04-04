@@ -23,17 +23,18 @@ crash recovery, and horizontal scaling.
      ▼                   ▼                   ▼
 ┌──────────┐      ┌───────────┐       ┌───────────┐
 │ Order DB │      │ Stock ×2  │       │Payment ×2 │
-│master+rep│      │ Lua atoms │       │ Lua atoms │
-└──────────┘      └─────┬─────┘       └─────┬─────┘
-     ↑                  ▼                   ▼
-  Sentinel ×3     ┌───────────┐       ┌───────────┐
-  (failover)      │ Stock DB  │       │Payment DB │
-                  │master+rep │       │master+rep │
+│master    │      │ Lua atoms │       │ Lua atoms │
+│ +2 rep   │      └─────┬─────┘       └─────┬─────┘
+└──────────┘            ▼                   ▼
+     ↑            ┌───────────┐       ┌───────────┐
+  Sentinel ×3     │ Stock DB  │       │Payment DB │
+  (failover)      │master     │       │master     │
+                  │ +2 rep    │       │ +2 rep    │
                   └───────────┘       └───────────┘
 ```
 
-**17 containers total:** 2 order, 2 stock, 2 payment, 3 Valkey masters,
-3 Valkey replicas, 3 Sentinels, 1 NATS, 1 HAProxy gateway.
+**20 containers total:** 2 order, 2 stock, 2 payment, 3 Valkey masters,
+6 Valkey replicas, 3 Sentinels, 1 NATS, 1 HAProxy gateway.
 
 ### Key Features
 
@@ -82,6 +83,9 @@ For the Kubernetes deployment, see [Kubernetes Deployment (Minikube)](#kubernete
 ```bash
 docker compose up --build -d
 ```
+
+> **Low-resource machines (<16 CPUs / Docker Desktop / WSL2):** use the small config instead:
+> `docker compose -f docker-compose-small.yml up --build -d`
 
 Wait for all containers to report healthy (~15-20 seconds):
 
@@ -136,6 +140,29 @@ To also remove volumes (reset all data):
 ```bash
 docker compose down -v
 ```
+
+## Deployment Configurations
+
+Five compose files target different hardware profiles:
+
+| Config | File | App Instances | CPU Target | Use Case |
+|--------|------|---------------|------------|----------|
+| Small | `docker-compose-small.yml` | 1/1/1 | ~6 CPU | Docker Desktop / WSL2 |
+| 6 CPU | `docker-compose-6cpu.yml` | 2/2/2 | ~6 CPU | Horizontal scaling validation |
+| Default | `docker-compose.yml` | 2/2/2 | ~30 CPU | Development / CI |
+| Medium | `docker-compose-medium.yml` | 4/4/4 | ~50 CPU | Stress testing |
+| Large | `docker-compose-large.yml` | 9/7/7 | ~90 CPU | Production benchmark |
+
+"App Instances" = order / stock / payment service replicas.
+
+Usage:
+
+```bash
+docker compose -f docker-compose-small.yml up --build -d
+```
+
+Each config has a matching HAProxy config (`haproxy-small.cfg`, `haproxy-6cpu.cfg`, etc.)
+with per-server `maxconn` limits tuned for the target concurrency.
 
 ## Kubernetes Deployment (Minikube)
 
@@ -325,7 +352,7 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   ├── order_lib.lua
 │   ├── stock_lib.lua
 │   └── payment_lib.lua
-├── test/                   # 55 unit + 11 integration tests
+├── test/                   # 85 unit + 27 integration = 112 tests
 │   ├── test_microservices.py
 │   ├── test_circuit_breaker.py
 │   ├── test_crash_recovery.py
@@ -335,8 +362,15 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   ├── test_sentinel_failover.py
 │   ├── test_stress.py
 │   ├── test_wal_metrics.py
+│   ├── test_new_unit_tests.py      # Conservation, payment crash, multi-item, etc.
+│   ├── test_new_integration_tests.py  # Integration coverage for new scenarios
+│   ├── test_chaos.py               # Network partition, cascading failure tests
 │   ├── conftest.py
+│   ├── helpers.py              # Shared test helpers
+│   ├── topology.py             # Docker topology introspection
 │   ├── locustfile.py
+│   ├── analyze_stress.py       # Stress test result analyzer
+│   ├── parse_results.py        # Benchmark result parser
 │   └── utils.py
 ├── docs/
 │   ├── plans/2026-02-15-system-design.md   # Design document
@@ -345,8 +379,16 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   └── stress_test_results.png             # Benchmark results
 ├── tla/                    # TLA+ formal specification (CheckoutProtocol.tla)
 ├── env/                    # Redis connection env vars
-├── docker-compose.yml      # Full 17-container deployment
-├── haproxy.cfg             # HAProxy reverse proxy config
+├── docker-compose.yml            # Default 20-container deployment (~30 CPU)
+├── docker-compose-small.yml      # Minimal single-instance (~6 CPU)
+├── docker-compose-6cpu.yml       # Dual-instance, constrained (~6 CPU)
+├── docker-compose-medium.yml     # 4× instances (~50 CPU)
+├── docker-compose-large.yml      # 9/7/7 instances (~90 CPU)
+├── haproxy.cfg                   # HAProxy config (default)
+├── haproxy-small.cfg             # HAProxy config (small)
+├── haproxy-6cpu.cfg              # HAProxy config (6cpu)
+├── haproxy-medium.cfg            # HAProxy config (medium)
+├── haproxy-large.cfg             # HAProxy config (large)
 ├── sentinel.conf           # Redis Sentinel configuration
 ├── sentinel-entrypoint.sh  # Sentinel startup script
 ├── minikube-deploy.sh      # Minikube full deployment script
@@ -398,7 +440,8 @@ All endpoints are available via the gateway at `http://localhost:8000`.
 
 ## Performance Results
 
-Benchmarked on Docker Desktop with NATS request-reply transport:
+Benchmarked using the **default** compose config (`docker-compose.yml`, 2/2/2 instances,
+~30 CPU) on Docker Desktop with NATS request-reply transport:
 
 **10,000 concurrent users (checkout-only, 120s, 1000/s ramp):**
 
@@ -413,6 +456,11 @@ Benchmarked on Docker Desktop with NATS request-reply transport:
 | Consistency | 0 inconsistencies |
 
 **Fault tolerance:** 0% failures during container kills (stock-service, NATS).
+
+> **Note:** Performance on Docker Desktop / WSL2 is lower (~300-800 RPS) due to
+> Hyper-V virtualization overhead on Redis AOF writes. Use the `small` or `6cpu`
+> configs for these environments. The `medium` and `large` configs are designed
+> for dedicated Linux machines.
 
 ## Logs
 

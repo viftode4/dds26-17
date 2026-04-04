@@ -3,28 +3,23 @@ services:
   gateway:
     image: haproxy:3.0-bookworm
     volumes:
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./haproxy-small.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
     ports:
       - "8000:80"
-      # - "[::1]:8000:80"
     depends_on:
       order-service-1:
         condition: service_healthy
-      order-service-2:
+      stock-service-1:
         condition: service_healthy
-      stock-service:
-        condition: service_healthy
-      stock-service-2:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-      payment-service-2:
+      payment-service-1:
         condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "0.5"
+          memory: 256M
+
+  # ---- Application Services (1 instance each) ----
 
   order-service-1:
     build: ./order
@@ -33,9 +28,9 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 1 --loop uvloop app:app
     env_file:
       - env/order_redis.env
     volumes:
@@ -67,30 +62,30 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.0"
+          cpus: "1.0"
           memory: 512M
 
-  order-service-2:
-    image: order:latest
+  stock-service-1:
+    build: ./stock
+    image: stock:latest
     environment:
-      - GATEWAY_URL=http://gateway:80
-      - INSTANCE_ID=order-2
+      - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 1 --loop uvloop app:app
     env_file:
-      - env/order_redis.env
+      - env/stock_redis.env
     volumes:
       - ./common:/app/common:ro
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      order-db:
+      stock-db:
         condition: service_started
-      order-db-replica:
+      stock-db-replica:
         condition: service_started
-      order-db-replica-2:
+      stock-db-replica-2:
         condition: service_started
       nats:
         condition: service_started
@@ -110,27 +105,71 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.0"
-          memory: 512M
+          cpus: "0.5"
+          memory: 384M
+
+  payment-service-1:
+    build: ./payment
+    image: payment:latest
+    environment:
+      - INSTANCE_ID=payment-1
+      - NATS_URL=nats://nats:4222
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 1 --loop uvloop app:app
+    env_file:
+      - env/payment_redis.env
+    volumes:
+      - ./common:/app/common:ro
+      - ./orchestrator:/app/orchestrator:ro
+      - ./lua:/app/lua:ro
+    depends_on:
+      payment-db:
+        condition: service_started
+      payment-db-replica:
+        condition: service_started
+      payment-db-replica-2:
+        condition: service_started
+      nats:
+        condition: service_started
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
 
   # ---- Redis Masters ----
+
   order-db:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 400mb
+        --maxmemory 280mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 8
+        --io-threads 3
         --io-threads-do-reads yes
-        --maxclients 8192
+        --maxclients 2048
     deploy:
       resources:
         limits:
-          cpus: "5.0"
-          memory: 512M
+          cpus: "0.8"
+          memory: 384M
 
   stock-db:
     image: valkey/valkey:8.1-bookworm
@@ -138,19 +177,19 @@ services:
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 350mb
+        --maxmemory 150mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 8
+        --io-threads 2
         --io-threads-do-reads yes
-        --maxclients 8192
+        --maxclients 2048
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 512M
+          cpus: "0.5"
+          memory: 192M
 
   payment-db:
     image: valkey/valkey:8.1-bookworm
@@ -158,27 +197,28 @@ services:
       redis-server
         --requirepass redis
         --masterauth redis
-        --maxmemory 350mb
+        --maxmemory 150mb
         --appendonly yes
         --appendfsync everysec
-        --io-threads 8
+        --io-threads 2
         --io-threads-do-reads yes
-        --maxclients 8192
+        --maxclients 2048
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 512M
+          cpus: "0.5"
+          memory: 192M
 
   # ---- Redis Replicas ----
+
   order-db-replica:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 150mb
         --replicaof order-db 6379
         --masterauth redis
     depends_on:
@@ -187,15 +227,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.25"
+          memory: 192M
 
   order-db-replica-2:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 150mb
         --replicaof order-db 6379
         --masterauth redis
     depends_on:
@@ -204,15 +244,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.2"
+          memory: 192M
 
   stock-db-replica:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 130mb
         --replicaof stock-db 6379
         --masterauth redis
     depends_on:
@@ -221,15 +261,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.2"
+          memory: 160M
 
   stock-db-replica-2:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 130mb
         --replicaof stock-db 6379
         --masterauth redis
     depends_on:
@@ -238,15 +278,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.15"
+          memory: 160M
 
   payment-db-replica:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 130mb
         --replicaof payment-db 6379
         --masterauth redis
     depends_on:
@@ -255,15 +295,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.2"
+          memory: 160M
 
   payment-db-replica-2:
     image: valkey/valkey:8.1-bookworm
     command: >
       redis-server
         --requirepass redis
-        --maxmemory 200mb
+        --maxmemory 130mb
         --replicaof payment-db 6379
         --masterauth redis
     depends_on:
@@ -272,21 +312,21 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 256M
+          cpus: "0.15"
+          memory: 160M
 
   # ---- NATS ----
+
   nats:
     image: nats:2.11-alpine
     deploy:
       resources:
         limits:
-          cpus: "0.45"
+          cpus: "0.25"
           memory: 64M
 
   # ---- Sentinel Nodes ----
-  # Entrypoint resolves hostnames to IPs at startup so Sentinel
-  # tracks masters by IP — failover works even when master DNS disappears.
+
   sentinel-1:
     image: valkey/valkey:8.1-bookworm
     command: sh /etc/redis/sentinel-entrypoint.sh
@@ -314,7 +354,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "0.15"
           memory: 64M
 
   sentinel-2:
@@ -344,7 +384,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "0.15"
           memory: 64M
 
   sentinel-3:
@@ -374,171 +414,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "0.15"
           memory: 64M
-
-  stock-service:
-    build: ./stock
-    image: stock:latest
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
-    environment:
-      - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    env_file:
-      - env/stock_redis.env
-    volumes:
-      - ./common:/app/common:ro
-      - ./orchestrator:/app/orchestrator:ro
-      - ./lua:/app/lua:ro
-    depends_on:
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
-      nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
-        condition: service_started
-    restart: on-failure
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 384M
-
-  stock-service-2:
-    image: stock:latest
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
-    environment:
-      - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    env_file:
-      - env/stock_redis.env
-    volumes:
-      - ./common:/app/common:ro
-      - ./orchestrator:/app/orchestrator:ro
-      - ./lua:/app/lua:ro
-    depends_on:
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
-      nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
-        condition: service_started
-    restart: on-failure
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 384M
-
-  payment-service:
-    build: ./payment
-    image: payment:latest
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
-    environment:
-      - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    env_file:
-      - env/payment_redis.env
-    volumes:
-      - ./common:/app/common:ro
-      - ./orchestrator:/app/orchestrator:ro
-      - ./lua:/app/lua:ro
-    depends_on:
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
-      nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
-        condition: service_started
-    restart: on-failure
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 384M
-
-  payment-service-2:
-    image: payment:latest
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
-    environment:
-      - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
-    env_file:
-      - env/payment_redis.env
-    volumes:
-      - ./common:/app/common:ro
-      - ./orchestrator:/app/orchestrator:ro
-      - ./lua:/app/lua:ro
-    depends_on:
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
-      nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
-        condition: service_started
-    restart: on-failure
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval: 5s
-      timeout: 3s
-      start_period: 10s
-      retries: 3
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 384M

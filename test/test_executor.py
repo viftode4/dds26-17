@@ -159,6 +159,62 @@ class TestTwoPCExecutor:
         mock_wal.log_terminal.assert_called_with(saga_id, "COMPLETED")
 
     @pytest.mark.asyncio
+    async def test_2pc_commit_wal_keeps_tx_name_when_context_omits_it(
+        self, mock_transport, mock_wal, circuit_breakers, metrics, checkout_tx
+    ):
+        """Recovery metadata must keep tx_name even if runtime context doesn't."""
+        _route_transport(mock_transport, {
+            ("stock", "prepare"): {"event": "prepared"},
+            ("payment", "prepare"): {"event": "prepared"},
+            ("stock", "commit"): {"event": "committed"},
+            ("payment", "commit"): {"event": "committed"},
+        })
+        executor = _make_executor(TwoPCExecutor, mock_transport, mock_wal,
+                                  circuit_breakers, metrics)
+
+        result = await executor.execute(
+            checkout_tx,
+            "2pc-commit-txname",
+            {"items": "[]", "user_id": "u1", "total_cost": "100"},
+            tx_name="checkout",
+        )
+
+        assert result["status"] == "success"
+        commit_call = next(
+            c for c in mock_wal.log.call_args_list
+            if c.args[0] == "2pc-commit-txname" and c.args[1] == "COMMITTING"
+        )
+        assert commit_call.args[2]["tx_name"] == "checkout"
+
+    @pytest.mark.asyncio
+    async def test_2pc_abort_wal_keeps_tx_name_when_context_omits_it(
+        self, mock_transport, mock_wal, circuit_breakers, metrics, checkout_tx
+    ):
+        """Abort recovery also needs tx_name in the WAL payload."""
+        _route_transport(mock_transport, {
+            ("stock", "prepare"): {"event": "failed", "reason": "insufficient_stock"},
+            ("payment", "prepare"): {"event": "prepared"},
+            ("stock", "abort"): {"event": "aborted"},
+            ("payment", "abort"): {"event": "aborted"},
+        })
+        executor = _make_executor(TwoPCExecutor, mock_transport, mock_wal,
+                                  circuit_breakers, metrics)
+
+        result = await executor.execute(
+            checkout_tx,
+            "2pc-abort-txname",
+            {"items": "[]", "user_id": "u1", "total_cost": "100"},
+            tx_name="checkout",
+        )
+
+        assert result["status"] == "failed"
+        abort_call = next(
+            c for c in mock_wal.log.call_args_list
+            if c.args[0] == "2pc-abort-txname" and c.args[1] == "ABORTING"
+        )
+        assert abort_call.args[2]["tx_name"] == "checkout"
+
+    @pytest.mark.asyncio
     async def test_circuit_breaker_fast_fail(self, mock_transport, mock_wal,
                                               circuit_breakers, metrics, checkout_tx):
         """Circuit breaker open -> WAL FAILED immediately, no commands sent."""

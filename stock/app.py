@@ -110,14 +110,6 @@ async def handle_nats_message(msg):
     saga_id = fields.get("saga_id", "")
     try:
         event = await handle_command(fields)
-        # Ensure mutating writes reach at least one replica before confirming.
-        # Prevents data loss during Sentinel failover between our response and
-        # the orchestrator's next action (e.g. commit after prepare).
-        if event in ("prepared", "committed", "executed", "aborted", "compensated"):
-            try:
-                await db.execute_command("WAIT", 1, 5000)
-            except Exception:
-                log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":
             response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
         else:
@@ -198,10 +190,6 @@ async def create_item(request: Request):
         })
         # Ensure replica has the item before responding — prevents stale reads
         # when addItem immediately reads the item price via the replica.
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"item_id": key})
@@ -220,10 +208,6 @@ async def batch_init_users(request: Request):
                     "price": item_price,
                 })
             await pipe.execute()
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for stock successful"})
@@ -231,12 +215,15 @@ async def batch_init_users(request: Request):
 
 async def find_item(request: Request):
     item_id = request.path_params["item_id"]
-    conn = db_read or db
     try:
-        entry = await conn.hgetall(f"item:{item_id}")
+        # External reads must prefer the current Sentinel master. After a failover,
+        # the replica may still be reconnecting or serving stale data.
+        entry = await db.hgetall(f"item:{item_id}")
     except Exception:
+        if not db_read:
+            raise HTTPException(400, detail=DB_ERROR_STR)
         try:
-            entry = await db.hgetall(f"item:{item_id}")
+            entry = await db_read.hgetall(f"item:{item_id}")
         except aioredis.RedisError:
             raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:
@@ -261,10 +248,6 @@ async def add_stock(request: Request):
         raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
-    try:
-        await db.execute_command("WAIT", 1, 5000)
-    except Exception:
-        pass
     return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
 

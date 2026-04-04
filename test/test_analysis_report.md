@@ -4,7 +4,7 @@
 
 The test suite covers a **microservices-based e-commerce checkout system** with stock, payment, and order services coordinated through a central orchestrator. Two transaction protocols are supported: **2PC** (Two-Phase Commit) and **SAGA** (compensating transactions). The system uses Redis as its data store with Sentinel for failover, HAProxy for load balancing, and a WAL (Write-Ahead Log) for crash recovery.
 
-The test directory contains **11 test files**, plus **4 benchmark scripts**, a **Locust load file**, a **consistency checker**, and utilities.
+The test directory contains **12 test files** (85 unit + 27 integration = **112 tests**), plus **4 benchmark scripts**, a **Locust load file**, a **consistency checker**, and utilities.
 
 ---
 
@@ -14,13 +14,14 @@ The test directory contains **11 test files**, plus **4 benchmark scripts**, a *
 
 | File | Tests | What it verifies |
 |---|---|---|
-| [test_executor.py](file:///home/babu/Workspace/distributed-data-systems/test/test_executor.py) | 8 | 2PC and SAGA executor state machines: happy path, prepare failure → abort, verified commits, circuit breaker fast-fail, saga sequential execution, early abort, second-step failure + compensation, no-confirm-phase |
-| [test_recovery.py](file:///home/babu/Workspace/distributed-data-systems/test/test_recovery.py) | 7 | RecoveryWorker crash recovery: STARTED→FAILED, PREPARING→abort all, COMMITTING→commit/retry, exhaustive retry until commit, ABORTING→abort all, no-definition fallback |
-| [test_circuit_breaker.py](file:///home/babu/Workspace/distributed-data-systems/test/test_circuit_breaker.py) | 7 | CircuitBreaker state machine: closed/open/half-open transitions, threshold, recovery timeout, success/failure recording |
+| [test_executor.py](file:///home/babu/Workspace/distributed-data-systems/test/test_executor.py) | 10 | 2PC and SAGA executor state machines: happy path, prepare failure → abort, verified commits, circuit breaker fast-fail, saga sequential execution, early abort, second-step failure + compensation, no-confirm-phase |
+| [test_recovery.py](file:///home/babu/Workspace/distributed-data-systems/test/test_recovery.py) | 15 | RecoveryWorker crash recovery: STARTED→FAILED, PREPARING→abort all, COMMITTING→commit/retry, exhaustive retry until commit, ABORTING→abort all, no-definition fallback |
+| [test_circuit_breaker.py](file:///home/babu/Workspace/distributed-data-systems/test/test_circuit_breaker.py) | 8 | CircuitBreaker state machine: closed/open/half-open transitions, threshold, recovery timeout, success/failure recording |
 | [test_orchestrator_core.py](file:///home/babu/Workspace/distributed-data-systems/test/test_orchestrator_core.py) | 16 | Orchestrator protocol selection (auto 2PC↔SAGA switching with hysteresis), execute routing, metrics recording, leader election acquire/release/heartbeat/stop |
 | [test_wal_metrics.py](file:///home/babu/Workspace/distributed-data-systems/test/test_wal_metrics.py) | 17 | WAL log/terminal operations, `get_incomplete_sagas` with stale/terminal cleanup, malformed JSON handling, LatencyHistogram bucket/overflow/prometheus format, MetricsCollector sliding abort rate and percentile delegation |
+| [test_new_unit_tests.py](file:///home/babu/Workspace/distributed-data-systems/test/test_new_unit_tests.py) | 19 | Conservation equation verification, payment crash scenarios, multi-item transaction edge cases, additional executor/recovery paths |
 
-**Total unit tests: 55**
+**Total unit tests: 85**
 
 ### 2.2 Integration Tests (require Docker Compose)
 
@@ -30,8 +31,10 @@ The test directory contains **11 test files**, plus **4 benchmark scripts**, a *
 | [test_stress.py](file:///home/babu/Workspace/distributed-data-systems/test/test_stress.py) | 4 | **Consistency under concurrency**: 50 concurrent checkouts, contention on limited stock, conservation after failures, idempotent confirm (no double counting) |
 | [test_crash_recovery.py](file:///home/babu/Workspace/distributed-data-systems/test/test_crash_recovery.py) | 2 | **Consistency after crashes**: Kill order-service mid-checkout → recovery → non-negative stock; Kill stock-service mid-reserve → saga compensates → no leaks |
 | [test_sentinel_failover.py](file:///home/babu/Workspace/distributed-data-systems/test/test_sentinel_failover.py) | 2 | **DB failover**: Kill stock-db master → Sentinel failover → checkouts resume → stock ≥ 0; Kill order-service → leader election takeover → checkouts work |
+| [test_new_integration_tests.py](file:///home/babu/Workspace/distributed-data-systems/test/test_new_integration_tests.py) | 10 | Extended integration coverage: conservation under crash recovery, payment-side verification, multi-item concurrency, chaos scenarios |
+| [test_chaos.py](file:///home/babu/Workspace/distributed-data-systems/test/test_chaos.py) | 6 | Network partition simulation, cascading failure recovery, multi-container kill under load |
 
-**Total integration tests: ~11**
+**Total integration tests: 27**
 
 ### 2.3 Benchmark / Load Tests (shell scripts + Locust)
 
@@ -75,9 +78,11 @@ The test suite has **three layers** of consistency verification:
 
 4. **No isolation/serializability testing**: No test verifies that concurrent transactions don't produce anomalous intermediate states (e.g., phantom reads, lost updates).
 
-### 3.3 Test Run Results (2026-03-23)
+### 3.3 Test Run Results (2026-03-23, pre-optimize branch)
 
-All services were built and deployed via `docker compose up -d` (17 containers). Tests run with `uv run python -m pytest`.
+> **Note:** These results were collected before the optimize branch changes (pool tuning, HAProxy fixes, 2nd replicas, new compose configs). They need to be re-run on the optimize branch to reflect the current state (112 tests across 12 test files).
+
+All services were built and deployed via `docker compose up -d` (17 containers at the time). Tests run with `uv run python -m pytest`.
 
 | Test File | Tests | Result |
 |---|---|---|
@@ -113,18 +118,18 @@ All services were built and deployed via `docker compose up -d` (17 containers).
 
 | Issue | Severity | Details |
 |---|---|---|
-| **No full conservation equation** | 🔴 Critical | No test ever computes `total_credit_deducted == total_stock_sold × price` after either stress or crash scenarios. Bounds checks (`stock ≥ 0`) can pass even with leaks |
-| **Crash tests: no payment verification** | 🔴 Critical | [test_crash_recovery.py](file:///home/babu/Workspace/distributed-data-systems/test/test_crash_recovery.py) only checks stock post-recovery, never payment. A crash could leave a user debited without stock being subtracted — this wouldn't be caught |
+| **No full conservation equation** | ✅ Addressed | Previously no test computed `total_credit_deducted == total_stock_sold × price`. Now covered by `test_new_unit_tests.py` and `test_new_integration_tests.py` conservation tests |
+| **Crash tests: no payment verification** | ✅ Addressed | Previously only stock was checked post-recovery. Now `test_new_integration_tests.py` verifies both stock and payment sides after crash recovery |
 | **Chaos benchmarks: weak consistency check** | 🟡 Major | After brutal chaos (multi-kill, cascade), the system only checks for negative values. A test could pass with money leaked from users but stock never deducted |
 | **No controlled crash timing** | 🟡 Major | Crash tests use `asyncio.sleep(0.3)` before killing — this is timing-dependent. The crash may happen before or after the critical section, making the test non-deterministic |
 | **No WAL replay verification** | 🟡 Major | Unit tests mock the WAL. No integration test verifies that WAL replay actually recovers the correct state in a real Redis environment |
 | **No 2PC-specific crash testing** | 🟡 Major | Crash tests don't explicitly test a crash between PREPARING and COMMITTING states (the "danger window" of 2PC). No test crashes the coordinator after deciding COMMIT but before sending commit to all participants |
 | **Recovery tests don't simulate partial state** | 🟡 Major | Unit recovery tests mock services returning "aborted" or "committed" cleanly. No test simulates a service that already applied a mutation but lost its response - the participant crash case |
-| **No multi-item transaction testing** | 🟠 Moderate | Stress, crash, and chaos tests all use single-item orders. Multi-item orders with partial stock availability are only tested in `test_microservices.test_order`, which is not a concurrency test |
+| **No multi-item transaction testing** | ✅ Addressed | Previously only single-item orders in stress/crash tests. Now `test_new_unit_tests.py` and `test_new_integration_tests.py` include multi-item concurrency scenarios |
 | **Hardcoded gateway URLs** | 🟠 Moderate | `GATEWAY = "http://127.0.0.1:8000"` is hardcoded everywhere instead of configurable |
 | **No test for SAGA compensation failure** | 🟠 Moderate | What if stock compensation itself fails during SAGA abort? This is tested at the unit level but not at the integration level |
 | **Low concurrency in crash tests** | 🟠 Moderate | Only 5–10 concurrent checkouts during crash. A real stress test should run hundreds while crashing |
-| **No timeout/network partition testing** | 🟠 Moderate | No simulation of slow responses, partial failures, or network partitions — only hard kills |
+| **No timeout/network partition testing** | ✅ Addressed | Previously only hard kills. Now `test_chaos.py` includes network partition simulation via `docker network disconnect` |
 | **No data contamination between tests** | 🟢 Minor | Tests create fresh entities per test but don't flush/isolate databases. Earlier test artifacts could affect later tests |
 
 ### 4.3 Unit Test Quality
@@ -297,8 +302,8 @@ docker network disconnect app_net stock-db
 
 ```mermaid
 graph TD
-    A[Test Pyramid] --> B[Unit Tests ~45]
-    A --> C[Integration Tests ~11]
+    A[Test Pyramid] --> B[Unit Tests 85]
+    A --> C[Integration Tests 27]
     A --> D[Chaos Tests 4 scenarios]
     
     B --> B1[Executor state machines]

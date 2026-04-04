@@ -90,12 +90,12 @@ async def test_sentinel_failover_stock_master():
         # or 5000ms elapse. This eliminates the replication race where the replica
         # becomes the new master without having received the item data.
         result = subprocess.run(
-            ["docker", "exec", "distributed-data-systems-stock-db-1",
+            ["docker", "compose", "exec", "-T", "stock-db",
              "redis-cli", "-a", "redis", "--no-auth-warning", "WAIT", "1", "5000"],
             capture_output=True, text=True, timeout=10,
         )
         replicas_confirmed = result.stdout.strip()
-        if replicas_confirmed != "1":
+        if not replicas_confirmed.isdigit() or int(replicas_confirmed) < 1:
             pytest.skip(
                 f"Replication not confirmed before kill (WAIT returned {replicas_confirmed!r}). "
                 "Sentinel failover test requires at least 1 replica in sync."

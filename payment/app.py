@@ -105,14 +105,6 @@ async def handle_nats_message(msg):
     saga_id = fields.get("saga_id", "")
     try:
         event = await handle_command(fields)
-        # Ensure mutating writes reach at least one replica before confirming.
-        # Prevents data loss during Sentinel failover between our response and
-        # the orchestrator's next action (e.g. commit after prepare).
-        if event in ("prepared", "committed", "executed", "aborted", "compensated"):
-            try:
-                await db.execute_command("WAIT", 1, 5000)
-            except Exception:
-                log.warning("Replication WAIT failed (no replicas?)", saga_id=saga_id)
         if event == "failed":
             response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_credit"}
         else:
@@ -185,10 +177,6 @@ async def create_user(request: Request):
             "available_credit": 0,
             "held_credit": 0,
         })
-        try:
-            await db.execute_command("WAIT", 1, 5000)
-        except Exception:
-            pass
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"user_id": key})
@@ -212,12 +200,15 @@ async def batch_init_users(request: Request):
 
 async def find_user(request: Request):
     user_id = request.path_params["user_id"]
-    conn = db_read or db
     try:
-        entry = await conn.hgetall(f"user:{user_id}")
+        # External reads must prefer the current Sentinel master. After a failover,
+        # the replica may still be reconnecting or serving stale data.
+        entry = await db.hgetall(f"user:{user_id}")
     except Exception:
+        if not db_read:
+            raise HTTPException(400, detail=DB_ERROR_STR)
         try:
-            entry = await db.hgetall(f"user:{user_id}")
+            entry = await db_read.hgetall(f"user:{user_id}")
         except aioredis.RedisError:
             raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:
@@ -242,10 +233,6 @@ async def add_credit(request: Request):
         raise HTTPException(400, detail=DB_ERROR_STR)
     except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
-    try:
-        await db.execute_command("WAIT", 1, 5000)
-    except Exception:
-        pass
     return JSONResponse({"done": True})
 
 
