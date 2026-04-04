@@ -241,16 +241,12 @@ services:
   # ---- Redis Masters ----
 
   order-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 300mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 4
-        --io-threads-do-reads yes
         --maxclients 8192
     deploy:
       resources:
@@ -259,16 +255,12 @@ services:
           memory: 400M
 
   stock-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 230mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 3
-        --io-threads-do-reads yes
         --maxclients 8192
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
@@ -279,16 +271,12 @@ services:
           memory: 300M
 
   payment-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 230mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 3
-        --io-threads-do-reads yes
         --maxclients 8192
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
@@ -301,9 +289,9 @@ services:
   # ---- Redis Replicas ----
 
   order-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof order-db 6379
@@ -318,9 +306,9 @@ services:
           memory: 200M
 
   order-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof order-db 6379
@@ -335,9 +323,9 @@ services:
           memory: 200M
 
   stock-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 120mb
         --replicaof stock-db 6379
@@ -352,9 +340,9 @@ services:
           memory: 160M
 
   stock-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 120mb
         --replicaof stock-db 6379
@@ -369,9 +357,9 @@ services:
           memory: 160M
 
   payment-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 120mb
         --replicaof payment-db 6379
@@ -386,9 +374,9 @@ services:
           memory: 160M
 
   payment-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 120mb
         --replicaof payment-db 6379
@@ -406,6 +394,7 @@ services:
 
   nats:
     image: nats:2.11-alpine
+    command: ["-js"]
     deploy:
       resources:
         limits:

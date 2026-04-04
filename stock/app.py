@@ -152,7 +152,9 @@ async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    return await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+    result = await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
+    return result
 
 
 async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
@@ -164,6 +166,7 @@ async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
     for item_id, amount in items:
         args += [item_id, str(amount)]
     await db.fcall("stock_2pc_commit", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
 
 
 async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
@@ -175,6 +178,7 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     for item_id, _ in items:
         args.append(item_id)
     await db.fcall("stock_2pc_abort", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
 
 
 async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
@@ -183,7 +187,9 @@ async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
     args = [saga_id]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    return await db.fcall("stock_saga_execute", len(keys), *keys, *args)
+    result = await db.fcall("stock_saga_execute", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
+    return result
 
 
 async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
@@ -191,6 +197,7 @@ async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
     await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n))
+    await db.execute_command("WAIT", 1, 5000)
 
 
 # ============================================================================

@@ -163,19 +163,15 @@ services:
   # ---- Redis Masters ----
 
   order-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 400mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 4
-        --io-threads-do-reads yes
         --maxclients 10000
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -186,21 +182,17 @@ services:
           memory: 512M
 
   stock-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 200mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 2
-        --io-threads-do-reads yes
         --maxclients 5000
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -211,21 +203,17 @@ services:
           memory: 256M
 
   payment-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 200mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 2
-        --io-threads-do-reads yes
         --maxclients 5000
         --min-replicas-to-write 1
         --min-replicas-max-lag 10
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -238,9 +226,9 @@ services:
   # ---- Redis Replicas ----
 
   order-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 200mb
         --replicaof order-db 6379
@@ -250,7 +238,7 @@ services:
       order-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -261,9 +249,9 @@ services:
           memory: 256M
 
   order-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 200mb
         --replicaof order-db 6379
@@ -273,7 +261,7 @@ services:
       order-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -284,9 +272,9 @@ services:
           memory: 256M
 
   order-db-replica-3:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 200mb
         --replicaof order-db 6379
@@ -296,7 +284,7 @@ services:
       order-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -307,9 +295,9 @@ services:
           memory: 256M
 
   stock-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof stock-db 6379
@@ -319,7 +307,7 @@ services:
       stock-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -330,9 +318,9 @@ services:
           memory: 192M
 
   stock-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof stock-db 6379
@@ -342,7 +330,7 @@ services:
       stock-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -353,9 +341,9 @@ services:
           memory: 192M
 
   stock-db-replica-3:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof stock-db 6379
@@ -365,7 +353,7 @@ services:
       stock-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -376,9 +364,9 @@ services:
           memory: 192M
 
   payment-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof payment-db 6379
@@ -388,7 +376,7 @@ services:
       payment-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -399,9 +387,9 @@ services:
           memory: 192M
 
   payment-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof payment-db 6379
@@ -411,7 +399,7 @@ services:
       payment-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -422,9 +410,9 @@ services:
           memory: 192M
 
   payment-db-replica-3:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 150mb
         --replicaof payment-db 6379
@@ -434,7 +422,7 @@ services:
       payment-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "valkey-cli", "-a", "redis", "ping"]
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -448,6 +436,7 @@ services:
 
   nats:
     image: nats:2.11-alpine
+    command: ["-js"]
     deploy:
       resources:
         limits:

@@ -24,6 +24,7 @@ class NatsTransport:
     def __init__(self, url: str = "nats://nats:4222"):
         self._url = url
         self._nc: NatsClient | None = None
+        self._js = None  # JetStream context (requires NATS server --js flag)
         self._subs: list = []
 
     async def connect(self, retries: int = 30, delay: float = 1.0):
@@ -37,6 +38,10 @@ class NatsTransport:
                     reconnected_cb=self._reconnected_cb,
                     disconnected_cb=self._disconnected_cb,
                 )
+                try:
+                    self._js = self._nc.jetstream()
+                except Exception as e:
+                    log.warning("JetStream not available", error=str(e))
                 log.info("NATS connected", url=self._url)
                 return
             except Exception as e:
@@ -56,7 +61,15 @@ class NatsTransport:
 
             enriched = inject_trace_context(payload)
             data = json.dumps(enriched).encode()
-            msg = await self._nc.request(subject, data, timeout=timeout)
+
+            # Nats-Msg-Id enables JetStream deduplication on orchestrator retries
+            headers: dict | None = None
+            saga_id = payload.get("saga_id", "")
+            action = payload.get("action", "")
+            if saga_id and action:
+                headers = {"Nats-Msg-Id": f"{saga_id}:{action}"}
+
+            msg = await self._nc.request(subject, data, timeout=timeout, headers=headers)
             response = json.loads(msg.data.decode())
 
             if isinstance(response, dict) and response.get("event") == "failed":
@@ -64,11 +77,30 @@ class NatsTransport:
 
             return response
 
+    async def _ensure_stream(self, name: str, subjects: list[str]) -> None:
+        """Create a JetStream stream for these subjects if it doesn't already exist."""
+        if not self._js:
+            return
+        try:
+            await self._js.add_stream(name=name, subjects=subjects)
+            log.info("JetStream stream ensured", name=name)
+        except Exception as e:
+            err = str(e)
+            if "already in use" not in err.lower() and "already exists" not in err.lower():
+                log.warning("JetStream stream setup warning", name=name, error=err)
+
     async def subscribe(self, subject: str, queue: str, handler):
         """Subscribe with a queue group for load-balanced delivery.
 
         handler signature: async def handler(msg: Msg) -> None
         """
+        # Persist messages in a JetStream stream for dedup and durability.
+        parts = subject.split(".")
+        if len(parts) >= 2:
+            stream_name = parts[1].upper()          # "svc.stock.*" -> "STOCK"
+            stream_subject = ".".join(parts[:2]) + ".>"  # "svc.stock.>"
+            await self._ensure_stream(stream_name, [stream_subject])
+
         sub = await self._nc.subscribe(subject, queue=queue, cb=handler)
         self._subs.append(sub)
         return sub

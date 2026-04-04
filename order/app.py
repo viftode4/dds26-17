@@ -57,7 +57,7 @@ def stock_payload(saga_id: str, action: str, context: dict) -> dict:
     cmd: dict[str, str] = {}
     if items:
         cmd["items"] = json.dumps(items)
-    cmd["ttl"] = str(context.get("_reservation_ttl", 60))
+    cmd["ttl"] = str(context.get("_reservation_ttl", 300))
     return cmd
 
 
@@ -66,7 +66,7 @@ def payment_payload(saga_id: str, action: str, context: dict) -> dict:
     return {
         "user_id": context.get("user_id", ""),
         "amount": str(context.get("total_cost", 0)),
-        "ttl": str(context.get("_reservation_ttl", 60)),
+        "ttl": str(context.get("_reservation_ttl", 300)),
     }
 
 
@@ -337,7 +337,7 @@ async def checkout(request: Request):
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
     keys = [f"order:{order_id}", f"order:{order_id}:items", idempotency_key]
-    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "120")
+    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "300")
     found, entry_flat_json, items_json, acquired_int = raw[0], raw[1], raw[2], raw[3]
     if not found:
         raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -373,7 +373,9 @@ async def checkout(request: Request):
 
     if not aggregated_items:
         if acquired:
-            await db.delete(idempotency_key)
+            await db.set(idempotency_key,
+                         json.dumps({"status": "failed", "error": "no_items"}),
+                         ex=60)
         raise HTTPException(400, detail="Order has no items")
 
     if not acquired:
@@ -416,9 +418,10 @@ async def checkout(request: Request):
                  protocol=result.get("protocol"))
         return PlainTextResponse("Checkout successful")
     else:
-        # Delete idempotency key — allow client to retry after fixing conditions
-        await db.delete(idempotency_key)
         error = result.get("error", "unknown")
+        await db.set(idempotency_key,
+                     json.dumps({"status": "failed", "error": error}),
+                     ex=300)
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         raise HTTPException(400, detail=f"Checkout failed: {error}")
 

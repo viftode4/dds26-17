@@ -140,7 +140,9 @@ async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -
         f"saga:{saga_id}:payment:status",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
-    return await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
+    result = await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
+    return result
 
 
 async def _2pc_commit(saga_id: str, user_id: str, amount: int):
@@ -150,6 +152,7 @@ async def _2pc_commit(saga_id: str, user_id: str, amount: int):
         f"saga:{saga_id}:payment:status",
     ]
     await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, str(amount), user_id)
+    await db.execute_command("WAIT", 1, 5000)
 
 
 async def _2pc_abort(saga_id: str, user_id: str):
@@ -161,6 +164,7 @@ async def _2pc_abort(saga_id: str, user_id: str):
         f"saga:{saga_id}:payment:status",
     ]
     await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id)
+    await db.execute_command("WAIT", 1, 5000)
 
 
 async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
@@ -170,7 +174,9 @@ async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
         f"saga:{saga_id}:payment:amounts",
     ]
     args = [str(amount), saga_id, user_id]
-    return await db.fcall("payment_saga_execute", len(keys), *keys, *args)
+    result = await db.fcall("payment_saga_execute", len(keys), *keys, *args)
+    await db.execute_command("WAIT", 1, 5000)
+    return result
 
 
 async def _saga_compensate(saga_id: str, user_id: str):
@@ -182,6 +188,7 @@ async def _saga_compensate(saga_id: str, user_id: str):
         f"saga:{saga_id}:payment:amounts",
     ]
     await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id)
+    await db.execute_command("WAIT", 1, 5000)
 
 
 # ============================================================================
