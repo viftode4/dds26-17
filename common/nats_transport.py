@@ -8,10 +8,14 @@ import json
 
 import nats
 from nats.aio.client import Client as NatsClient, Msg
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from common.logging import get_logger
+from common.tracing import inject_trace_context
 
 log = get_logger("nats_transport")
+_tracer = trace.get_tracer("nats_transport")
 
 
 class NatsTransport:
@@ -42,9 +46,23 @@ class NatsTransport:
                 await asyncio.sleep(delay)
 
     async def request(self, subject: str, payload: dict, timeout: float = 10.0) -> dict:
-        data = json.dumps(payload).encode()
-        msg = await self._nc.request(subject, data, timeout=timeout)
-        return json.loads(msg.data.decode())
+        with _tracer.start_as_current_span(
+            f"nats send {subject}",
+            kind=SpanKind.CLIENT,
+        ) as span:
+            span.set_attribute("messaging.system", "nats")
+            span.set_attribute("messaging.destination.name", subject)
+            span.set_attribute("messaging.operation", "send")
+
+            enriched = inject_trace_context(payload)
+            data = json.dumps(enriched).encode()
+            msg = await self._nc.request(subject, data, timeout=timeout)
+            response = json.loads(msg.data.decode())
+
+            if isinstance(response, dict) and response.get("event") == "failed":
+                span.set_status(Status(StatusCode.ERROR, response.get("reason", "failed")))
+
+            return response
 
     async def subscribe(self, subject: str, queue: str, handler):
         """Subscribe with a queue group for load-balanced delivery.
@@ -103,6 +121,8 @@ class NatsOrchestratorTransport:
                 return await self._transport.request(subject, msg, timeout=timeout)
             except asyncio.TimeoutError:
                 last_error = "timeout"
+                span = trace.get_current_span()
+                span.add_event("nats.timeout", {"subject": subject, "attempt": attempt})
             except Exception as e:
                 err = str(e)
                 if "no responders" in err.lower() or "disconnected" in err.lower() or "connection" in err.lower():

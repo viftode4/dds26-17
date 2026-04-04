@@ -15,6 +15,7 @@ from starlette.routing import Route
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
+from common.tracing import setup_tracing, shutdown_tracing, extract_trace_context, get_tracer
 
 
 DB_ERROR_STR = "DB error"
@@ -29,6 +30,7 @@ _nats_transport: NatsTransport | None = None
 @asynccontextmanager
 async def lifespan(app):
     global db, db_read, _nats_transport
+    setup_tracing("stock-service")
     setup_logging("stock-service")
 
     db = create_redis_connection(prefix="", decode_responses=True)
@@ -69,6 +71,7 @@ async def lifespan(app):
         await db_read.aclose()
     if db:
         await db.aclose()
+    shutdown_tracing()
 
 
 async def handle_command(fields: dict) -> str:
@@ -106,18 +109,32 @@ async def handle_command(fields: dict) -> str:
 
 
 async def handle_nats_message(msg):
+    from opentelemetry.trace import SpanKind
     fields = json.loads(msg.data.decode())
+    ctx = extract_trace_context(fields)
+    tracer = get_tracer("stock")
+    action = fields.get("action", "unknown")
     saga_id = fields.get("saga_id", "")
-    try:
-        event = await handle_command(fields)
-        if event == "failed":
-            response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
-        else:
-            response = {"saga_id": saga_id, "event": event}
-    except Exception as e:
-        log.error("NATS handler error", error=str(e), saga_id=saga_id)
-        response = {"saga_id": saga_id, "event": "failed", "reason": str(e)}
-    await msg.respond(json.dumps(response).encode())
+    with tracer.start_as_current_span(
+        f"stock.handle {action}", context=ctx, kind=SpanKind.SERVER
+    ) as span:
+        span.set_attribute("messaging.system", "nats")
+        span.set_attribute("messaging.operation", "receive")
+        span.set_attribute("saga_id", saga_id)
+        span.set_attribute("action", action)
+        try:
+            event = await handle_command(fields)
+            if event == "failed":
+                response = {"saga_id": saga_id, "event": "failed", "reason": "insufficient_stock"}
+                span.set_attribute("outcome", "failed")
+            else:
+                response = {"saga_id": saga_id, "event": event}
+                span.set_attribute("outcome", event)
+        except Exception as e:
+            log.error("NATS handler error", error=str(e), saga_id=saga_id)
+            response = {"saga_id": saga_id, "event": "failed", "reason": str(e)}
+            span.record_exception(e)
+        await msg.respond(json.dumps(response).encode())
 
 
 def _parse_items(fields: dict) -> list[tuple[str, int]]:

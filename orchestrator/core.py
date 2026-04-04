@@ -4,14 +4,17 @@ import time
 import uuid
 
 import redis.asyncio as aioredis
-
 import structlog
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind, Status, StatusCode
+
 from orchestrator.definition import TransactionDefinition
 from orchestrator.executor import TwoPCExecutor, SagaExecutor, CircuitBreaker
 from orchestrator.wal import WALEngine
 from orchestrator.metrics import MetricsCollector
 
 logger = structlog.get_logger("orchestrator.core")
+_tracer = trace.get_tracer("orchestrator.core")
 
 
 MAX_CONCURRENT_CHECKOUTS = 500
@@ -87,29 +90,36 @@ class Orchestrator:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
 
-        # Execute and measure latency
-        start = time.monotonic()
-        if protocol == "2pc":
-            result = await self.two_pc.execute(tx_def, saga_id, context, tx_name=tx_name)
-        else:
-            result = await self.saga.execute(tx_def, saga_id, context, tx_name=tx_name)
+        with _tracer.start_as_current_span("orchestrator.execute", kind=SpanKind.INTERNAL) as span:
+            span.set_attribute("tx.name", tx_name)
+            span.set_attribute("saga_id", saga_id)
+            span.set_attribute("protocol", protocol)
 
-        duration = time.monotonic() - start
+            start = time.monotonic()
+            if protocol == "2pc":
+                result = await self.two_pc.execute(tx_def, saga_id, context, tx_name=tx_name)
+            else:
+                result = await self.saga.execute(tx_def, saga_id, context, tx_name=tx_name)
 
-        self.metrics.record(
-            success=(result.get("status") == "success"),
-            protocol=protocol,
-            duration=duration,
-        )
+            duration = time.monotonic() - start
 
-        result["saga_id"] = saga_id
-        result["protocol"] = protocol
+            self.metrics.record(
+                success=(result.get("status") == "success"),
+                protocol=protocol,
+                duration=duration,
+            )
 
-        # Publish result via pub/sub — fire-and-forget, needed only for
-        # cross-instance recovery retries (rare fallback path)
-        asyncio.create_task(self._publish_result(saga_id, result))
+            span.set_attribute("outcome", result.get("status", ""))
+            span.set_attribute("duration_ms", round(duration * 1000, 2))
+            if result.get("status") != "success":
+                span.set_status(Status(StatusCode.ERROR, result.get("error", "")))
 
-        return result
+            result["saga_id"] = saga_id
+            result["protocol"] = protocol
+
+            asyncio.create_task(self._publish_result(saga_id, result))
+
+            return result
 
     def _select_protocol(self) -> str:
         """Select protocol based on mode and abort-rate metrics.

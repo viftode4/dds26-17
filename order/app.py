@@ -22,6 +22,7 @@ from common.config import create_redis_connection, create_replica_connection, wa
 from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
+from common.tracing import setup_tracing, shutdown_tracing
 from orchestrator import (
     Orchestrator, TransactionDefinition, Step,
     LeaderElection, RecoveryWorker,
@@ -119,6 +120,7 @@ async def _leadership_loop():
 async def lifespan(app):
     global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task, _http_client, _nats_transport
 
+    setup_tracing("order-service")
     setup_logging("order-service")
 
     # Master connection for writes
@@ -139,6 +141,9 @@ async def lifespan(app):
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
     await asyncio.gather(*[db.ping() for _ in range(32)])
+
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    HTTPXClientInstrumentor().instrument()
 
     # Shared HTTP client for inter-service lookups via gateway
     _http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=5.0)
@@ -193,6 +198,7 @@ async def lifespan(app):
         await db_read.aclose()
     if db:
         await db.aclose()
+    shutdown_tracing()
 
 
 # ---------------------------------------------------------------------------
