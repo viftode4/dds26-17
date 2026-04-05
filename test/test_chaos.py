@@ -265,13 +265,19 @@ async def test_cascade_failure():
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Restart everything.
-        # stock-db: Sentinel will promote stock-db-replica to master (~20s).
-        # Restart stock-service instances to force reconnection to the new master.
-        _docker_compose("start", "stock-db", "payment-service")
-        await asyncio.sleep(25.0)  # Sentinel failover time for stock-db
+        # Restart payment-service immediately — it has no Sentinel involvement.
+        _docker_compose("start", "payment-service")
+
+        # On Docker Desktop/Windows, Sentinel enters TILT mode every ~30s due to
+        # VM clock sync jitter. TILT blocks all failover operations (automatic AND
+        # SENTINEL FAILOVER commands). We bypass this by manually promoting the
+        # replica and re-registering the master with Sentinel.
+        await asyncio.sleep(5.0)  # Let in-flight sagas reach a stable state
+        from topology import force_failover
+        force_failover("stock-master", "stock-db-replica")
+
         _docker_compose("restart", "stock-service", "stock-service-2")
-        await asyncio.sleep(15.0)  # stock-service startup time
+        await asyncio.sleep(20.0)  # Extended startup time
         await wait_gateway_healthy(client)
         await asyncio.sleep(20.0)  # recovery worker time
 
@@ -305,8 +311,15 @@ async def test_redis_failover_data_loss_detection():
         # Kill stock-db immediately — potential data loss before replication
         _docker_compose("kill", "stock-db")
 
-        # Wait for Sentinel to promote replica
-        await asyncio.sleep(20.0)
+        # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
+        # Manually promote the replica so checkouts can proceed.
+        await asyncio.sleep(5.0)
+        from topology import force_failover
+        force_failover("stock-master", "stock-db-replica")
+        # Restart stock-service so it reconnects to the new master (stock-db-replica).
+        _docker_compose("restart", "stock-service", "stock-service-2")
+        await asyncio.sleep(15.0)
+        await wait_gateway_healthy(client)
 
         tracker = OutcomeTracker()
         # Try checkouts after failover — system must not corrupt data.
@@ -400,12 +413,15 @@ async def test_wal_survives_redis_failover():
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Wait for Sentinel failover
-        await asyncio.sleep(20.0)
-        _docker_compose("start", "order-db")
-        await asyncio.sleep(10.0)
+        # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
+        # Manually promote order-db-replica so order services can reconnect.
+        await asyncio.sleep(3.0)
+        from topology import force_failover
+        force_failover("order-master", "order-db-replica")
 
-        # Restart order services + gateway to reconnect to new master
+        # Restart order services + gateway to reconnect to the new master.
+        # Leave order-db dead — conftest restore_topology handles it before the
+        # next test. Starting an empty order-db now would create split-brain.
         _docker_compose("restart", "order-service-1", "order-service-2", "gateway")
         await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
