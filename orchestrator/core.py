@@ -153,3 +153,4 @@ class Orchestrator:
         result_key = f"saga-result:{saga_id}"
         notify_channel = f"saga-notify:{saga_id}"
         await self.order_db.set(result_key, result_data, ex=60)
+        await self.order_db.execute_command("PUBLISH", notify_channel, "done")

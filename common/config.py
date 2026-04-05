@@ -3,6 +3,7 @@ import os
 
 import structlog
 
+import redis.asyncio as aioredis
 from redis.asyncio.cluster import RedisCluster, ClusterNode
 from redis.exceptions import ConnectionError, TimeoutError
 
@@ -62,6 +63,24 @@ def create_redis_cluster_connection(
         read_from_replicas=read_from_replicas,
         password=os.environ.get("REDIS_PASSWORD", "redis"),
         **merged,
+    )
+
+
+def create_redis_pubsub_connection(startup_nodes: list[tuple[str, int]]) -> aioredis.Redis:
+    """Standalone single-node Redis connection for pub/sub.
+
+    RedisCluster does not expose pubsub(). Redis Cluster gossips PUBLISH
+    messages to all nodes via the cluster bus, so subscribing on any one
+    node receives all publishes cluster-wide.
+    """
+    host, port = startup_nodes[0]
+    return aioredis.Redis(
+        host=host,
+        port=port,
+        password=os.environ.get("REDIS_PASSWORD", "redis"),
+        decode_responses=True,
+        socket_timeout=5,
+        socket_connect_timeout=5,
     )
 
 

@@ -18,7 +18,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from common.config import create_redis_cluster_connection, get_cluster_nodes, wait_for_redis
+from common.config import create_redis_cluster_connection, create_redis_pubsub_connection, get_cluster_nodes, wait_for_redis
 from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
@@ -41,6 +41,7 @@ recovery_worker: RecoveryWorker | None = None
 _leader_task: asyncio.Task | None = None
 _http_client: httpx.AsyncClient | None = None
 _nats_transport: NatsTransport | None = None
+_pubsub_redis = None
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +117,14 @@ async def _leadership_loop():
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, orchestrator, leader_election, recovery_worker, _leader_task, _http_client, _nats_transport
+    global db, orchestrator, leader_election, recovery_worker, _leader_task, _http_client, _nats_transport, _pubsub_redis
 
     setup_logging("order-service")
 
     startup_nodes = get_cluster_nodes("ORDER_CLUSTER_NODES")
     pool_size = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))
     db = create_redis_cluster_connection(startup_nodes, pool_size=pool_size)
+    _pubsub_redis = create_redis_pubsub_connection(startup_nodes)
     await wait_for_redis(db, "order-cluster")
 
     # Load Lua function library on ALL cluster primaries
@@ -174,6 +176,8 @@ async def lifespan(app):
 
     yield
 
+    if _pubsub_redis:
+        await _pubsub_redis.aclose()
     if _http_client:
         await _http_client.aclose()
     if _leader_task:
@@ -353,7 +357,7 @@ async def checkout(request: Request):
                 # Still processing on another instance — wait via pub/sub fallback
                 existing_saga_id = existing_data.get("saga_id", "")
                 if existing_saga_id:
-                    result = await wait_for_result(db, existing_saga_id, timeout=30.0)
+                    result = await wait_for_result(db, existing_saga_id, timeout=30.0, pubsub_db=_pubsub_redis)
                     if result.get("status") == "success":
                         return PlainTextResponse("Checkout successful")
                     raise HTTPException(400, detail=f"Checkout failed: {result.get('error', 'unknown')}")
