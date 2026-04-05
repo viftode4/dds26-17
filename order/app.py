@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import logging
 import os
@@ -123,6 +124,9 @@ async def lifespan(app):
 
     setup_tracing("order-service")
     setup_logging("order-service")
+
+    # Reduce GC pause frequency — gen0 threshold 700→50000
+    gc.set_threshold(50000, 500, 1000)
 
     startup_nodes = get_cluster_nodes("ORDER_CLUSTER_NODES")
     pool_size = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))

@@ -21,9 +21,13 @@ async def wait_for_result(db: aioredis.Redis, saga_id: str,
         return json.loads(raw)
 
     if pubsub_db is None:
-        await asyncio.sleep(timeout)
-        raw = await db.get(result_key)
-        return json.loads(raw) if raw else {"status": "failed", "error": "timeout"}
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.1)
+            raw = await db.get(result_key)
+            if raw:
+                return json.loads(raw)
+        return {"status": "failed", "error": "timeout"}
 
     pubsub = pubsub_db.pubsub()
     await pubsub.subscribe(f"saga-notify:{saga_id}")
@@ -37,7 +41,7 @@ async def wait_for_result(db: aioredis.Redis, saga_id: str,
             async with asyncio.timeout(timeout):
                 while True:
                     msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
+                        ignore_subscribe_messages=True, timeout=0.1
                     )
                     if msg:
                         raw = await db.get(result_key)

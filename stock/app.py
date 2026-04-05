@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import os
 import uuid
@@ -40,6 +41,9 @@ async def lifespan(app):
     global db, _nats_transport
     setup_tracing("stock-service")
     setup_logging("stock-service")
+
+    # Reduce GC pause frequency — gen0 threshold 700→50000
+    gc.set_threshold(50000, 500, 1000)
 
     startup_nodes = get_cluster_nodes("STOCK_CLUSTER_NODES")
     pool_size = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))
