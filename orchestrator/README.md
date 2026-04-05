@@ -55,10 +55,11 @@ class Transport(Protocol):
                             payload: dict, timeout: float) -> dict: ...
 ```
 
-The default implementation uses **NATS Core request-reply**:
+The default implementation uses **NATS JetStream commands + Core NATS inbox replies**:
 - Subject scheme: `svc.{service}.{action}` (e.g., `svc.stock.prepare`)
+- Commands: JetStream (durable, deduplicated, WorkQueue retention, memory storage ~28µs ack)
+- Replies: Core NATS ephemeral inbox (lowest latency)
 - Queue groups: `{service}-workers` for load balancing across replicas
-- ~0.28ms per-hop latency (vs ~100ms with polling-based approaches)
 
 Any transport that implements `send_and_wait` can be used — the orchestrator is
 fully transport-agnostic.
@@ -113,7 +114,7 @@ from orchestrator import (
                           │  └────────┬────────────┘  │
                           └───────────┼────────────────┘
                                       │
-                           NATS request-reply
+                        NATS JetStream commands
                         svc.{service}.{action}
                                       │
                         ┌─────────────┴─────────────┐
@@ -131,17 +132,25 @@ See the root README for all deployment configurations.
 
 - **Adaptive protocol selection**: Automatically switches between 2PC and Saga
   based on sliding-window abort rate (hysteresis at 5%/10% thresholds)
-- **Write-Ahead Log (WAL)**: Every state transition is logged before execution,
-  enabling full crash recovery
+- **Parallel step execution**: `_broadcast()` sends all steps concurrently via `asyncio.gather()`
+- **Dual-structure WAL**: Stream (audit trail) + SET (active sagas) + HASH (per-saga state)
+  for O(1) recovery instead of O(n) stream scan
+- **Recovery state machine**: Per-state strategy — PREPARING→abort, COMMITTING→must commit,
+  EXECUTING→compensate, COMPENSATING→retry
 - **Circuit breakers**: Per-service fail-fast with configurable thresholds and
-  half-open probing
+  half-open probing; forces 2PC when any breaker is open (safety override)
+- **Backpressure control**: Async semaphore caps concurrent in-flight checkouts (default 500)
 - **Forward recovery**: Confirm failures are retried with exponential backoff
-  before falling back to compensation
-- **Reservation TTL**: Configurable TTL for locks/reservations (default 60s in the
-  provided payload builders) to prevent resource leaks during long-tail failures
+  before falling back to compensation; exhausted retries escalate to DLQ
+- **Reconciliation loop**: Periodic orphan saga detection (60s interval, 120s timeout)
+- **Reservation TTL**: Configurable TTL for locks/reservations (default 60s) to prevent
+  resource leaks during long-tail failures
 - **Transport-agnostic**: Any messaging system implementing the `Transport`
   protocol can be used (NATS, Redis Streams, gRPC, etc.)
-- **AOF durability**: Valkey AOF persistence ensures committed data survives restarts
+- **In-process result delivery**: asyncio.Future on happy path (no stream hop);
+  pub/sub + key polling fallback for cross-instance recovery
+- **Active-active execution**: All instances execute checkouts; leader-only for
+  background maintenance (recovery, reconciliation)
 
 ## Recovery
 
@@ -175,7 +184,7 @@ The `reconcile_fn` callback runs application-specific invariant checks
 (e.g., "no stock value is negative"). The orchestrator schedules it;
 the application defines what to check.
 
-WAL terminal states: `COMPLETED`, `FAILED`.
+WAL terminal states: `COMPLETED`, `FAILED`, `ABANDONED`.
 
 Timing constants:
 
