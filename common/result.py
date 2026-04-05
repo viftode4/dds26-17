@@ -6,13 +6,11 @@ import redis.asyncio as aioredis
 
 async def wait_for_result(db: aioredis.Redis, saga_id: str,
                           timeout: float = 30.0) -> dict:
-    """Wait for saga result using pub/sub + key pattern.
+    """Wait for saga result by polling the result key.
 
-    1. Check if result already exists (fast path)
-    2. Subscribe to notification channel
-    3. Check again (prevent race between GET and SUBSCRIBE)
-    4. Block on notification with timeout
-    5. Fall back to key check on timeout
+    RedisCluster does not support pubsub() — polling is used instead.
+    Poll interval starts at 50 ms and backs off to 500 ms to balance
+    latency vs. Redis load on the (rare) cross-instance fallback path.
     """
     result_key = f"saga-result:{saga_id}"
 
@@ -21,37 +19,13 @@ async def wait_for_result(db: aioredis.Redis, saga_id: str,
     if raw:
         return json.loads(raw)
 
-    # Subscribe BEFORE checking key (prevents race condition)
-    pubsub = db.pubsub()
-    await pubsub.subscribe(f"saga-notify:{saga_id}")
-
-    try:
-        # Check again after subscribe
+    deadline = asyncio.get_event_loop().time() + timeout
+    interval = 0.05  # start at 50 ms
+    while asyncio.get_event_loop().time() < deadline:
+        await asyncio.sleep(interval)
         raw = await db.get(result_key)
         if raw:
             return json.loads(raw)
+        interval = min(interval * 1.5, 0.5)  # back off up to 500 ms
 
-        # Block on notification
-        try:
-            async with asyncio.timeout(timeout):
-                while True:
-                    msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
-                    )
-                    if msg:
-                        raw = await db.get(result_key)
-                        if raw:
-                            return json.loads(raw)
-        except asyncio.TimeoutError:
-            pass
-
-        # Final fallback check
-        raw = await db.get(result_key)
-        if raw:
-            return json.loads(raw)
-
-        return {"status": "failed", "error": "timeout"}
-
-    finally:
-        await pubsub.unsubscribe()
-        await pubsub.aclose()
+    return {"status": "failed", "error": "timeout"}

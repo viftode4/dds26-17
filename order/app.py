@@ -371,10 +371,12 @@ async def checkout(request: Request):
     # 6. Persist result — all three keys share {order_{order_id}} tag → same-slot transaction
     if result.get("status") == "success":
         final_value = json.dumps({"status": "success", "saga_id": saga_id})
-        async with db.pipeline(transaction=True) as pipe:
-            pipe.set(idempotency_key, final_value, ex=86400)
-            pipe.hset(f"{{order_{order_id}}}:data", "paid", "true")
-            await pipe.execute()
+        await db.fcall(
+            "order_mark_paid", 2,
+            idempotency_key,
+            f"{{order_{order_id}}}:data",
+            final_value, "86400",
+        )
         log.info("Checkout successful", order_id=order_id, saga_id=saga_id,
                  protocol=result.get("protocol"))
         return PlainTextResponse("Checkout successful")

@@ -172,7 +172,11 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
 
 
 async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
-    """Execute saga deductions for all items in parallel. Returns 1 only if all succeed."""
+    """Execute saga deductions for all items in parallel. Returns 1 only if all succeed.
+
+    If some items succeed and others fail, compensates the successful ones before
+    returning 0 so that execute is all-or-nothing from the orchestrator's view.
+    """
     results = await asyncio.gather(*[
         db.fcall(
             "stock_saga_execute_one", 3,
@@ -183,7 +187,13 @@ async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
         )
         for item_id, amount in items
     ])
-    return 1 if all(r == 1 for r in results) else 0
+    if all(r == 1 for r in results):
+        return 1
+    # Partial failure: roll back any items that were successfully deducted
+    succeeded = [items[i] for i, r in enumerate(results) if r == 1]
+    if succeeded:
+        await _saga_compensate(saga_id, succeeded)
+    return 0
 
 
 async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):

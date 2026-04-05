@@ -52,5 +52,17 @@ local function order_load_and_claim(KEYS, ARGV)
     return {1, cjson.encode(entry), cjson.encode(items), acquired and 1 or 0}
 end
 
+-- Atomically finalize checkout: set idempotency key + mark order paid
+-- KEYS[1] = {order_{order_id}}:idempotency:checkout
+-- KEYS[2] = {order_{order_id}}:data
+-- ARGV[1] = final_value (JSON string)
+-- ARGV[2] = idempotency TTL in seconds
+local function order_mark_paid(KEYS, ARGV)
+    redis.call('SET', KEYS[1], ARGV[1], 'EX', tonumber(ARGV[2]))
+    redis.call('HSET', KEYS[2], 'paid', 'true')
+    return 1
+end
+
 redis.register_function('order_add_item',        add_item_atomic)
 redis.register_function('order_load_and_claim',  order_load_and_claim)
+redis.register_function('order_mark_paid',       order_mark_paid)
