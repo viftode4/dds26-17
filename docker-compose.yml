@@ -253,7 +253,10 @@ services:
   # ---- NATS ----
   nats:
     image: nats:2.11-alpine
-    command: ["-js"]
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
     deploy:
       resources:
         limits:
@@ -518,3 +521,16 @@ services:
         limits:
           cpus: "1.0"
           memory: 384M
+
+  # ---- Observability ----
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M

@@ -55,6 +55,7 @@ class NatsTransport:
         self._nc: NatsClient | None = None
         self._js = None
         self._subs: list = []
+        self._sub_params: list[tuple[str, str, object]] = []  # (subject, queue, handler)
 
     async def connect(self, retries: int = 30, delay: float = 1.0) -> None:
         for attempt in range(1, retries + 1):
@@ -111,9 +112,11 @@ class NatsTransport:
             try:
                 enriched = inject_trace_context(payload)
                 data = json.dumps(enriched).encode()
-                # Dedup key: unique per (saga, action) pair — protects against retry
+                # Dedup key: unique per (saga, service, action) — protects against retry
                 # double-delivery within the 2-minute duplicate_window.
-                msg_id = f"{payload.get('saga_id', '')}-{subject.split('.')[-1]}"
+                # Must include the full subject so svc.stock.execute and
+                # svc.payment.execute don't collide.
+                msg_id = f"{payload.get('saga_id', '')}-{subject}"
 
                 # Run JetStream publish (~28µs stream ack) concurrently with inbox
                 # wait. The reply arrives after service processing (~280µs total),
@@ -139,6 +142,10 @@ class NatsTransport:
         handler signature: async def handler(msg) -> None  (unchanged from before)
         msg.data and msg.respond() work exactly as with Core NATS messages.
         """
+        self._sub_params.append((subject, queue, handler))
+        await self._js_subscribe(subject, queue, handler)
+
+    async def _js_subscribe(self, subject: str, queue: str, handler) -> None:
         async def js_handler(msg: Msg) -> None:
             await handler(_JsMsgAdapter(msg, self._nc))
 
@@ -175,6 +182,18 @@ class NatsTransport:
     async def _reconnect_ensure_stream(self) -> None:
         try:
             await self._ensure_stream()
+            # Memory-storage consumers are also lost — re-subscribe all handlers.
+            old_subs = self._subs[:]
+            self._subs.clear()
+            for sub in old_subs:
+                try:
+                    await sub.unsubscribe()
+                except Exception:
+                    pass
+            for subject, queue, handler in self._sub_params:
+                await self._js_subscribe(subject, queue, handler)
+            log.info("JetStream consumers re-subscribed after reconnect",
+                     count=len(self._sub_params))
         except Exception as e:
             log.error("Failed to recreate COMMANDS stream after reconnect", error=str(e))
 

@@ -150,8 +150,16 @@ async def lifespan(app):
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     HTTPXClientInstrumentor().instrument()
 
-    # Shared HTTP client for inter-service lookups via gateway
-    _http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=5.0)
+    # Shared HTTP client for inter-service lookups via gateway.
+    # Semaphore caps concurrent outgoing HTTP requests to prevent pool exhaustion
+    # when the event loop is saturated under load (PoolTimeout).
+    global _http_semaphore
+    _http_semaphore = asyncio.Semaphore(50)
+    _http_client = httpx.AsyncClient(
+        base_url=GATEWAY_URL,
+        timeout=httpx.Timeout(5.0, pool=2.0),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
 
     # NATS transport for orchestrator-to-service communication
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
@@ -288,7 +296,8 @@ async def add_item(request: Request):
     if quantity <= 0:
         raise HTTPException(400, detail="Quantity must be positive")
     try:
-        resp = await _http_client.get(f"/stock/find/{item_id}")
+        async with _http_semaphore:
+            resp = await _http_client.get(f"/stock/find/{item_id}")
     except httpx.HTTPError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     if resp.status_code != 200:
