@@ -145,7 +145,7 @@ async def lifespan(app):
         raise
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
-    await asyncio.gather(*[db.ping() for _ in range(32)])
+    await asyncio.gather(*[db.ping() for _ in range(128)])
 
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     HTTPXClientInstrumentor().instrument()
@@ -432,10 +432,12 @@ async def checkout(request: Request):
         return PlainTextResponse("Checkout successful")
     else:
         error = result.get("error", "unknown")
-        # Delete idempotency key so retries are allowed after conditions improve
-        # (e.g. stock/credit added). Concurrent waiters already hold the saga_id
-        # and wait on saga-result:{saga_id}, not this key.
-        await db.delete(idempotency_key)
+        # Mark idempotency key as failed (not delete) — prevents a concurrent
+        # request from grabbing the same key before this response is sent.
+        # Short TTL allows retries after conditions improve (stock/credit added).
+        await db.set(idempotency_key,
+                     json.dumps({"status": "failed", "error": error, "saga_id": saga_id}),
+                     ex=60)
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         raise HTTPException(400, detail=f"Checkout failed: {error}")
 

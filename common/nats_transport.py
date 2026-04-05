@@ -9,6 +9,7 @@ and WorkQueue retention (messages deleted after consumer acks, no buildup).
 import asyncio
 import json
 
+import msgpack
 import nats
 from nats.aio.client import Client as NatsClient, Msg
 from opentelemetry import trace
@@ -111,7 +112,7 @@ class NatsTransport:
             sub = await self._nc.subscribe(inbox, cb=on_reply)
             try:
                 enriched = inject_trace_context(payload)
-                data = json.dumps(enriched).encode()
+                data = msgpack.packb(enriched, use_bin_type=True)
 
                 headers = {"Reply-To": inbox}
                 # Dedup via Msg-Id only for prepare/execute — these have side effects
@@ -130,7 +131,7 @@ class NatsTransport:
                     asyncio.wait_for(fut, timeout=timeout),
                 )
 
-                response = json.loads(reply_raw)
+                response = msgpack.unpackb(reply_raw, raw=False)
                 if isinstance(response, dict) and response.get("event") == "failed":
                     span.set_status(Status(StatusCode.ERROR, response.get("reason", "failed")))
                 return response

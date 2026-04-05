@@ -1,0 +1,145 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "title": "Checkout Rate (success vs failure)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": { "unit": "ops" },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "failures" }, "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }] },
+          { "matcher": { "id": "byName", "options": "successes" }, "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }] }
+        ]
+      },
+      "targets": [
+        { "expr": "rate(saga_total{result=\"success\"}[1m])", "legendFormat": "successes" },
+        { "expr": "rate(saga_total{result=\"failure\"}[1m])", "legendFormat": "failures" }
+      ]
+    },
+    {
+      "title": "Abort Rate (sliding window)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0, "max": 1,
+          "thresholds": { "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 0.05 },
+            { "color": "red", "value": 0.1 }
+          ]}
+        }
+      },
+      "targets": [
+        { "expr": "saga_abort_rate", "legendFormat": "abort rate" }
+      ]
+    },
+    {
+      "title": "Active Protocol",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "mappings": [{ "type": "value", "options": { "1": { "text": "ACTIVE" } } }] } },
+      "targets": [
+        { "expr": "saga_current_protocol", "legendFormat": "{{protocol}}" }
+      ]
+    },
+    {
+      "title": "Checkout Latency (p50 / p95 / p99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(checkout_duration_seconds_bucket[5m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(checkout_duration_seconds_bucket[5m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(checkout_duration_seconds_bucket[5m]))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "title": "Leader Status",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "mappings": [
+        { "type": "value", "options": { "0": { "text": "FOLLOWER", "color": "blue" }, "1": { "text": "LEADER", "color": "green" } } }
+      ]}},
+      "targets": [
+        { "expr": "leader_status", "legendFormat": "{{instance}}" }
+      ]
+    },
+    {
+      "title": "DLQ Length",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 8 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null },
+        { "color": "yellow", "value": 1 },
+        { "color": "red", "value": 10 }
+      ]}}},
+      "targets": [
+        { "expr": "dlq_length", "legendFormat": "dead letters" }
+      ]
+    },
+    {
+      "title": "Stock Service — Request Rate by Action",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        { "expr": "rate(stock_requests_total{result=\"success\"}[1m])", "legendFormat": "{{action}} ok" },
+        { "expr": "rate(stock_requests_total{result=\"failed\"}[1m])", "legendFormat": "{{action}} fail" }
+      ]
+    },
+    {
+      "title": "Payment Service — Request Rate by Action",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        { "expr": "rate(payment_requests_total{result=\"success\"}[1m])", "legendFormat": "{{action}} ok" },
+        { "expr": "rate(payment_requests_total{result=\"failed\"}[1m])", "legendFormat": "{{action}} fail" }
+      ]
+    },
+    {
+      "title": "Stock Latency by Action (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(stock_request_duration_seconds_bucket[5m]))", "legendFormat": "{{action}} p95" }
+      ]
+    },
+    {
+      "title": "Payment Latency by Action (p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "datasource": "Prometheus",
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(payment_request_duration_seconds_bucket[5m]))", "legendFormat": "{{action}} p95" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["distributed-systems", "checkout"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Distributed Checkout System",
+  "uid": "checkout-system",
+  "version": 1
+}

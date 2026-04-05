@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: "order"
+    static_configs:
+      - targets: ["order-service-1:5000", "order-service-2:5000"]
+    metrics_path: /metrics
+
+  - job_name: "stock"
+    static_configs:
+      - targets: ["stock-service-1:5000", "stock-service-2:5000"]
+    metrics_path: /metrics
+
+  - job_name: "payment"
+    static_configs:
+      - targets: ["payment-service-1:5000", "payment-service-2:5000"]
+    metrics_path: /metrics

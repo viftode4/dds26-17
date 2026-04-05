@@ -5,6 +5,8 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import msgpack
+
 import redis.asyncio as aioredis
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
@@ -17,6 +19,7 @@ from common.fault_injection import get_injector
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
 from common.tracing import setup_tracing, shutdown_tracing, extract_trace_context, get_tracer
+from orchestrator.metrics import LatencyHistogram
 from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 
@@ -29,6 +32,10 @@ db_read: aioredis.Redis | None = None
 _nats_transport: NatsTransport | None = None
 _scripts: dict[str, str] = {}
 
+# Per-action Prometheus metrics
+_action_counts: dict[str, dict[str, int]] = {}
+_action_latency: dict[str, LatencyHistogram] = {}
+
 
 @asynccontextmanager
 async def lifespan(app):
@@ -40,7 +47,7 @@ async def lifespan(app):
     await wait_for_redis(db, "payment-db")
 
     # Prewarm connection pool
-    await asyncio.gather(*[db.ping() for _ in range(8)])
+    await asyncio.gather(*[db.ping() for _ in range(64)])
 
     # Replica connection for read-only find endpoints
     db_read = create_replica_connection(prefix="", decode_responses=True)
@@ -82,8 +89,19 @@ async def lifespan(app):
     shutdown_tracing()
 
 
+def _record_metric(action: str, result: str, duration: float) -> None:
+    """Record per-action counter and latency."""
+    if action not in _action_counts:
+        _action_counts[action] = {"success": 0, "failed": 0}
+        _action_latency[action] = LatencyHistogram()
+    _action_counts[action][result] += 1
+    _action_latency[action].observe(duration)
+
+
 async def handle_command(fields: dict) -> str:
     """Dispatch a command to the appropriate Lua function."""
+    import time as _time
+    _cmd_start = _time.monotonic()
     injector = get_injector()
     action = fields.get("action", "")
     saga_id = fields.get("saga_id", "")
@@ -114,13 +132,15 @@ async def handle_command(fields: dict) -> str:
 
     await injector.maybe_inject(f"after_{action}", saga_id)
 
+    _record_metric(action, "success" if outcome not in ("failed",) else "failed",
+                   _time.monotonic() - _cmd_start)
     log.info("Command handled", action=action, saga_id=saga_id, result=outcome)
     return outcome
 
 
 async def handle_nats_message(msg):
     from opentelemetry.trace import SpanKind
-    fields = json.loads(msg.data.decode())
+    fields = msgpack.unpackb(msg.data, raw=False)
     ctx = extract_trace_context(fields)
     tracer = get_tracer("payment")
     action = fields.get("action", "unknown")
@@ -144,7 +164,7 @@ async def handle_nats_message(msg):
             log.error("NATS handler error", error=str(e), saga_id=saga_id)
             response = {"saga_id": saga_id, "event": "failed", "reason": str(e)}
             span.record_exception(e)
-        await msg.respond(json.dumps(response).encode())
+        await msg.respond(msgpack.packb(response, use_bin_type=True))
 
 
 async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -> int:
@@ -296,6 +316,24 @@ async def health(request: Request):
     return JSONResponse({"status": "healthy"})
 
 
+async def metrics(request: Request):
+    """Prometheus-compatible metrics for payment service."""
+    from starlette.responses import Response
+    lines = [
+        "# HELP payment_requests_total Total payment service requests by action and result",
+        "# TYPE payment_requests_total counter",
+    ]
+    for action, counts in _action_counts.items():
+        for result, count in counts.items():
+            lines.append(f'payment_requests_total{{action="{action}",result="{result}"}} {count}')
+    lines.append("")
+    lines.append("# HELP payment_request_duration_seconds Payment service request latency")
+    lines.append("# TYPE payment_request_duration_seconds histogram")
+    for action, hist in _action_latency.items():
+        lines.extend(hist.prometheus_lines("payment_request_duration_seconds", f'action="{action}"'))
+    return Response("\n".join(lines) + "\n", status_code=200, media_type="text/plain")
+
+
 # ---------------------------------------------------------------------------
 # Fault injection control endpoints
 # ---------------------------------------------------------------------------
@@ -334,6 +372,7 @@ routes = [
     Route("/add_funds/{user_id}/{amount}", add_credit, methods=["POST"]),
     Route("/pay/{user_id}/{amount}", remove_credit, methods=["POST"]),
     Route("/health", health, methods=["GET"]),
+    Route("/metrics", metrics, methods=["GET"]),
     Route("/fault/set", set_fault, methods=["POST"]),
     Route("/fault/clear", clear_fault, methods=["POST"]),
     Route("/fault/rules", get_faults, methods=["GET"]),

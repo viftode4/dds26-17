@@ -114,20 +114,24 @@ class RecoveryWorker:
 
         while pending_steps and attempt < MAX_RECOVERY_RETRIES:
             attempt += 1
-            still_pending = []
-            for step in pending_steps:
+
+            async def _try_abort(step):
                 try:
                     payload = {"saga_id": saga_id, "action": "abort"}
                     if step.payload_builder:
                         payload.update(step.payload_builder(saga_id, "abort", data))
-                    result = await self.transport.send_and_wait(step.service, "abort", payload, STEP_TIMEOUT)
+                    return step, await self.transport.send_and_wait(step.service, "abort", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery abort error", service=step.service,
                                    saga_id=saga_id, error=str(e))
-                    still_pending.append(step)
-                    continue
+                    return step, e
 
-                if isinstance(result, dict) and result.get("event") == "aborted":
+            results = await asyncio.gather(*[_try_abort(s) for s in pending_steps])
+            still_pending = []
+            for step, result in results:
+                if isinstance(result, Exception):
+                    still_pending.append(step)
+                elif isinstance(result, dict) and result.get("event") == "aborted":
                     pass  # success
                 else:
                     still_pending.append(step)
@@ -169,20 +173,24 @@ class RecoveryWorker:
 
         while pending_steps and attempt < MAX_RECOVERY_RETRIES:
             attempt += 1
-            still_pending = []
-            for step in pending_steps:
+
+            async def _try_commit(step):
                 try:
                     payload = {"saga_id": saga_id, "action": "commit"}
                     if step.payload_builder:
                         payload.update(step.payload_builder(saga_id, "commit", data))
-                    result = await self.transport.send_and_wait(step.service, "commit", payload, STEP_TIMEOUT)
+                    return step, await self.transport.send_and_wait(step.service, "commit", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery commit error", service=step.service,
                                    saga_id=saga_id, error=str(e))
-                    still_pending.append(step)
-                    continue
+                    return step, e
 
-                if isinstance(result, dict) and result.get("event") == "committed":
+            results = await asyncio.gather(*[_try_commit(s) for s in pending_steps])
+            still_pending = []
+            for step, result in results:
+                if isinstance(result, Exception):
+                    still_pending.append(step)
+                elif isinstance(result, dict) and result.get("event") == "committed":
                     pass  # success
                 else:
                     still_pending.append(step)
