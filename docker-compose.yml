@@ -34,7 +34,6 @@ services:
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
     env_file:
       - env/order_redis.env
@@ -43,26 +42,16 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      order-db:
-        condition: service_started
-      order-db-replica:
-        condition: service_started
-      order-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
@@ -77,7 +66,6 @@ services:
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
     env_file:
       - env/order_redis.env
@@ -86,296 +74,22 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      order-db:
-        condition: service_started
-      order-db-replica:
-        condition: service_started
-      order-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
         limits:
           cpus: "3.0"
           memory: 512M
-
-  # ---- Redis Masters ----
-  order-db:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --masterauth redis
-        --maxmemory 400mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 8192
-    deploy:
-      resources:
-        limits:
-          cpus: "5.0"
-          memory: 512M
-
-  stock-db:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --masterauth redis
-        --maxmemory 350mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 8192
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
-    deploy:
-      resources:
-        limits:
-          cpus: "4.0"
-          memory: 512M
-
-  payment-db:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --masterauth redis
-        --maxmemory 350mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 8192
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
-    deploy:
-      resources:
-        limits:
-          cpus: "4.0"
-          memory: 512M
-
-  # ---- Redis Replicas ----
-  order-db-replica:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
-        --masterauth redis
-    depends_on:
-      order-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  order-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
-        --masterauth redis
-    depends_on:
-      order-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  stock-db-replica:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof stock-db 6379
-        --masterauth redis
-    depends_on:
-      stock-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  stock-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof stock-db 6379
-        --masterauth redis
-    depends_on:
-      stock-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  payment-db-replica:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof payment-db 6379
-        --masterauth redis
-    depends_on:
-      payment-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  payment-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
-    command: >
-      redis-server
-        --requirepass redis
-        --maxmemory 200mb
-        --replicaof payment-db 6379
-        --masterauth redis
-    depends_on:
-      payment-db:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 256M
-
-  # ---- NATS ----
-  nats:
-    image: nats:2.11-alpine
-    deploy:
-      resources:
-        limits:
-          cpus: "0.45"
-          memory: 64M
-
-  # ---- Sentinel Nodes ----
-  # Entrypoint resolves hostnames to IPs at startup so Sentinel
-  # tracks masters by IP — failover works even when master DNS disappears.
-  sentinel-1:
-    image: valkey/valkey:8.1-bookworm
-    command: sh /etc/redis/sentinel-entrypoint.sh
-    volumes:
-      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
-    depends_on:
-      order-db:
-        condition: service_started
-      order-db-replica:
-        condition: service_started
-      order-db-replica-2:
-        condition: service_started
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 64M
-
-  sentinel-2:
-    image: valkey/valkey:8.1-bookworm
-    command: sh /etc/redis/sentinel-entrypoint.sh
-    volumes:
-      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
-    depends_on:
-      order-db:
-        condition: service_started
-      order-db-replica:
-        condition: service_started
-      order-db-replica-2:
-        condition: service_started
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 64M
-
-  sentinel-3:
-    image: valkey/valkey:8.1-bookworm
-    command: sh /etc/redis/sentinel-entrypoint.sh
-    volumes:
-      - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
-    depends_on:
-      order-db:
-        condition: service_started
-      order-db-replica:
-        condition: service_started
-      order-db-replica-2:
-        condition: service_started
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 64M
 
   stock-service:
     build: ./stock
@@ -384,7 +98,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     env_file:
       - env/stock_redis.env
     volumes:
@@ -392,26 +105,16 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
@@ -425,7 +128,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     env_file:
       - env/stock_redis.env
     volumes:
@@ -433,26 +135,16 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      stock-db:
-        condition: service_started
-      stock-db-replica:
-        condition: service_started
-      stock-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
@@ -467,7 +159,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     env_file:
       - env/payment_redis.env
     volumes:
@@ -475,26 +166,16 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
@@ -508,7 +189,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
     env_file:
       - env/payment_redis.env
     volumes:
@@ -516,29 +196,451 @@ services:
       - ./orchestrator:/app/orchestrator:ro
       - ./lua:/app/lua:ro
     depends_on:
-      payment-db:
-        condition: service_started
-      payment-db-replica:
-        condition: service_started
-      payment-db-replica-2:
-        condition: service_started
+      cluster-init:
+        condition: service_completed_successfully
       nats:
-        condition: service_started
-      sentinel-1:
-        condition: service_started
-      sentinel-2:
-        condition: service_started
-      sentinel-3:
         condition: service_started
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
       timeout: 3s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 384M
+
+  # ---- Order Cluster (3 masters + 3 replicas) ----
+
+  order-cluster-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=135mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 200M
+
+  order-cluster-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=135mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 200M
+
+  order-cluster-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=135mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 200M
+
+  order-cluster-replica-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  order-cluster-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  order-cluster-replica-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  # ---- Stock Cluster (3 masters + 3 replicas) ----
+
+  stock-cluster-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  stock-cluster-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  stock-cluster-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  stock-cluster-replica-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  stock-cluster-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  stock-cluster-replica-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  # ---- Payment Cluster (3 masters + 3 replicas) ----
+
+  payment-cluster-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  payment-cluster-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  payment-cluster-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=115mb
+      - MAXCLIENTS=4096
+      - IO_THREADS=4
+      - MIN_REPLICAS_TO_WRITE=1
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 200M
+
+  payment-cluster-replica-1:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  payment-cluster-replica-2:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  payment-cluster-replica-3:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-node-entrypoint.sh
+    environment:
+      - MAXMEMORY=65mb
+      - MAXCLIENTS=2048
+      - IO_THREADS=2
+    volumes:
+      - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.35"
+          memory: 128M
+
+  # ---- NATS ----
+  nats:
+    image: nats:2.11-alpine
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: 64M
+
+  # ---- Cluster Init (one-shot) ----
+
+  cluster-init:
+    image: valkey/valkey:8.1-bookworm
+    command: sh /etc/redis/cluster-init.sh
+    volumes:
+      - ./cluster-init.sh:/etc/redis/cluster-init.sh:ro
+    depends_on:
+      order-cluster-1:
+        condition: service_healthy
+      order-cluster-2:
+        condition: service_healthy
+      order-cluster-3:
+        condition: service_healthy
+      order-cluster-replica-1:
+        condition: service_healthy
+      order-cluster-replica-2:
+        condition: service_healthy
+      order-cluster-replica-3:
+        condition: service_healthy
+      stock-cluster-1:
+        condition: service_healthy
+      stock-cluster-2:
+        condition: service_healthy
+      stock-cluster-3:
+        condition: service_healthy
+      stock-cluster-replica-1:
+        condition: service_healthy
+      stock-cluster-replica-2:
+        condition: service_healthy
+      stock-cluster-replica-3:
+        condition: service_healthy
+      payment-cluster-1:
+        condition: service_healthy
+      payment-cluster-2:
+        condition: service_healthy
+      payment-cluster-3:
+        condition: service_healthy
+      payment-cluster-replica-1:
+        condition: service_healthy
+      payment-cluster-replica-2:
+        condition: service_healthy
+      payment-cluster-replica-3:
+        condition: service_healthy
+    restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 64M

@@ -158,46 +158,33 @@ def docker_compose(*args, check=False):
 
 
 # ---------------------------------------------------------------------------
-# Integration test isolation (task 0.4)
+# Integration test isolation
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def _ensure_clean_topology(request):
-    """Restore Sentinel topology before each slow/chaos test.
+    """Ensure all cluster containers are running before each integration test.
 
-    After tests that kill Redis masters (triggering Sentinel failover), the
-    topology is inverted: replicas become masters and vice versa.  This fixture
-    detects the drift and restores the original roles so each test starts clean.
+    After chaos tests that kill cluster nodes, this fixture restarts any
+    stopped containers and waits for the cluster to reach a stable state.
     """
     if "integration" not in request.keywords:
         yield
         return
 
-    from topology import (
-        ensure_containers_running,
-        is_topology_drifted,
-        restore_topology,
-        restart_app_services,
-        wait_stack_healthy,
-    )
+    from topology import ensure_containers_running, wait_cluster_stable
 
     ensure_containers_running()
-
-    drifted = is_topology_drifted()
-    if any(drifted.values()):
-        print(f"\n[topology] Drift detected: {drifted}, restoring...")
-        restore_topology()
-        restart_app_services()
-        wait_stack_healthy(timeout=120)
+    wait_cluster_stable(timeout=30)
     yield
 
 
 @pytest.fixture(autouse=True)
 def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
-    """Flush all Redis databases before each integration test.
+    """Flush all Redis cluster shards before each integration test.
 
     Only runs when the test is marked with @pytest.mark.integration.
-    Uses `docker compose exec` to issue FLUSHALL on each service DB.
+    Issues FLUSHALL on each cluster master (replicates automatically to replicas).
     Set SKIP_DB_FLUSH=1 to disable (e.g. when running against a remote stack).
     """
     import os
@@ -208,22 +195,17 @@ def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
         yield
         return
 
-    # Flush both master and replica containers for each DB.
-    # After a Sentinel failover, the replica becomes the new master, so we
-    # must flush it too. Flushing a still-replica fails with READONLY (silently
-    # ignored via check=False), which is harmless.
+    # Flush each master shard — FLUSHALL in cluster mode flushes the local
+    # node's slots and is replicated to its replica automatically.
     db_containers = [
-        ("order-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("order-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("stock-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("stock-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("payment-db",        "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("payment-db-replica","redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        "order-cluster-1", "order-cluster-2", "order-cluster-3",
+        "stock-cluster-1", "stock-cluster-2", "stock-cluster-3",
+        "payment-cluster-1", "payment-cluster-2", "payment-cluster-3",
     ]
-    for container, *cmd in db_containers:
+    for container in db_containers:
         subprocess.run(
-            ["docker", "compose", "exec", "-T", container, *cmd],
+            ["docker", "compose", "exec", "-T", container,
+             "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"],
             capture_output=True, text=True, timeout=15, check=False,
         )
     yield
-

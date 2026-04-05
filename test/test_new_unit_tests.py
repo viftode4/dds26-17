@@ -410,7 +410,7 @@ async def test_wal_get_incomplete_with_high_volume():
     db.sscan = AsyncMock(return_value=(0, saga_ids))
 
     async def _hgetall(key):
-        saga_id = key.replace("saga_state:", "")
+        saga_id = key.replace("{order-wal}:state:", "")
         return {
             "saga_id": saga_id,
             "step": "PREPARING",

@@ -1,8 +1,8 @@
-"""Sentinel topology detection and restoration for test isolation.
+"""Cluster topology health checking and container restart for test isolation.
 
-After chaos tests kill Redis masters, Sentinel promotes replicas. This leaves
-the topology inverted for subsequent tests. These utilities detect drift and
-restore the original master/replica roles so each test starts with a clean stack.
+After chaos tests kill cluster master nodes, the cluster auto-promotes replicas.
+These utilities ensure all containers are running and the cluster has stabilized
+before subsequent tests start.
 """
 from __future__ import annotations
 
@@ -10,26 +10,20 @@ import subprocess
 import time
 
 
-# Expected topology: service_name -> (master_container, replica_container)
-MASTER_MAP = {
-    "stock-master": ("stock-db", "stock-db-replica"),
-    "order-master": ("order-db", "order-db-replica"),
-    "payment-master": ("payment-db", "payment-db-replica"),
-}
+CLUSTER_CONTAINERS = [
+    "order-cluster-1", "order-cluster-2", "order-cluster-3",
+    "order-cluster-replica-1", "order-cluster-replica-2", "order-cluster-replica-3",
+    "stock-cluster-1", "stock-cluster-2", "stock-cluster-3",
+    "stock-cluster-replica-1", "stock-cluster-replica-2", "stock-cluster-replica-3",
+    "payment-cluster-1", "payment-cluster-2", "payment-cluster-3",
+    "payment-cluster-replica-1", "payment-cluster-replica-2", "payment-cluster-replica-3",
+]
 
 ALL_APP_SERVICES = [
-    "stock-service", "stock-service-2",
-    "payment-service", "payment-service-2",
     "order-service-1", "order-service-2",
+    "stock-service-1", "stock-service-2",
+    "payment-service-1", "payment-service-2",
 ]
-
-DB_CONTAINERS = [
-    "stock-db", "stock-db-replica",
-    "order-db", "order-db-replica",
-    "payment-db", "payment-db-replica",
-]
-
-SENTINEL_CONTAINERS = ["sentinel-1", "sentinel-2", "sentinel-3"]
 
 
 def _docker_compose(*args: str, timeout: int = 60) -> subprocess.CompletedProcess:
@@ -59,99 +53,39 @@ def get_container_ip(container: str) -> str | None:
     return ip if ip else None
 
 
-def get_sentinel_master_ip(service_name: str) -> str | None:
-    """Ask sentinel-1 for the current master IP of a monitored service."""
-    result = _redis_cli("sentinel-1", "SENTINEL", "get-master-addr-by-name", service_name, port=26379)
-    # Response is two lines: IP then port
-    lines = result.splitlines()
-    return lines[0] if lines else None
-
-
-def is_topology_drifted() -> dict[str, bool]:
-    """Check whether Sentinel's view of each master matches the expected container.
-
-    Returns a dict like {"stock-master": True, "order-master": False, ...}
-    where True means the topology is drifted (needs restoration).
-    """
-    drifted = {}
-    for service_name, (master_container, _replica) in MASTER_MAP.items():
-        sentinel_ip = get_sentinel_master_ip(service_name)
-        expected_ip = get_container_ip(master_container)
-        if sentinel_ip is None or expected_ip is None:
-            # Can't determine — assume drifted to be safe
-            drifted[service_name] = True
-        else:
-            drifted[service_name] = sentinel_ip != expected_ip
-    return drifted
-
-
 def ensure_containers_running():
-    """Start all DB, sentinel, and NATS containers in case a prior test left one dead."""
-    containers = DB_CONTAINERS + SENTINEL_CONTAINERS + ["nats"]
+    """Start all cluster nodes and NATS in case a prior test left one dead."""
+    containers = CLUSTER_CONTAINERS + ["nats"]
     _docker_compose("start", *containers)
-    # Brief pause for containers to initialize
-    time.sleep(3)
+    # Brief pause for containers to initialize and cluster to stabilize
+    time.sleep(5)
 
 
-def restore_topology():
-    """Restore the original master/replica roles for all drifted services.
+def wait_cluster_stable(timeout: float = 60):
+    """Poll CLUSTER INFO until all three clusters report cluster_state:ok.
 
-    For each drifted service:
-    1. REPLICAOF NO ONE on the original master (promote it back)
-    2. REPLICAOF <master> 6379 on the replica (demote it back)
-    3. SENTINEL REMOVE + SENTINEL MONITOR to give sentinels the correct master
-       IP directly — avoids the multi-second failover cycle that SENTINEL RESET
-       triggers when the current monitored IP has become a replica.
-    4. Poll until Sentinel reports the correct master
+    After killing a cluster master, the cluster elects a new master in
+    ~5-10s (cluster-node-timeout=5000ms + election overhead). Polls until
+    all three clusters (order, stock, payment) confirm a healthy state.
     """
-    drifted = is_topology_drifted()
+    # Use the -2 nodes as check targets — they are never the killed masters
+    # in failover tests (tests always kill -1).
+    check_nodes = ["order-cluster-2", "stock-cluster-2", "payment-cluster-2"]
+    deadline = time.monotonic() + timeout
 
-    for service_name, is_drifted in drifted.items():
-        if not is_drifted:
-            continue
+    while time.monotonic() < deadline:
+        all_ok = True
+        for node in check_nodes:
+            info = _redis_cli(node, "CLUSTER", "INFO")
+            if "cluster_state:ok" not in info:
+                all_ok = False
+                break
+        if all_ok:
+            print("[topology] All clusters stable (cluster_state:ok)")
+            return
+        time.sleep(2)
 
-        master_container, replica_container = MASTER_MAP[service_name]
-        print(f"[topology] Restoring {service_name}: "
-              f"{master_container}=master, {replica_container}=replica")
-
-        # Ensure the original master is running and reachable
-        _docker_compose("start", master_container)
-        _wait_redis_ready(master_container, timeout=15)
-
-        # Promote original master back
-        _redis_cli(master_container, "REPLICAOF", "NO", "ONE")
-
-        # Demote the replica back (use container hostname for Docker DNS resolution)
-        _redis_cli(replica_container, "REPLICAOF", master_container, "6379")
-
-        # Explicitly re-register the master with each sentinel.
-        # SENTINEL RESET keeps the old (drifted) master IP and waits for
-        # auto-discovery which can take >60s when failover-timeout doubles
-        # after repeated failovers. SENTINEL REMOVE + MONITOR gives the
-        # correct IP immediately.
-        master_ip = get_container_ip(master_container)
-        if master_ip:
-            for sentinel in SENTINEL_CONTAINERS:
-                _redis_cli(sentinel, "SENTINEL", "REMOVE", service_name, port=26379)
-                _redis_cli(sentinel, "SENTINEL", "MONITOR", service_name,
-                           master_ip, "6379", "2", port=26379)
-                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
-                           "auth-pass", "redis", port=26379)
-                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
-                           "down-after-milliseconds", "5000", port=26379)
-                _redis_cli(sentinel, "SENTINEL", "SET", service_name,
-                           "failover-timeout", "10000", port=26379)
-        else:
-            print(f"[topology] WARNING: Cannot resolve IP for {master_container}, "
-                  f"falling back to SENTINEL RESET")
-            for sentinel in SENTINEL_CONTAINERS:
-                _redis_cli(sentinel, "SENTINEL", "RESET", "*", port=26379)
-
-    # Brief settle for sentinel state propagation
-    time.sleep(3)
-
-    # Wait for sentinels to converge on the correct masters
-    _wait_sentinel_converged(timeout=60)
+    print(f"[topology] WARNING: Cluster did not stabilize within {timeout}s")
 
 
 def _wait_redis_ready(container: str, timeout: float = 15):
@@ -163,20 +97,6 @@ def _wait_redis_ready(container: str, timeout: float = 15):
             return
         time.sleep(1)
     print(f"[topology] WARNING: {container} did not respond to PING within {timeout}s")
-
-
-def _wait_sentinel_converged(timeout: float = 60):
-    """Poll sentinel until all services report the expected master IP."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        drifted = is_topology_drifted()
-        if not any(drifted.values()):
-            print("[topology] Sentinel topology restored successfully")
-            return
-        time.sleep(2)
-    still_drifted = {k: v for k, v in is_topology_drifted().items() if v}
-    print(f"[topology] WARNING: Sentinel did not converge within {timeout}s. "
-          f"Still drifted: {still_drifted}")
 
 
 def restart_app_services():

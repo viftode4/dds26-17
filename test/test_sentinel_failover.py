@@ -1,4 +1,4 @@
-"""Integration tests for Sentinel failover and HAProxy failover.
+"""Integration tests for Redis Cluster failover and HAProxy failover.
 
 These tests require a running Docker Compose stack and kill/restart containers.
 
@@ -39,7 +39,6 @@ def _docker_compose(*args: str, check: bool = False) -> subprocess.CompletedProc
 async def _setup_item_and_user(client: httpx.AsyncClient,
                                 stock: int = 100, credit: int = 100000):
     """Create a test item and user, returning (item_id, user_id). Retries on 503."""
-    # Retry loop for transient 503s after container restarts
     for attempt in range(5):
         r = await client.post(f"{GATEWAY}/stock/item/create/10")
         if r.status_code == 200:
@@ -66,15 +65,13 @@ async def _setup_item_and_user(client: httpx.AsyncClient,
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_sentinel_failover_stock_master():
-    """Kill stock-db master, wait for Sentinel failover, verify checkouts still work.
+async def test_cluster_failover_stock_master():
+    """Kill stock-cluster-1 master, wait for cluster failover, verify checkouts still work.
 
-    Fixes (task 5.1 + task 1.6):
-    - Use WAIT-based replication confirmation via a setup delay + health check
-      (direct WAIT command would require raw Redis access from test; instead we
-       sleep slightly longer and verify item is readable on replica before killing)
-    - Add r.status_code == 200 guard before accessing stock_data["stock"]
-    - Use OutcomeTracker to capture all request outcomes for diagnostics
+    Redis Cluster automatically promotes the replica for the affected shard
+    once cluster-node-timeout (5s) + election time (~5s) elapses. The
+    RedisCluster client discovers the new topology via MOVED/ASK responses
+    without requiring service restarts.
     """
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         await wait_gateway_healthy(client)
@@ -85,37 +82,20 @@ async def test_sentinel_failover_stock_master():
         item_id, user_id = await _setup_item_and_user(client, stock=100, credit=100000)
         initial_credit = 100000
 
-        # Confirm replication to the replica using Redis WAIT before killing the master.
-        # WAIT 1 5000 blocks until at least 1 replica acknowledges the latest write,
-        # or 5000ms elapse. This eliminates the replication race where the replica
-        # becomes the new master without having received the item data.
-        result = subprocess.run(
-            ["docker", "compose", "exec", "-T", "stock-db",
-             "redis-cli", "-a", "redis", "--no-auth-warning", "WAIT", "1", "5000"],
-            capture_output=True, text=True, timeout=10,
-        )
-        replicas_confirmed = result.stdout.strip()
-        if not replicas_confirmed.isdigit() or int(replicas_confirmed) < 1:
-            pytest.skip(
-                f"Replication not confirmed before kill (WAIT returned {replicas_confirmed!r}). "
-                "Sentinel failover test requires at least 1 replica in sync."
-            )
+        # Brief pause to allow replication to the replica before killing the master.
+        await asyncio.sleep(2.0)
 
-        # Kill the stock master
-        _docker_compose("kill", "stock-db")
+        # Kill one stock cluster master
+        _docker_compose("kill", "stock-cluster-1")
 
-        # Wait for Sentinel failover (down-after=5s + failover-timeout=10s)
-        await asyncio.sleep(20)
+        # Wait for cluster election (cluster-node-timeout=5s + election overhead)
+        await asyncio.sleep(15)
 
-        # Restart stock-db so the promoted master gets a replica.
-        # With min-replicas-to-write=1, the promoted master rejects writes
-        # until it has at least one connected replica.
-        _docker_compose("start", "stock-db")
-        await asyncio.sleep(10)
-
-        # Restart stock services + gateway to force connection pool refresh.
-        _docker_compose("restart", "stock-service", "stock-service-2", "gateway")
-        await asyncio.sleep(10)
+        # Restart stock-cluster-1 so the promoted master gets a replica.
+        # With min-replicas-to-write=1 configured on original masters, the
+        # promoted replica (started without that setting) accepts writes immediately.
+        _docker_compose("start", "stock-cluster-1")
+        await asyncio.sleep(5)
 
         # Wait for stock service to be reachable through HAProxy after failover.
         async def _stock_healthy():
@@ -138,25 +118,15 @@ async def test_sentinel_failover_stock_master():
             except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError) as e:
                 tracker.record_exception(e)
 
-        # Restart killed containers and wait for full recovery
-        _docker_compose("start", "stock-db")
-        await asyncio.sleep(10)
-
-        # Restart app services to force connection pool refresh after topology change
-        _docker_compose("restart", "stock-service", "stock-service-2",
-                        "order-service-1", "order-service-2")
-        await asyncio.sleep(15)
-
         await wait_gateway_healthy(client)
 
         # At least one checkout should have succeeded or failed gracefully (not all 5xx)
         assert tracker.successes + tracker.client_errors > 0, (
-            f"All requests were server/connection errors — Sentinel failover did not recover.\n"
+            f"All requests were server/connection errors — cluster failover did not recover.\n"
             f"Outcomes: {tracker.summary()}\n"
             f"Details: {tracker.outcomes}"
         )
 
-        # Task 1.6: guard stock access with status check
         r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
         assert r.status_code == 200, (
             f"stock/find returned {r.status_code} after failover: {r.text}"
@@ -182,14 +152,8 @@ async def test_sentinel_failover_stock_master():
 async def test_haproxy_failover_order_service():
     """Kill order-service-1, verify order-service-2 takes over via HAProxy.
 
-    Renamed from test_leader_election_takeover — checkouts don't depend on
-    leader election (active-active architecture). This tests HAProxy failover.
-
-    Fixes (task 5.2 + task 1.7):
-    - Use OutcomeTracker instead of silent pass/continue (3 silent paths fixed)
-    - Wait for HAProxy to detect the dead backend before issuing checkouts
-    - Retry-with-backoff logic for the transition window
-    - Meaningful diagnostic output on failure
+    Tests HAProxy leastconn failover — checkouts don't depend on leader
+    election (active-active architecture).
     """
     initial_stock = 100
     initial_credit = 100000
@@ -221,8 +185,6 @@ async def test_haproxy_failover_order_service():
                          msg="order-service-2 not healthy after 30s")
 
         # Issue 10 checkouts using OutcomeTracker — no silent swallowing.
-        # Retry orders/create up to 3 times with 1s backoff to handle any
-        # residual HAProxy flapping after the transition window.
         tracker = OutcomeTracker()
         for _ in range(10):
             order_id = None
@@ -233,7 +195,7 @@ async def test_haproxy_failover_order_service():
                         order_id = r.json()["order_id"]
                         break
                     tracker.record_response(r)
-                    break  # Non-200 but not a connection error — don't retry
+                    break
                 except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
                     await asyncio.sleep(1.0)
 
@@ -260,7 +222,6 @@ async def test_haproxy_failover_order_service():
 
         # With one order instance alive and HAProxy fully failed over, all
         # checkouts should succeed or fail with clean business-logic errors.
-        # Allow at most 1 transient server error for the HAProxy transition window.
         assert tracker.server_errors <= 1, (
             f"Got {tracker.server_errors} server errors after HAProxy failover.\n"
             f"Summary: {tracker.summary()}\n"

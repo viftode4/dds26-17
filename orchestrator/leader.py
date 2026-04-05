@@ -37,7 +37,7 @@ class LeaderElection:
     Checkout processing runs on ALL instances directly.
     """
 
-    LOCK_KEY = "orchestrator:leader"
+    LOCK_KEY = "{order-wal}:leader"
     LOCK_TTL = 5  # seconds
     HEARTBEAT_INTERVAL = 2  # seconds (must be < LOCK_TTL)
 

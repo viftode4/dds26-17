@@ -1,8 +1,19 @@
 #!lua name=payment_lib
 
 -- ============================================================================
--- Payment Service Lua Function Library
+-- Payment Service Lua Function Library (Redis Cluster edition)
 -- ============================================================================
+-- Key naming uses {user_{user_id}} hash tag so that all keys for the same user
+-- land on the same cluster shard. Since payment always deals with a single user
+-- per saga, all three keys per call share the same tag — no cross-slot issues.
+--
+-- Key layout per user:
+--   {user_{id}}:data              — user HASH (available_credit, held_credit)
+--   {user_{id}}:lock:{saga}       — 2PC lock STRING (amount, short TTL)
+--   {user_{id}}:2pc-status:{saga} — 2PC status HASH (status, amount)
+--   {user_{id}}:saga-status:{saga}— saga status STRING (executed / compensated)
+--   {user_{id}}:amounts:{saga}    — saga amounts HASH (user_id -> amount, for compensate)
+--
 -- 2PC operations: payment_2pc_prepare, payment_2pc_commit, payment_2pc_abort
 -- Saga operations: payment_saga_execute, payment_saga_compensate
 -- Direct API operations: payment_subtract_direct, payment_add_direct
@@ -10,9 +21,9 @@
 
 -- 2PC Prepare: Validate + deduct credit atomically
 --
--- KEYS[1] = user:{user_id}
--- KEYS[2] = lock:2pc:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[1] = {user_{user_id}}:data
+-- KEYS[2] = {user_{user_id}}:lock:{saga_id}
+-- KEYS[3] = {user_{user_id}}:2pc-status:{saga_id}
 -- ARGV: amount, saga_id, user_id, lock_ttl
 local function payment_2pc_prepare(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -44,12 +55,12 @@ end
 
 -- 2PC Commit: Finalize (deduction already happened in prepare)
 --
--- KEYS[1] = user:{user_id}
--- KEYS[2] = lock:2pc:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[1] = {user_{user_id}}:data
+-- KEYS[2] = {user_{user_id}}:lock:{saga_id}
+-- KEYS[3] = {user_{user_id}}:2pc-status:{saga_id}
 -- ARGV: saga_id, amount, user_id
 --   amount/user_id are used to re-apply the deduction if prepare
---   data was lost during a Redis Sentinel failover.
+--   data was lost during a Redis master failover.
 local function payment_2pc_commit(KEYS, ARGV)
     local saga_id = ARGV[1]
 
@@ -57,8 +68,8 @@ local function payment_2pc_commit(KEYS, ARGV)
     local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'committed' then return 1 end
 
-    -- Safety: if prepare data was lost (Redis Sentinel failover during 2PC),
-    -- re-apply the credit deduction.  In 2PC the commit decision is irrevocable.
+    -- Safety: if prepare data was lost during a Redis master failover,
+    -- re-apply the credit deduction. In 2PC the commit decision is irrevocable.
     if status ~= 'prepared' then
         local amount = tonumber(ARGV[2])
         if amount and amount > 0 then
@@ -75,11 +86,11 @@ local function payment_2pc_commit(KEYS, ARGV)
     return 1
 end
 
--- 2PC Abort: Restore credit from lock key (undo prepare deduction)
+-- 2PC Abort: Restore credit from status hash (undo prepare deduction)
 --
--- KEYS[1] = user:{user_id}
--- KEYS[2] = lock:2pc:{saga_id}:{user_id}
--- KEYS[3] = saga:{saga_id}:payment:status
+-- KEYS[1] = {user_{user_id}}:data
+-- KEYS[2] = {user_{user_id}}:lock:{saga_id}
+-- KEYS[3] = {user_{user_id}}:2pc-status:{saga_id}
 -- ARGV: saga_id
 local function payment_2pc_abort(KEYS, ARGV)
     local saga_id = ARGV[1]
@@ -102,9 +113,9 @@ end
 
 -- Saga Execute: Direct deduction (no locks, no held_credit)
 --
--- KEYS[1] = user:{user_id}
--- KEYS[2] = saga:{saga_id}:payment:status
--- KEYS[3] = saga:{saga_id}:payment:amounts
+-- KEYS[1] = {user_{user_id}}:data
+-- KEYS[2] = {user_{user_id}}:saga-status:{saga_id}
+-- KEYS[3] = {user_{user_id}}:amounts:{saga_id}
 -- ARGV: amount, saga_id, user_id
 local function payment_saga_execute(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -132,9 +143,9 @@ end
 
 -- Saga Compensate: Restore credit from stored amounts
 --
--- KEYS[1] = user:{user_id}
--- KEYS[2] = saga:{saga_id}:payment:status
--- KEYS[3] = saga:{saga_id}:payment:amounts
+-- KEYS[1] = {user_{user_id}}:data
+-- KEYS[2] = {user_{user_id}}:saga-status:{saga_id}
+-- KEYS[3] = {user_{user_id}}:amounts:{saga_id}
 -- ARGV: saga_id
 local function payment_saga_compensate(KEYS, ARGV)
     local saga_id = ARGV[1]
@@ -158,7 +169,7 @@ local function payment_saga_compensate(KEYS, ARGV)
 end
 
 -- Atomic check-and-decrement for /pay API endpoint
--- KEYS[1] = user:{user_id}
+-- KEYS[1] = {user_{user_id}}:data
 -- ARGV[1] = amount to subtract
 local function subtract_direct(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -174,7 +185,7 @@ local function subtract_direct(KEYS, ARGV)
 end
 
 -- Atomic increment for /add_funds API endpoint
--- KEYS[1] = user:{user_id}
+-- KEYS[1] = {user_{user_id}}:data
 -- ARGV[1] = amount to add
 local function add_direct(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -185,10 +196,10 @@ local function add_direct(KEYS, ARGV)
     return redis.call('HINCRBY', KEYS[1], 'available_credit', amount)
 end
 
-redis.register_function('payment_2pc_prepare', payment_2pc_prepare)
-redis.register_function('payment_2pc_commit', payment_2pc_commit)
-redis.register_function('payment_2pc_abort', payment_2pc_abort)
-redis.register_function('payment_saga_execute', payment_saga_execute)
+redis.register_function('payment_2pc_prepare',    payment_2pc_prepare)
+redis.register_function('payment_2pc_commit',     payment_2pc_commit)
+redis.register_function('payment_2pc_abort',      payment_2pc_abort)
+redis.register_function('payment_saga_execute',   payment_saga_execute)
 redis.register_function('payment_saga_compensate', payment_saga_compensate)
 redis.register_function('payment_subtract_direct', subtract_direct)
-redis.register_function('payment_add_direct', add_direct)
+redis.register_function('payment_add_direct',     add_direct)

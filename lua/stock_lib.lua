@@ -1,203 +1,171 @@
 #!lua name=stock_lib
 
 -- ============================================================================
--- Stock Service Lua Function Library
+-- Stock Service Lua Function Library (Redis Cluster edition)
 -- ============================================================================
--- 2PC operations: stock_2pc_prepare, stock_2pc_commit, stock_2pc_abort
--- Saga operations: stock_saga_execute, stock_saga_compensate
--- Direct API operations: stock_subtract_direct, stock_add_direct
--- ============================================================================
-
--- 2PC Prepare: Validate + deduct stock atomically
+-- All operations are single-item. Key naming uses {item_{item_id}} hash tag so
+-- that data, lock, and status keys for the same item land on the same shard.
 --
--- KEYS layout (for N items):
---   KEYS[1..N]       = item:{item_id} hashes
---   KEYS[N+1..2N]    = lock:2pc:{saga_id}:{item_id} keys (store amounts for abort)
---   KEYS[2N+1]       = saga:{saga_id}:stock:status
--- ARGV: saga_id, lock_ttl, (item_id, amount)...
-local function stock_2pc_prepare(KEYS, ARGV)
-    local saga_id = ARGV[1]
-    local lock_ttl = tonumber(ARGV[2])
-    local n_items = (#KEYS - 1) / 2
-    local status_key = KEYS[2 * n_items + 1]
+-- Key layout per item:
+--   {item_{id}}:data              — item HASH (available_stock, reserved_stock, price)
+--   {item_{id}}:lock:{saga}       — 2PC lock STRING (amount, short TTL)
+--   {item_{id}}:2pc-status:{saga} — 2PC status HASH (status, amount)
+--   {item_{id}}:saga-status:{saga}— saga status STRING (executed / compensated)
+--   {item_{id}}:amounts:{saga}    — saga amounts HASH (item_id -> amount, for compensate)
+--
+-- 2PC operations:   stock_2pc_prepare_one, stock_2pc_commit_one, stock_2pc_abort_one
+-- Saga operations:  stock_saga_execute_one, stock_saga_compensate_one
+-- Direct API ops:   stock_subtract_direct, stock_add_direct
+-- ============================================================================
 
-    -- Idempotency + poison pill: if abort already ran, refuse to prepare.
-    -- This prevents a late prepare (redis-py retry after Sentinel failover)
-    -- from deducting stock after the orchestrator already decided to abort.
-    local status = redis.call('HGET', status_key, 'status')
-    if status == 'prepared' then return 1 end
+-- 2PC Prepare (single item): Validate + deduct stock atomically
+--
+-- KEYS[1] = {item_{id}}:data
+-- KEYS[2] = {item_{id}}:lock:{saga_id}
+-- KEYS[3] = {item_{id}}:2pc-status:{saga_id}
+-- ARGV[1] = saga_id
+-- ARGV[2] = item_id
+-- ARGV[3] = amount
+-- ARGV[4] = lock_ttl
+-- Returns: 1=success, 0=insufficient/already aborted or committed
+local function stock_2pc_prepare_one(KEYS, ARGV)
+    local amount   = tonumber(ARGV[3])
+    local lock_ttl = tonumber(ARGV[4])
+
+    -- Idempotency + poison pill: refuse if already aborted or committed.
+    -- Prevents a late prepare (connection retry) from re-deducting after the
+    -- orchestrator already decided to abort.
+    local status = redis.call('HGET', KEYS[3], 'status')
+    if status == 'prepared'   then return 1 end
     if status == 'aborted' or status == 'committed' then return 0 end
 
-    -- Validate ALL items have sufficient available_stock
-    for i = 1, n_items do
-        local item_key = KEYS[i]
-        local amount = tonumber(ARGV[2 + i * 2])
-        local available = tonumber(redis.call('HGET', item_key, 'available_stock'))
-        if not available or available < amount then
-            return 0
-        end
+    -- Validate sufficient available_stock
+    local available = tonumber(redis.call('HGET', KEYS[1], 'available_stock'))
+    if not available or available < amount then
+        return 0
     end
 
-    -- Deduct stock and store amounts durably
-    for i = 1, n_items do
-        local item_key = KEYS[i]
-        local lock_key = KEYS[n_items + i]
-        local item_id = ARGV[1 + i * 2]
-        local amount = tonumber(ARGV[2 + i * 2])
-        redis.call('HINCRBY', item_key, 'available_stock', -amount)
-        -- Lock key guards against duplicate prepares (short TTL is fine)
-        redis.call('SETEX', lock_key, lock_ttl, tostring(amount))
-        -- Store amount in status hash (survives lock TTL expiry, 24h TTL)
-        redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
-    end
-
-    redis.call('HSET', status_key, 'status', 'prepared')
-    redis.call('EXPIRE', status_key, 86400)
+    -- Deduct and store amount durably in both lock key and status hash
+    redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
+    redis.call('SETEX', KEYS[2], lock_ttl, tostring(amount))
+    redis.call('HSET',  KEYS[3], 'amount', tostring(amount))
+    redis.call('HSET',  KEYS[3], 'status', 'prepared')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 
--- 2PC Commit: Finalize (deduction already happened in prepare)
+-- 2PC Commit (single item): Finalize — deduction already happened in prepare
 --
--- Same KEYS layout as prepare
--- ARGV: saga_id, n_items, (item_id, amount)...
---   item_id/amount pairs are used to re-apply the deduction if prepare
---   data was lost during a Redis Sentinel failover.
-local function stock_2pc_commit(KEYS, ARGV)
-    local saga_id = ARGV[1]
-    local n_items = tonumber(ARGV[2])
-    local status_key = KEYS[2 * n_items + 1]
+-- KEYS[1] = {item_{id}}:data
+-- KEYS[2] = {item_{id}}:lock:{saga_id}
+-- KEYS[3] = {item_{id}}:2pc-status:{saga_id}
+-- ARGV[1] = saga_id
+-- ARGV[2] = item_id
+-- ARGV[3] = amount  (re-apply if prepare data lost during failover)
+local function stock_2pc_commit_one(KEYS, ARGV)
+    local amount = tonumber(ARGV[3])
 
     -- Idempotency
-    local status = redis.call('HGET', status_key, 'status')
+    local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'committed' then return 1 end
 
-    -- Safety: if prepare data was lost (Redis Sentinel failover during 2PC),
-    -- re-apply the stock deduction.  In 2PC the commit decision is irrevocable
-    -- so we MUST ensure stock is deducted to maintain conservation invariant:
-    --   total_credit_spent == total_stock_sold * price
+    -- Safety: if prepare data was lost during a Redis master failover,
+    -- re-apply the deduction. In 2PC the commit decision is irrevocable
+    -- so we MUST deduct to maintain conservation invariant.
     if status ~= 'prepared' then
-        for i = 1, n_items do
-            local item_key = KEYS[i]
-            local item_id = ARGV[1 + i * 2]
-            local amount = tonumber(ARGV[2 + i * 2])
-            redis.call('HINCRBY', item_key, 'available_stock', -amount)
-            redis.call('HSET', status_key, 'amount:' .. item_id, tostring(amount))
-        end
+        redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
+        redis.call('HSET',  KEYS[3], 'amount', tostring(amount))
     end
 
-    -- Delete all lock keys (amounts already deducted in prepare or above)
-    for i = 1, n_items do
-        redis.call('DEL', KEYS[n_items + i])
-    end
-
-    redis.call('HSET', status_key, 'status', 'committed')
-    redis.call('EXPIRE', status_key, 86400)
+    redis.call('DEL',  KEYS[2])
+    redis.call('HSET', KEYS[3], 'status', 'committed')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 
--- 2PC Abort: Restore stock from status hash (undo prepare deduction)
+-- 2PC Abort (single item): Restore stock from status hash
 --
--- Same KEYS layout as prepare
--- ARGV: saga_id, n_items, item_id_1, item_id_2, ...
-local function stock_2pc_abort(KEYS, ARGV)
-    local saga_id = ARGV[1]
-    local n_items = tonumber(ARGV[2])
-    local status_key = KEYS[2 * n_items + 1]
-
+-- KEYS[1] = {item_{id}}:data
+-- KEYS[2] = {item_{id}}:lock:{saga_id}
+-- KEYS[3] = {item_{id}}:2pc-status:{saga_id}
+-- ARGV[1] = saga_id
+-- ARGV[2] = item_id
+local function stock_2pc_abort_one(KEYS, ARGV)
     -- Idempotency
-    local status = redis.call('HGET', status_key, 'status')
+    local status = redis.call('HGET', KEYS[3], 'status')
     if status == 'aborted' then return 1 end
 
     -- Restore stock from status hash (survives lock TTL expiry)
-    for i = 1, n_items do
-        local item_key = KEYS[i]
-        local lock_key = KEYS[n_items + i]
-        local item_id = ARGV[2 + i]
-        local amount = redis.call('HGET', status_key, 'amount:' .. item_id)
-        if amount then
-            redis.call('HINCRBY', item_key, 'available_stock', tonumber(amount))
-        end
-        redis.call('DEL', lock_key)
+    local amount = redis.call('HGET', KEYS[3], 'amount')
+    if amount then
+        redis.call('HINCRBY', KEYS[1], 'available_stock', tonumber(amount))
     end
+    redis.call('DEL', KEYS[2])
 
-    redis.call('HSET', status_key, 'status', 'aborted')
-    redis.call('EXPIRE', status_key, 86400)
+    redis.call('HSET', KEYS[3], 'status', 'aborted')
+    redis.call('EXPIRE', KEYS[3], 86400)
     return 1
 end
 
--- Saga Execute: Direct deduction (no locks, no reserved_stock)
+-- Saga Execute (single item): Direct deduction, no locks
 --
--- KEYS layout (for N items):
---   KEYS[1..N]   = item:{item_id} hashes
---   KEYS[N+1]    = saga:{saga_id}:stock:status
---   KEYS[N+2]    = saga:{saga_id}:stock:amounts
--- ARGV: saga_id, (item_id, amount)...
-local function stock_saga_execute(KEYS, ARGV)
-    local saga_id = ARGV[1]
-    local n_items = #KEYS - 2
-    local status_key = KEYS[n_items + 1]
-    local amounts_key = KEYS[n_items + 2]
+-- KEYS[1] = {item_{id}}:data
+-- KEYS[2] = {item_{id}}:saga-status:{saga_id}
+-- KEYS[3] = {item_{id}}:amounts:{saga_id}
+-- ARGV[1] = saga_id
+-- ARGV[2] = item_id
+-- ARGV[3] = amount
+-- Returns: 1=success, 0=insufficient / already compensated
+local function stock_saga_execute_one(KEYS, ARGV)
+    local item_id = ARGV[2]
+    local amount  = tonumber(ARGV[3])
 
     -- Idempotency + poison pill: refuse if already compensated
-    local status = redis.call('GET', status_key)
-    if status == 'executed' then return 1 end
+    local status = redis.call('GET', KEYS[2])
+    if status == 'executed'    then return 1 end
     if status == 'compensated' then return 0 end
 
-    -- Validate ALL items
-    for i = 1, n_items do
-        local item_key = KEYS[i]
-        local amount = tonumber(ARGV[1 + i * 2])
-        local available = tonumber(redis.call('HGET', item_key, 'available_stock'))
-        if not available or available < amount then
-            return 0
-        end
+    -- Validate
+    local available = tonumber(redis.call('HGET', KEYS[1], 'available_stock'))
+    if not available or available < amount then
+        return 0
     end
 
-    -- Apply deductions and store amounts for compensation
-    for i = 1, n_items do
-        local item_key = KEYS[i]
-        local item_id = ARGV[i * 2]
-        local amount = tonumber(ARGV[1 + i * 2])
-        redis.call('HINCRBY', item_key, 'available_stock', -amount)
-        redis.call('HSET', amounts_key, item_id, tostring(amount))
-    end
-
-    redis.call('SETEX', status_key, 86400, 'executed')
-    redis.call('EXPIRE', amounts_key, 86400)
+    redis.call('HINCRBY', KEYS[1], 'available_stock', -amount)
+    -- Store amount in the per-item amounts hash so compensate can recover it
+    redis.call('HSET',   KEYS[3], item_id, tostring(amount))
+    redis.call('EXPIRE', KEYS[3], 86400)
+    redis.call('SETEX',  KEYS[2], 86400, 'executed')
     return 1
 end
 
--- Saga Compensate: Restore stock from stored amounts
+-- Saga Compensate (single item): Restore stock from stored amounts
 --
--- Same KEYS layout as execute
--- ARGV: saga_id, n_items
-local function stock_saga_compensate(KEYS, ARGV)
-    local saga_id = ARGV[1]
-    local n_items = tonumber(ARGV[2])
-    local status_key = KEYS[n_items + 1]
-    local amounts_key = KEYS[n_items + 2]
+-- KEYS[1] = {item_{id}}:data
+-- KEYS[2] = {item_{id}}:saga-status:{saga_id}
+-- KEYS[3] = {item_{id}}:amounts:{saga_id}
+-- ARGV[1] = saga_id
+-- ARGV[2] = item_id
+local function stock_saga_compensate_one(KEYS, ARGV)
+    local item_id = ARGV[2]
 
     -- Idempotency
-    local status = redis.call('GET', status_key)
+    local status = redis.call('GET', KEYS[2])
     if status == 'compensated' then return 1 end
 
-    -- Restore stock from stored amounts
-    local all_amounts = redis.call('HGETALL', amounts_key)
-    for j = 1, #all_amounts, 2 do
-        local item_id = all_amounts[j]
-        local amount = tonumber(all_amounts[j + 1])
-        if amount then
-            redis.call('HINCRBY', 'item:' .. item_id, 'available_stock', amount)
-        end
+    -- Restore stock from amounts hash
+    local amount = redis.call('HGET', KEYS[3], item_id)
+    if amount then
+        redis.call('HINCRBY', KEYS[1], 'available_stock', tonumber(amount))
     end
 
-    redis.call('DEL', amounts_key)
-    redis.call('SETEX', status_key, 86400, 'compensated')
+    redis.call('DEL',   KEYS[3])
+    redis.call('SETEX', KEYS[2], 86400, 'compensated')
     return 1
 end
 
 -- Atomic check-and-decrement for /subtract API endpoint
--- KEYS[1] = item:{item_id}
+-- KEYS[1] = {item_{id}}:data
 -- ARGV[1] = amount to subtract
 local function subtract_direct(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -213,7 +181,7 @@ local function subtract_direct(KEYS, ARGV)
 end
 
 -- Atomic increment for /add API endpoint
--- KEYS[1] = item:{item_id}
+-- KEYS[1] = {item_{id}}:data
 -- ARGV[1] = amount to add
 local function add_direct(KEYS, ARGV)
     local amount = tonumber(ARGV[1])
@@ -224,10 +192,10 @@ local function add_direct(KEYS, ARGV)
     return redis.call('HINCRBY', KEYS[1], 'available_stock', amount)
 end
 
-redis.register_function('stock_2pc_prepare', stock_2pc_prepare)
-redis.register_function('stock_2pc_commit', stock_2pc_commit)
-redis.register_function('stock_2pc_abort', stock_2pc_abort)
-redis.register_function('stock_saga_execute', stock_saga_execute)
-redis.register_function('stock_saga_compensate', stock_saga_compensate)
-redis.register_function('stock_subtract_direct', subtract_direct)
-redis.register_function('stock_add_direct', add_direct)
+redis.register_function('stock_2pc_prepare_one',   stock_2pc_prepare_one)
+redis.register_function('stock_2pc_commit_one',    stock_2pc_commit_one)
+redis.register_function('stock_2pc_abort_one',     stock_2pc_abort_one)
+redis.register_function('stock_saga_execute_one',  stock_saga_execute_one)
+redis.register_function('stock_saga_compensate_one', stock_saga_compensate_one)
+redis.register_function('stock_subtract_direct',   subtract_direct)
+redis.register_function('stock_add_direct',        add_direct)
