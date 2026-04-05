@@ -47,8 +47,8 @@ x-stock-service: &stock-service
   image: stock:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=512
-    - REDIS_REPLICA_POOL_SIZE=256
+    - REDIS_MASTER_POOL_SIZE=2048
+    - REDIS_REPLICA_POOL_SIZE=1024
   env_file:
     - env/stock_redis.env
   volumes:
@@ -87,8 +87,8 @@ x-payment-service: &payment-service
   image: payment:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=512
-    - REDIS_REPLICA_POOL_SIZE=256
+    - REDIS_MASTER_POOL_SIZE=2048
+    - REDIS_REPLICA_POOL_SIZE=1024
   env_file:
     - env/payment_redis.env
   volumes:
@@ -223,8 +223,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-2:
     <<: *order-service
@@ -232,8 +232,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-3:
     <<: *order-service
@@ -241,8 +241,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-4:
     <<: *order-service
@@ -250,8 +250,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-5:
     <<: *order-service
@@ -259,8 +259,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-6:
     <<: *order-service
@@ -268,8 +268,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-7:
     <<: *order-service
@@ -277,8 +277,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-8:
     <<: *order-service
@@ -286,8 +286,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-8
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   order-service-9:
     <<: *order-service
@@ -295,8 +295,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-9
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Stock Services (7 instances, 2 Granian workers each) ----
 
@@ -306,56 +306,56 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-2:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-3:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-4:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-5:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-6:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   stock-service-7:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Payment Services (7 instances, 2 Granian workers each) ----
 
@@ -365,56 +365,56 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-2:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-3:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-4:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-5:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-6:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   payment-service-7:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=512
-      - REDIS_REPLICA_POOL_SIZE=256
+      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_REPLICA_POOL_SIZE=1024
 
   # ---- Redis Masters ----
 
@@ -425,7 +425,7 @@ services:
         --requirepass redis
         --masterauth redis
         --maxmemory 1600mb
-        --maxclients 16384
+        --maxclients 50000
     deploy:
       resources:
         limits:
@@ -438,7 +438,7 @@ services:
         --requirepass redis
         --masterauth redis
         --maxmemory 768mb
-        --maxclients 8192
+        --maxclients 30000
     deploy:
       resources:
         limits:
@@ -451,7 +451,7 @@ services:
         --requirepass redis
         --masterauth redis
         --maxmemory 768mb
-        --maxclients 8192
+        --maxclients 30000
     deploy:
       resources:
         limits:
@@ -467,7 +467,7 @@ services:
         --maxmemory 800mb
         --replicaof order-db:6379
         --masterauth redis
-        --maxclients 8192
+        --maxclients 30000
     depends_on:
       order-db:
         condition: service_started
@@ -484,7 +484,7 @@ services:
         --maxmemory 800mb
         --replicaof order-db:6379
         --masterauth redis
-        --maxclients 8192
+        --maxclients 30000
     depends_on:
       order-db:
         condition: service_started
@@ -501,7 +501,7 @@ services:
         --maxmemory 300mb
         --replicaof stock-db:6379
         --masterauth redis
-        --maxclients 12288
+        --maxclients 30000
     depends_on:
       stock-db:
         condition: service_started
@@ -518,7 +518,7 @@ services:
         --maxmemory 300mb
         --replicaof stock-db:6379
         --masterauth redis
-        --maxclients 12288
+        --maxclients 30000
     depends_on:
       stock-db:
         condition: service_started
@@ -535,7 +535,7 @@ services:
         --maxmemory 300mb
         --replicaof payment-db:6379
         --masterauth redis
-        --maxclients 12288
+        --maxclients 30000
     depends_on:
       payment-db:
         condition: service_started
@@ -552,7 +552,7 @@ services:
         --maxmemory 300mb
         --replicaof payment-db:6379
         --masterauth redis
-        --maxclients 12288
+        --maxclients 30000
     depends_on:
       payment-db:
         condition: service_started
