@@ -47,7 +47,7 @@ async def lifespan(app):
     await wait_for_redis(db, "stock-cluster")
 
     # Prewarm connection pool
-    await asyncio.gather(*[db.ping() for _ in range(64)])
+    await asyncio.gather(*[db.ping() for _ in range(128)])
 
     # Load Lua function library on ALL cluster primaries
     lua_path = Path(__file__).parent / "lua" / "stock_lib.lua"

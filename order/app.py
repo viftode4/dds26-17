@@ -148,7 +148,7 @@ async def lifespan(app):
             raise
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
-    await asyncio.gather(*[db.ping() for _ in range(128)])
+    await asyncio.gather(*[db.ping() for _ in range(256)])
 
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
     HTTPXClientInstrumentor().instrument()
@@ -157,11 +157,11 @@ async def lifespan(app):
     # Semaphore caps concurrent outgoing HTTP requests to prevent pool exhaustion
     # when the event loop is saturated under load (PoolTimeout).
     global _http_semaphore
-    _http_semaphore = asyncio.Semaphore(50)
+    _http_semaphore = asyncio.Semaphore(150)
     _http_client = httpx.AsyncClient(
         base_url=GATEWAY_URL,
         timeout=httpx.Timeout(5.0, pool=2.0),
-        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+        limits=httpx.Limits(max_connections=250, max_keepalive_connections=50),
     )
 
     # NATS transport for orchestrator-to-service communication
