@@ -263,19 +263,22 @@ async def test_cascade_failure():
         for container in ["stock-db", "payment-service"]:
             _docker_compose("kill", container)
 
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Restart payment-service immediately — it has no Sentinel involvement.
-        _docker_compose("start", "payment-service")
-
         # On Docker Desktop/Windows, Sentinel enters TILT mode every ~30s due to
         # VM clock sync jitter. TILT blocks all failover operations (automatic AND
         # SENTINEL FAILOVER commands). We bypass this by manually promoting the
         # replica and re-registering the master with Sentinel.
-        await asyncio.sleep(5.0)  # Let in-flight sagas reach a stable state
+        #
+        # CRITICAL: force_failover must run BEFORE Dragonfly's ~10s reconnect-FLUSHALL
+        # timer fires. When a Dragonfly replica loses its master connection, it clears
+        # its data at ~10s to prepare for a full resync. Calling REPLICAOF NO ONE
+        # cancels that timer. We must not wait for gather() first — it can take 30s.
         from topology import force_failover
         force_failover("stock-master", "stock-db-replica")
 
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Restart payment-service — it has no Sentinel involvement.
+        _docker_compose("start", "payment-service")
         _docker_compose("restart", "stock-service", "stock-service-2")
         await asyncio.sleep(20.0)  # Extended startup time
         await wait_gateway_healthy(client)
@@ -313,7 +316,9 @@ async def test_redis_failover_data_loss_detection():
 
         # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
         # Manually promote the replica so checkouts can proceed.
-        await asyncio.sleep(5.0)
+        # Keep delay minimal — Dragonfly fires a reconnect-FLUSHALL on the replica
+        # at ~10s after master loss. REPLICAOF NO ONE cancels that timer.
+        await asyncio.sleep(1.0)
         from topology import force_failover
         force_failover("stock-master", "stock-db-replica")
         # Restart stock-service so it reconnects to the new master (stock-db-replica).
@@ -411,13 +416,16 @@ async def test_wal_survives_redis_failover():
         # Kill the order-db master
         _docker_compose("kill", "order-db")
 
-        await asyncio.gather(*tasks, return_exceptions=True)
-
         # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
         # Manually promote order-db-replica so order services can reconnect.
-        await asyncio.sleep(3.0)
+        #
+        # CRITICAL: must run before Dragonfly's ~10s reconnect-FLUSHALL fires on the
+        # replica (which would wipe WAL entries). Call immediately after kill, not after
+        # gather() which can take up to 30s waiting for checkout timeouts.
         from topology import force_failover
         force_failover("order-master", "order-db-replica")
+
+        await asyncio.gather(*tasks, return_exceptions=True)
 
         # Restart order services + gateway to reconnect to the new master.
         # Leave order-db dead — conftest restore_topology handles it before the
