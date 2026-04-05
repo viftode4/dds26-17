@@ -16,10 +16,12 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "1.5"
           memory: 512M
 
-  # ---- Application Services (1 instance each) ----
+  # ---- Application Services (1 instance each, tuned for ~16-20 CPU) ----
+  # Order: heaviest — 7 Redis round-trips + 2 NATS waits per checkout + WAL + leader election
+  # Stock/Payment: 1 fcall each but called sequentially — must never queue
 
   order-service-1:
     build: ./order
@@ -28,9 +30,9 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_MASTER_POOL_SIZE=256
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 5 --loop uvloop app:app
     env_file:
       - env/order_redis.env
     volumes:
@@ -52,8 +54,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.5"
-          memory: 1024M
+          cpus: "5.0"
+          memory: 1536M
 
   stock-service-1:
     build: ./stock
@@ -61,9 +63,9 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_MASTER_POOL_SIZE=256
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 1 --loop uvloop app:app
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
     env_file:
       - env/stock_redis.env
     volumes:
@@ -85,8 +87,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "3.0"
+          memory: 768M
 
   payment-service-1:
     build: ./payment
@@ -94,9 +96,9 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
+      - REDIS_MASTER_POOL_SIZE=256
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 1 --loop uvloop app:app
+    command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
     env_file:
       - env/payment_redis.env
     volumes:
@@ -118,8 +120,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
-          memory: 512M
+          cpus: "3.0"
+          memory: 768M
 
   # ---- Order Cluster (3 masters + 3 replicas) ----
 
@@ -128,8 +130,8 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=130mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=100000
+      - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -148,8 +150,8 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=130mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=100000
+      - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -168,8 +170,8 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=130mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=100000
+      - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -188,7 +190,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=60mb
-      - MAXCLIENTS=2048
+      - MAXCLIENTS=100000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -208,7 +210,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=60mb
-      - MAXCLIENTS=2048
+      - MAXCLIENTS=100000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -228,7 +230,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=60mb
-      - MAXCLIENTS=2048
+      - MAXCLIENTS=100000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -250,7 +252,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -271,7 +273,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -292,7 +294,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -313,7 +315,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -333,7 +335,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -353,7 +355,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -375,7 +377,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -396,7 +398,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -417,7 +419,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=65mb
-      - MAXCLIENTS=2000
+      - MAXCLIENTS=100000
       - IO_THREADS=2
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
@@ -438,7 +440,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -458,7 +460,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -478,7 +480,7 @@ services:
     command: sh /etc/redis/cluster-node-entrypoint.sh
     environment:
       - MAXMEMORY=45mb
-      - MAXCLIENTS=1000
+      - MAXCLIENTS=10000
       - IO_THREADS=2
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -504,8 +506,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "2.5"
+          memory: 512M
 
   # ---- Cluster Init (one-shot) ----
 

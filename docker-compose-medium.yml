@@ -1,13 +1,14 @@
-# Medium cluster — ~47 CPU total
-# System: ~39 CPU | Locust: ~8 CPU
-# App: 4 order + 4 stock + 4 payment instances, 2 Granian workers each
-# Pool: 768 master per instance (8 order processes, 8 stock, 8 payment)
+# Medium cluster — 50 CPU budget (42 system + 8 locust)
+# Order: heaviest (7 Redis ops + 2 NATS waits/checkout + WAL + leader election)
+# Stock/Payment: 1 fcall each, called sequentially — must never queue
+# App: 4 order (4 workers, 3.5 CPU) + 4 stock (3 workers, 2.5 CPU) + 4 payment (3 workers, 2.5 CPU)
+# Total: 16 + 12 + 12 = 40 app workers, pool 1024/node
 
 x-order-service: &order-service
   image: order:latest
-  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 4 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=4096
+    - REDIS_MASTER_POOL_SIZE=1024
   env_file:
     - env/order_redis.env
   volumes:
@@ -29,14 +30,14 @@ x-order-service: &order-service
   deploy:
     resources:
       limits:
-        cpus: "3.0"
-        memory: 512M
+        cpus: "3.5"
+        memory: 1024M
 
 x-stock-service: &stock-service
   image: stock:latest
-  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=768
+    - REDIS_MASTER_POOL_SIZE=1024
   env_file:
     - env/stock_redis.env
   volumes:
@@ -58,14 +59,14 @@ x-stock-service: &stock-service
   deploy:
     resources:
       limits:
-        cpus: "1.5"
-        memory: 384M
+        cpus: "2.5"
+        memory: 768M
 
 x-payment-service: &payment-service
   image: payment:latest
-  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
+  command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=768
+    - REDIS_MASTER_POOL_SIZE=1024
   env_file:
     - env/payment_redis.env
   volumes:
@@ -87,8 +88,8 @@ x-payment-service: &payment-service
   deploy:
     resources:
       limits:
-        cpus: "1.5"
-        memory: 384M
+        cpus: "2.5"
+        memory: 768M
 
 x-cluster-node: &cluster-node
   image: valkey/valkey:8.1-bookworm
@@ -150,7 +151,7 @@ services:
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   order-service-2:
     <<: *order-service
@@ -159,7 +160,7 @@ services:
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   order-service-3:
     <<: *order-service
@@ -168,7 +169,7 @@ services:
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   order-service-4:
     <<: *order-service
@@ -177,7 +178,7 @@ services:
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Stock Services (4 instances) ----
 
@@ -188,7 +189,7 @@ services:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-2:
     <<: *stock-service
@@ -196,7 +197,7 @@ services:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-3:
     <<: *stock-service
@@ -204,7 +205,7 @@ services:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-4:
     <<: *stock-service
@@ -212,7 +213,7 @@ services:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Payment Services (4 instances) ----
 
@@ -223,7 +224,7 @@ services:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-2:
     <<: *payment-service
@@ -231,7 +232,7 @@ services:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-3:
     <<: *payment-service
@@ -239,7 +240,7 @@ services:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-4:
     <<: *payment-service
@@ -247,7 +248,7 @@ services:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
-      - REDIS_MASTER_POOL_SIZE=768
+      - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Order Cluster (3 masters + 3 replicas) ----
 
@@ -485,8 +486,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 128M
+          cpus: "2.5"
+          memory: 256M
 
   # ---- Cluster Init (one-shot) ----
 
