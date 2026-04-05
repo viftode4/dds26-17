@@ -7,14 +7,14 @@ from pathlib import Path
 
 import msgpack
 
-import redis.asyncio as aioredis
+from redis.asyncio.cluster import RedisCluster
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
+from common.config import create_redis_cluster_connection, get_cluster_nodes, wait_for_redis
 from common.fault_injection import get_injector
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
@@ -27,10 +27,8 @@ DB_ERROR_STR = "DB error"
 
 log = get_logger("stock")
 
-db: aioredis.Redis | None = None
-db_read: aioredis.Redis | None = None
+db: RedisCluster | None = None
 _nats_transport: NatsTransport | None = None
-_scripts: dict[str, str] = {}
 
 # Per-action Prometheus metrics
 _action_counts: dict[str, dict[str, int]] = {}
@@ -39,53 +37,45 @@ _action_latency: dict[str, LatencyHistogram] = {}
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, _nats_transport
+    global db, _nats_transport
     setup_tracing("stock-service")
     setup_logging("stock-service")
 
-    db = create_redis_connection(prefix="", decode_responses=True)
-    await wait_for_redis(db, "stock-db")
+    startup_nodes = get_cluster_nodes("STOCK_CLUSTER_NODES")
+    pool_size = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))
+    db = create_redis_cluster_connection(startup_nodes, pool_size=pool_size)
+    await wait_for_redis(db, "stock-cluster")
 
     # Prewarm connection pool
     await asyncio.gather(*[db.ping() for _ in range(64)])
 
-    # Replica connection for read-only find/list endpoints
-    db_read = create_replica_connection(prefix="", decode_responses=True)
-
-    # Load Lua scripts into Dragonfly script cache
-    global _scripts
-    script_names = [
-        "stock_2pc_prepare", "stock_2pc_commit", "stock_2pc_abort",
-        "stock_saga_execute", "stock_saga_compensate",
-        "stock_subtract_direct", "stock_add_direct",
-    ]
-    lua_dir = Path(__file__).parent / "lua"
-    try:
-        for name in script_names:
-            code = (lua_dir / f"{name}.lua").read_text()
-            _scripts[name] = await db.script_load(code)
-    except aioredis.RedisError as e:
-        log.error("Failed to load Lua scripts", error=str(e))
-        raise
+    # Load Lua function library on ALL cluster primaries
+    lua_path = Path(__file__).parent / "lua" / "stock_lib.lua"
+    lua_code = lua_path.read_text()
+    for _attempt in range(15):
+        try:
+            await db.execute_command(
+                "FUNCTION", "LOAD", "REPLACE", lua_code,
+                target_nodes=RedisCluster.PRIMARIES,
+            )
+            break
+        except Exception as e:
+            if "NOREPLICAS" in str(e) and _attempt < 14:
+                await asyncio.sleep(2.0)
+                continue
+            log.error("Failed to load Lua library", error=str(e))
+            raise
 
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
     await _nats_transport.connect()
     await _nats_transport.subscribe("svc.stock.*", "stock-workers", handle_nats_message)
 
-    # Invalidate connection pools on Sentinel failover to prevent stale
-    # connections from reaching the demoted old master.
-    failover_task = await subscribe_failover_invalidation(
-        db, db_read, service_name="stock")
     log.info("Stock service started")
 
     yield
 
-    if failover_task:
-        failover_task.cancel()
     if _nats_transport:
         await _nats_transport.close()
-    if db_read:
-        await db_read.aclose()
     if db:
         await db.aclose()
     shutdown_tracing()
@@ -180,53 +170,81 @@ def _parse_items(fields: dict) -> list[tuple[str, int]]:
 
 
 async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30) -> int:
-    keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"saga:{saga_id}:stock:status"]
-    args = [saga_id, str(ttl)]
-    for item_id, amount in items:
-        args += [item_id, str(amount)]
-    result = await db.evalsha(_scripts["stock_2pc_prepare"], len(keys), *keys, *args)
-    return result
+    """Prepare all items in parallel. Returns 1 only if all items prepared successfully."""
+    results = await asyncio.gather(*[
+        db.fcall(
+            "stock_2pc_prepare_one", 3,
+            f"{{item_{item_id}}}:data",
+            f"{{item_{item_id}}}:lock:{saga_id}",
+            f"{{item_{item_id}}}:2pc-status:{saga_id}",
+            saga_id, item_id, str(amount), str(ttl),
+        )
+        for item_id, amount in items
+    ])
+    return 1 if all(r == 1 for r in results) else 0
 
 
 async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
-    n = len(items)
-    keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"saga:{saga_id}:stock:status"]
-    args = [saga_id, str(n)]
-    for item_id, amount in items:
-        args += [item_id, str(amount)]
-    await db.evalsha(_scripts["stock_2pc_commit"], len(keys), *keys, *args)
+    """Commit all items in parallel."""
+    await asyncio.gather(*[
+        db.fcall(
+            "stock_2pc_commit_one", 3,
+            f"{{item_{item_id}}}:data",
+            f"{{item_{item_id}}}:lock:{saga_id}",
+            f"{{item_{item_id}}}:2pc-status:{saga_id}",
+            saga_id, item_id, str(amount),
+        )
+        for item_id, amount in items
+    ])
 
 
 async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
-    n = len(items)
-    keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"lock:2pc:{saga_id}:{item_id}" for item_id, _ in items]
-    keys += [f"saga:{saga_id}:stock:status"]
-    args = [saga_id, str(n)]
-    for item_id, _ in items:
-        args.append(item_id)
-    await db.evalsha(_scripts["stock_2pc_abort"], len(keys), *keys, *args)
+    """Abort all items in parallel."""
+    await asyncio.gather(*[
+        db.fcall(
+            "stock_2pc_abort_one", 3,
+            f"{{item_{item_id}}}:data",
+            f"{{item_{item_id}}}:lock:{saga_id}",
+            f"{{item_{item_id}}}:2pc-status:{saga_id}",
+            saga_id, item_id,
+        )
+        for item_id, _ in items
+    ])
 
 
 async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
-    keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
-    args = [saga_id]
-    for item_id, amount in items:
-        args += [item_id, str(amount)]
-    result = await db.evalsha(_scripts["stock_saga_execute"], len(keys), *keys, *args)
-    return result
+    """Execute saga deductions for all items in parallel. Returns 1 only if all succeed."""
+    results = await asyncio.gather(*[
+        db.fcall(
+            "stock_saga_execute_one", 3,
+            f"{{item_{item_id}}}:data",
+            f"{{item_{item_id}}}:saga-status:{saga_id}",
+            f"{{item_{item_id}}}:amounts:{saga_id}",
+            saga_id, item_id, str(amount),
+        )
+        for item_id, amount in items
+    ])
+    if all(r == 1 for r in results):
+        return 1
+    # Partial failure: roll back any items that were successfully deducted
+    succeeded = [items[i] for i, r in enumerate(results) if r == 1]
+    if succeeded:
+        await _saga_compensate(saga_id, succeeded)
+    return 0
 
 
 async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
-    n = len(items)
-    keys = [f"item:{item_id}" for item_id, _ in items]
-    keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
-    await db.evalsha(_scripts["stock_saga_compensate"], len(keys), *keys, saga_id, str(n))
+    """Compensate all items in parallel."""
+    await asyncio.gather(*[
+        db.fcall(
+            "stock_saga_compensate_one", 3,
+            f"{{item_{item_id}}}:data",
+            f"{{item_{item_id}}}:saga-status:{saga_id}",
+            f"{{item_{item_id}}}:amounts:{saga_id}",
+            saga_id, item_id,
+        )
+        for item_id, _ in items
+    ])
 
 
 # ============================================================================
@@ -237,14 +255,12 @@ async def create_item(request: Request):
     price = int(request.path_params["price"])
     key = str(uuid.uuid4())
     try:
-        await db.hset(f"item:{key}", mapping={
+        await db.hset(f"{{item_{key}}}:data", mapping={
             "available_stock": 0,
             "reserved_stock": 0,
             "price": price,
         })
-        # Ensure replica has the item before responding — prevents stale reads
-        # when addItem immediately reads the item price via the replica.
-    except aioredis.RedisError:
+    except Exception:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"item_id": key})
 
@@ -256,13 +272,13 @@ async def batch_init_users(request: Request):
     try:
         async with db.pipeline(transaction=False) as pipe:
             for i in range(n):
-                pipe.hset(f"item:{i}", mapping={
+                pipe.hset(f"{{item_{i}}}:data", mapping={
                     "available_stock": starting_stock,
                     "reserved_stock": 0,
                     "price": item_price,
                 })
             await pipe.execute()
-    except aioredis.RedisError:
+    except Exception:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for stock successful"})
 
@@ -270,16 +286,9 @@ async def batch_init_users(request: Request):
 async def find_item(request: Request):
     item_id = request.path_params["item_id"]
     try:
-        # External reads must prefer the current Sentinel master. After a failover,
-        # the replica may still be reconnecting or serving stale data.
-        entry = await db.hgetall(f"item:{item_id}")
+        entry = await db.hgetall(f"{{item_{item_id}}}:data")
     except Exception:
-        if not db_read:
-            raise HTTPException(400, detail=DB_ERROR_STR)
-        try:
-            entry = await db_read.hgetall(f"item:{item_id}")
-        except aioredis.RedisError:
-            raise HTTPException(400, detail=DB_ERROR_STR)
+        raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:
         raise HTTPException(400, detail=f"Item: {item_id} not found!")
     available = int(entry["available_stock"])
@@ -293,14 +302,12 @@ async def find_item(request: Request):
 async def add_stock(request: Request):
     item_id = request.path_params["item_id"]
     amount = int(request.path_params["amount"])
-    key = f"item:{item_id}"
+    key = f"{{item_{item_id}}}:data"
     try:
-        new_stock = await db.evalsha(_scripts["stock_add_direct"], 1, key, amount)
-    except aioredis.ResponseError as e:
+        new_stock = await db.fcall("stock_add_direct", 1, key, amount)
+    except Exception as e:
         if "ITEM_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"Item: {item_id} not found!")
-        raise HTTPException(400, detail=DB_ERROR_STR)
-    except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 
@@ -308,17 +315,15 @@ async def add_stock(request: Request):
 async def remove_stock(request: Request):
     item_id = request.path_params["item_id"]
     amount = int(request.path_params["amount"])
-    key = f"item:{item_id}"
+    key = f"{{item_{item_id}}}:data"
     try:
-        new_stock = await db.evalsha(_scripts["stock_subtract_direct"], 1, key, amount)
-    except aioredis.ResponseError as e:
+        new_stock = await db.fcall("stock_subtract_direct", 1, key, amount)
+    except Exception as e:
         err_msg = str(e)
         if "ITEM_NOT_FOUND" in err_msg:
             raise HTTPException(400, detail=f"Item: {item_id} not found!")
         if "INSUFFICIENT_STOCK" in err_msg:
             raise HTTPException(400, detail=f"Item: {item_id} stock cannot get reduced below zero!")
-        raise HTTPException(400, detail=DB_ERROR_STR)
-    except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return PlainTextResponse(f"Item: {item_id} stock updated to: {new_stock}")
 

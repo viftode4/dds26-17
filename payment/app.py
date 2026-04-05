@@ -7,14 +7,14 @@ from pathlib import Path
 
 import msgpack
 
-import redis.asyncio as aioredis
+from redis.asyncio.cluster import RedisCluster
 from starlette.applications import Starlette
 from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
+from common.config import create_redis_cluster_connection, get_cluster_nodes, wait_for_redis
 from common.fault_injection import get_injector
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
@@ -27,10 +27,8 @@ DB_ERROR_STR = "DB error"
 
 log = get_logger("payment")
 
-db: aioredis.Redis | None = None
-db_read: aioredis.Redis | None = None
+db: RedisCluster | None = None
 _nats_transport: NatsTransport | None = None
-_scripts: dict[str, str] = {}
 
 # Per-action Prometheus metrics
 _action_counts: dict[str, dict[str, int]] = {}
@@ -39,51 +37,45 @@ _action_latency: dict[str, LatencyHistogram] = {}
 
 @asynccontextmanager
 async def lifespan(app):
-    global db, db_read, _nats_transport
+    global db, _nats_transport
     setup_tracing("payment-service")
     setup_logging("payment-service")
 
-    db = create_redis_connection(prefix="", decode_responses=True)
-    await wait_for_redis(db, "payment-db")
+    startup_nodes = get_cluster_nodes("PAYMENT_CLUSTER_NODES")
+    pool_size = int(os.environ.get("REDIS_MASTER_POOL_SIZE", "512"))
+    db = create_redis_cluster_connection(startup_nodes, pool_size=pool_size)
+    await wait_for_redis(db, "payment-cluster")
 
     # Prewarm connection pool
     await asyncio.gather(*[db.ping() for _ in range(64)])
 
-    # Replica connection for read-only find endpoints
-    db_read = create_replica_connection(prefix="", decode_responses=True)
-
-    # Load Lua scripts into Dragonfly script cache
-    global _scripts
-    script_names = [
-        "payment_2pc_prepare", "payment_2pc_commit", "payment_2pc_abort",
-        "payment_saga_execute", "payment_saga_compensate",
-        "payment_subtract_direct", "payment_add_direct",
-    ]
-    lua_dir = Path(__file__).parent / "lua"
-    try:
-        for name in script_names:
-            code = (lua_dir / f"{name}.lua").read_text()
-            _scripts[name] = await db.script_load(code)
-    except aioredis.RedisError as e:
-        log.error("Failed to load Lua scripts", error=str(e))
-        raise
+    # Load Lua function library on ALL cluster primaries
+    lua_path = Path(__file__).parent / "lua" / "payment_lib.lua"
+    lua_code = lua_path.read_text()
+    for _attempt in range(15):
+        try:
+            await db.execute_command(
+                "FUNCTION", "LOAD", "REPLACE", lua_code,
+                target_nodes=RedisCluster.PRIMARIES,
+            )
+            break
+        except Exception as e:
+            if "NOREPLICAS" in str(e) and _attempt < 14:
+                await asyncio.sleep(2.0)
+                continue
+            log.error("Failed to load Lua library", error=str(e))
+            raise
 
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
     await _nats_transport.connect()
     await _nats_transport.subscribe("svc.payment.*", "payment-workers", handle_nats_message)
 
-    failover_task = await subscribe_failover_invalidation(
-        db, db_read, service_name="payment")
     log.info("Payment service started")
 
     yield
 
-    if failover_task:
-        failover_task.cancel()
     if _nats_transport:
         await _nats_transport.close()
-    if db_read:
-        await db_read.aclose()
     if db:
         await db.aclose()
     shutdown_tracing()
@@ -169,55 +161,53 @@ async def handle_nats_message(msg):
 
 async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -> int:
     keys = [
-        f"user:{user_id}",
-        f"lock:2pc:{saga_id}:{user_id}",
-        f"saga:{saga_id}:payment:status",
+        f"{{user_{user_id}}}:data",
+        f"{{user_{user_id}}}:lock:{saga_id}",
+        f"{{user_{user_id}}}:2pc-status:{saga_id}",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
-    result = await db.evalsha(_scripts["payment_2pc_prepare"], len(keys), *keys, *args)
-    return result
+    return await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
 
 
 async def _2pc_commit(saga_id: str, user_id: str, amount: int):
     keys = [
-        f"user:{user_id}",
-        f"lock:2pc:{saga_id}:{user_id}",
-        f"saga:{saga_id}:payment:status",
+        f"{{user_{user_id}}}:data",
+        f"{{user_{user_id}}}:lock:{saga_id}",
+        f"{{user_{user_id}}}:2pc-status:{saga_id}",
     ]
-    await db.evalsha(_scripts["payment_2pc_commit"], len(keys), *keys, saga_id, str(amount), user_id)
+    await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, str(amount), user_id)
 
 
 async def _2pc_abort(saga_id: str, user_id: str):
     if not user_id:
         return
     keys = [
-        f"user:{user_id}",
-        f"lock:2pc:{saga_id}:{user_id}",
-        f"saga:{saga_id}:payment:status",
+        f"{{user_{user_id}}}:data",
+        f"{{user_{user_id}}}:lock:{saga_id}",
+        f"{{user_{user_id}}}:2pc-status:{saga_id}",
     ]
-    await db.evalsha(_scripts["payment_2pc_abort"], len(keys), *keys, saga_id)
+    await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id)
 
 
 async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
     keys = [
-        f"user:{user_id}",
-        f"saga:{saga_id}:payment:status",
-        f"saga:{saga_id}:payment:amounts",
+        f"{{user_{user_id}}}:data",
+        f"{{user_{user_id}}}:saga-status:{saga_id}",
+        f"{{user_{user_id}}}:amounts:{saga_id}",
     ]
     args = [str(amount), saga_id, user_id]
-    result = await db.evalsha(_scripts["payment_saga_execute"], len(keys), *keys, *args)
-    return result
+    return await db.fcall("payment_saga_execute", len(keys), *keys, *args)
 
 
 async def _saga_compensate(saga_id: str, user_id: str):
     if not user_id:
         return
     keys = [
-        f"user:{user_id}",
-        f"saga:{saga_id}:payment:status",
-        f"saga:{saga_id}:payment:amounts",
+        f"{{user_{user_id}}}:data",
+        f"{{user_{user_id}}}:saga-status:{saga_id}",
+        f"{{user_{user_id}}}:amounts:{saga_id}",
     ]
-    await db.evalsha(_scripts["payment_saga_compensate"], len(keys), *keys, saga_id)
+    await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id)
 
 
 # ============================================================================
@@ -227,11 +217,11 @@ async def _saga_compensate(saga_id: str, user_id: str):
 async def create_user(request: Request):
     key = str(uuid.uuid4())
     try:
-        await db.hset(f"user:{key}", mapping={
+        await db.hset(f"{{user_{key}}}:data", mapping={
             "available_credit": 0,
             "held_credit": 0,
         })
-    except aioredis.RedisError:
+    except Exception:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"user_id": key})
 
@@ -242,12 +232,12 @@ async def batch_init_users(request: Request):
     try:
         async with db.pipeline(transaction=False) as pipe:
             for i in range(n):
-                pipe.hset(f"user:{i}", mapping={
+                pipe.hset(f"{{user_{i}}}:data", mapping={
                     "available_credit": starting_money,
                     "held_credit": 0,
                 })
             await pipe.execute()
-    except aioredis.RedisError:
+    except Exception:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for users successful"})
 
@@ -255,16 +245,9 @@ async def batch_init_users(request: Request):
 async def find_user(request: Request):
     user_id = request.path_params["user_id"]
     try:
-        # External reads must prefer the current Sentinel master. After a failover,
-        # the replica may still be reconnecting or serving stale data.
-        entry = await db.hgetall(f"user:{user_id}")
+        entry = await db.hgetall(f"{{user_{user_id}}}:data")
     except Exception:
-        if not db_read:
-            raise HTTPException(400, detail=DB_ERROR_STR)
-        try:
-            entry = await db_read.hgetall(f"user:{user_id}")
-        except aioredis.RedisError:
-            raise HTTPException(400, detail=DB_ERROR_STR)
+        raise HTTPException(400, detail=DB_ERROR_STR)
     if not entry:
         raise HTTPException(400, detail=f"User: {user_id} not found!")
     available = int(entry["available_credit"])
@@ -278,14 +261,12 @@ async def find_user(request: Request):
 async def add_credit(request: Request):
     user_id = request.path_params["user_id"]
     amount = int(request.path_params["amount"])
-    key = f"user:{user_id}"
+    key = f"{{user_{user_id}}}:data"
     try:
-        await db.evalsha(_scripts["payment_add_direct"], 1, key, amount)
-    except aioredis.ResponseError as e:
+        await db.fcall("payment_add_direct", 1, key, amount)
+    except Exception as e:
         if "USER_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"User: {user_id} not found!")
-        raise HTTPException(400, detail=DB_ERROR_STR)
-    except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"done": True})
 
@@ -293,17 +274,15 @@ async def add_credit(request: Request):
 async def remove_credit(request: Request):
     user_id = request.path_params["user_id"]
     amount = int(request.path_params["amount"])
-    key = f"user:{user_id}"
+    key = f"{{user_{user_id}}}:data"
     try:
-        new_credit = await db.evalsha(_scripts["payment_subtract_direct"], 1, key, amount)
-    except aioredis.ResponseError as e:
+        new_credit = await db.fcall("payment_subtract_direct", 1, key, amount)
+    except Exception as e:
         err_msg = str(e)
         if "USER_NOT_FOUND" in err_msg:
             raise HTTPException(400, detail=f"User: {user_id} not found!")
         if "INSUFFICIENT_CREDIT" in err_msg:
             raise HTTPException(400, detail=f"User: {user_id} credit cannot get reduced below zero!")
-        raise HTTPException(400, detail=DB_ERROR_STR)
-    except aioredis.RedisError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     return PlainTextResponse(f"User: {user_id} credit updated to: {new_credit}")
 

@@ -37,7 +37,7 @@ class LeaderElection:
     Checkout processing runs on ALL instances directly.
     """
 
-    LOCK_KEY = "orchestrator:leader"
+    LOCK_KEY = "{order-wal}:leader"
     LOCK_TTL = 5  # seconds
     HEARTBEAT_INTERVAL = 2  # seconds (must be < LOCK_TTL)
 
@@ -47,8 +47,6 @@ class LeaderElection:
         self._is_leader = False
         self._heartbeat_task: asyncio.Task | None = None
         self._stop_event = asyncio.Event()
-        self._renew = db.register_script(_RENEW_SCRIPT)
-        self._release = db.register_script(_RELEASE_SCRIPT)
 
     @property
     def is_leader(self) -> bool:
@@ -88,7 +86,7 @@ class LeaderElection:
             self._heartbeat_task = None
 
         if self._is_leader:
-            await self._release(keys=[self.LOCK_KEY], args=[self.instance_id])
+            await self.db.eval(_RELEASE_SCRIPT, 1, self.LOCK_KEY, self.instance_id)
             self._is_leader = False
             logger.info("Leadership released", instance_id=self.instance_id)
 
@@ -102,9 +100,9 @@ class LeaderElection:
         while True:
             try:
                 await asyncio.sleep(self.HEARTBEAT_INTERVAL)
-                result = await self._renew(
-                    keys=[self.LOCK_KEY],
-                    args=[self.instance_id, str(self.LOCK_TTL)],
+                result = await self.db.eval(
+                    _RENEW_SCRIPT, 1,
+                    self.LOCK_KEY, self.instance_id, str(self.LOCK_TTL),
                 )
                 if not result:
                     # Lua returned 0: key gone or owned by someone else

@@ -20,8 +20,8 @@ class WALEngine:
       instead of O(n) stream scan
     """
 
-    STREAM_KEY = "saga-wal"
-    ACTIVE_SET = "active_sagas"
+    STREAM_KEY = "{order-wal}:saga-wal"
+    ACTIVE_SET = "{order-wal}:active_sagas"
     MAX_LEN = 50000
     TERMINAL_STATES = frozenset({"COMPLETED", "FAILED", "ABANDONED"})
 
@@ -42,14 +42,14 @@ class WALEngine:
             if data:
                 entry["data"] = json.dumps(data)
 
-            async with self.db.pipeline(transaction=True) as pipe:
+            async with self.db.pipeline(transaction=False) as pipe:
                 pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
                 if step in self.TERMINAL_STATES:
                     pipe.srem(self.ACTIVE_SET, saga_id)
-                    pipe.delete(f"saga_state:{saga_id}")
+                    pipe.delete(f"{{order-wal}}:state:{saga_id}")
                 else:
                     pipe.sadd(self.ACTIVE_SET, saga_id)
-                    pipe.hset(f"saga_state:{saga_id}", mapping=entry)
+                    pipe.hset(f"{{order-wal}}:state:{saga_id}", mapping=entry)
                 await pipe.execute()
 
     async def log_terminal(self, saga_id: str, step: str, data: dict | None = None):
@@ -69,7 +69,7 @@ class WALEngine:
             async with self.db.pipeline(transaction=False) as pipe:
                 pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
                 pipe.srem(self.ACTIVE_SET, saga_id)
-                pipe.delete(f"saga_state:{saga_id}")
+                pipe.delete(f"{{order-wal}}:state:{saga_id}")
                 await pipe.execute()
 
     async def get_incomplete_sagas(self) -> dict[str, dict]:
@@ -85,14 +85,14 @@ class WALEngine:
                 self.ACTIVE_SET, cursor=cursor, count=100
             )
             for saga_id in saga_ids:
-                state = await self.db.hgetall(f"saga_state:{saga_id}")
+                state = await self.db.hgetall(f"{{order-wal}}:state:{saga_id}")
                 if not state:
                     await self.db.srem(self.ACTIVE_SET, saga_id)
                     continue
                 step = state.get("step", "")
                 if step in self.TERMINAL_STATES:
                     await self.db.srem(self.ACTIVE_SET, saga_id)
-                    await self.db.delete(f"saga_state:{saga_id}")
+                    await self.db.delete(f"{{order-wal}}:state:{saga_id}")
                     continue
                 data = None
                 raw_data = state.get("data")

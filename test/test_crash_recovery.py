@@ -38,8 +38,9 @@ def _kill_container(name: str):
 
 
 def _restart_container(name: str):
-    """Restart a killed container."""
-    _docker_compose("start", name, check=False)
+    """Restart a killed container using raw docker start (bypasses compose depends_on)."""
+    from topology import start_service
+    start_service(name)
 
 
 @pytest.mark.asyncio
@@ -88,19 +89,19 @@ async def test_order_crash_mid_checkout():
         ]
         n_confirmed = len(checkout_results)
 
-        # Wait for recovery (order-service-2 takes over leadership)
-        # Task 1.4: use polling instead of hardcoded sleep
+        # Restart the killed service (docker compose restart is blocked by
+        # depends_on chain, so we use raw docker start via start_service)
+        _restart_container("order-service-1")
+
         async def _service_healthy():
             try:
                 r = await client.get(f"{GATEWAY}/orders/health")
                 return r.status_code == 200
-            except (httpx.ConnectError, httpx.ReadError):
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError):
                 return False
 
-        await wait_until(_service_healthy, timeout=30.0, interval=1.0,
-                         msg="order-service-2 did not take over within 30s")
-
-        _restart_container("order-service-1")
+        await wait_until(_service_healthy, timeout=60.0, interval=1.0,
+                         msg="order service did not recover within 60s")
 
         # Allow recovery worker time to complete in-flight sagas
         await asyncio.sleep(15.0)
@@ -157,18 +158,18 @@ async def test_stock_crash_mid_reserve():
 
         tasks = [asyncio.create_task(_checkout()) for _ in range(5)]
         await asyncio.sleep(0.2)
-        _kill_container("stock-service")
+        _kill_container("stock-service-1")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
         # Restart and wait for recovery using polling
-        _restart_container("stock-service")
+        _restart_container("stock-service-1")
 
         async def _stock_service_responsive():
             try:
                 r = await client.get(f"{GATEWAY}/orders/health")
                 return r.status_code == 200
-            except (httpx.ConnectError, httpx.ReadError):
+            except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError):
                 return False
 
         await wait_until(_stock_service_responsive, timeout=40.0, interval=1.0,

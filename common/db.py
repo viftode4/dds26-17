@@ -1,5 +1,6 @@
 import os
-import redis.asyncio as aioredis
+
+from redis.asyncio.cluster import RedisCluster, ClusterNode
 
 
 async def create_redis_connection(
@@ -7,12 +8,17 @@ async def create_redis_connection(
     port: int | None = None,
     password: str | None = None,
     db: int | None = None,
-) -> aioredis.Redis:
-    """Create an async Redis connection using environment variables or explicit params."""
-    return aioredis.Redis(
-        host=host or os.environ.get("REDIS_HOST", "localhost"),
-        port=port or int(os.environ.get("REDIS_PORT", 6379)),
-        password=password or os.environ.get("REDIS_PASSWORD", "redis"),
-        db=db or int(os.environ.get("REDIS_DB", 0)),
+) -> RedisCluster:
+    """Create an async RedisCluster connection using environment variables or explicit params.
+
+    Used primarily by tests. Connects to a single-node cluster (or standalone
+    Redis with cluster mode enabled) using the provided or env-var coordinates.
+    """
+    _host = host or os.environ.get("REDIS_HOST", "localhost")
+    _port = port or int(os.environ.get("REDIS_PORT", 6379))
+    _password = password or os.environ.get("REDIS_PASSWORD", "redis")
+    return RedisCluster(
+        startup_nodes=[ClusterNode(_host, _port)],
+        password=_password,
         decode_responses=True,
     )

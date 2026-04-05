@@ -21,6 +21,7 @@ from helpers import (
     wait_gateway_healthy,
     OutcomeTracker,
 )
+from topology import start_service
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
@@ -73,8 +74,8 @@ async def test_network_partition_stock_db():
 
         tracker = OutcomeTracker()
 
-        # Partition the stock DB
-        _docker_network_disconnect("distributed-data-systems-stock-db-1")
+        # Partition one stock cluster shard
+        _docker_network_disconnect("distributed-data-systems-stock-cluster-1-1")
 
         # Issue the checkout phase concurrently — sequential would accumulate
         # 5×30s = 150s of backoff before the partition is lifted.
@@ -93,7 +94,7 @@ async def test_network_partition_stock_db():
         # _verified_action retries with exponential backoff up to 60s between retries.
         # A mid-2PC-commit saga (payment committed, stock commit pending) can be stuck
         # for up to 60s before the next retry fires after reconnect.
-        _docker_network_connect("distributed-data-systems-stock-db-1")
+        _docker_network_connect("distributed-data-systems-stock-cluster-1-1")
         await asyncio.sleep(5.0)  # DB reconnect settle
         await wait_gateway_healthy(client)
         await asyncio.sleep(75.0)  # cover the full 60s max backoff + retry overhead
@@ -260,27 +261,17 @@ async def test_cascade_failure():
         await asyncio.sleep(0.25)
 
         # Kill both simultaneously
-        for container in ["stock-db", "payment-service"]:
+        for container in ["stock-cluster-1", "payment-service-1"]:
             _docker_compose("kill", container)
-
-        # On Docker Desktop/Windows, Sentinel enters TILT mode every ~30s due to
-        # VM clock sync jitter. TILT blocks all failover operations (automatic AND
-        # SENTINEL FAILOVER commands). We bypass this by manually promoting the
-        # replica and re-registering the master with Sentinel.
-        #
-        # CRITICAL: force_failover must run BEFORE Dragonfly's ~10s reconnect-FLUSHALL
-        # timer fires. When a Dragonfly replica loses its master connection, it clears
-        # its data at ~10s to prepare for a full resync. Calling REPLICAOF NO ONE
-        # cancels that timer. We must not wait for gather() first — it can take 30s.
-        from topology import force_failover
-        force_failover("stock-master", "stock-db-replica")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Restart payment-service — it has no Sentinel involvement.
-        _docker_compose("start", "payment-service")
-        _docker_compose("restart", "stock-service", "stock-service-2")
-        await asyncio.sleep(20.0)  # Extended startup time
+        # Restart everything.
+        # stock-cluster-1: cluster promotes its replica automatically (~10s).
+        # The Redis cluster client discovers the new topology via MOVED/ASK errors.
+        _docker_compose("start", "stock-cluster-1")
+        start_service("payment-service-1")
+        await asyncio.sleep(15.0)  # cluster election + client topology refresh
         await wait_gateway_healthy(client)
         await asyncio.sleep(20.0)  # recovery worker time
 
@@ -311,20 +302,11 @@ async def test_redis_failover_data_loss_detection():
         item_id = await create_item(client, price=item_price, stock=initial_stock)
         user_id = await create_user(client, credit=initial_credit)
 
-        # Kill stock-db immediately — potential data loss before replication
-        _docker_compose("kill", "stock-db")
+        # Kill stock-cluster-1 immediately — potential data loss before replication
+        _docker_compose("kill", "stock-cluster-1")
 
-        # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
-        # Manually promote the replica so checkouts can proceed.
-        # Keep delay minimal — Dragonfly fires a reconnect-FLUSHALL on the replica
-        # at ~10s after master loss. REPLICAOF NO ONE cancels that timer.
-        await asyncio.sleep(1.0)
-        from topology import force_failover
-        force_failover("stock-master", "stock-db-replica")
-        # Restart stock-service so it reconnects to the new master (stock-db-replica).
-        _docker_compose("restart", "stock-service", "stock-service-2")
+        # Wait for cluster to elect a new master for the affected shard
         await asyncio.sleep(15.0)
-        await wait_gateway_healthy(client)
 
         tracker = OutcomeTracker()
         # Try checkouts after failover — system must not corrupt data.
@@ -347,10 +329,8 @@ async def test_redis_failover_data_loss_detection():
                     httpx.ConnectError, httpx.TimeoutException) as e:
                 tracker.record_exception(e)
 
-        # Check conservation while stock-db is still dead and stock-db-replica
-        # is the sole master. Starting stock-db first would cause db_read
-        # (slave_for) to connect to the partially-resynced slave and read
-        # stale stock values before the resync completes.
+        # Check conservation while stock-cluster-1 is still dead and its replica
+        # is the elected master for that shard.
         await wait_gateway_healthy(client, max_wait=120.0)
 
         r = await client.get(f"{GATEWAY}/stock/find/{item_id}")
@@ -374,12 +354,11 @@ async def test_redis_failover_data_loss_detection():
 
         print(f"Failover outcomes: {tracker.summary()}")
 
-        # Bring stock-db back up and restore topology for subsequent tests.
-        _docker_compose("start", "stock-db")
-        await asyncio.sleep(30.0)
-        from topology import restore_topology, restart_app_services, wait_stack_healthy as _topo_healthy
-        restore_topology()
-        restart_app_services()
+        # Bring stock-cluster-1 back up — it will rejoin as a replica automatically.
+        _docker_compose("start", "stock-cluster-1")
+        await asyncio.sleep(15.0)
+        from topology import wait_cluster_stable, wait_stack_healthy as _topo_healthy
+        wait_cluster_stable(timeout=30)
         _topo_healthy(timeout=120)
 
 
@@ -413,24 +392,19 @@ async def test_wal_survives_redis_failover():
         tasks = [asyncio.create_task(_do_checkout()) for _ in range(10)]
         await asyncio.sleep(0.2)
 
-        # Kill the order-db master
-        _docker_compose("kill", "order-db")
-
-        # Sentinel TILT mode on Docker Desktop/Windows blocks auto-failover.
-        # Manually promote order-db-replica so order services can reconnect.
-        #
-        # CRITICAL: must run before Dragonfly's ~10s reconnect-FLUSHALL fires on the
-        # replica (which would wipe WAL entries). Call immediately after kill, not after
-        # gather() which can take up to 30s waiting for checkout timeouts.
-        from topology import force_failover
-        force_failover("order-master", "order-db-replica")
+        # Kill one order cluster master
+        _docker_compose("kill", "order-cluster-1")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Restart order services + gateway to reconnect to the new master.
-        # Leave order-db dead — conftest restore_topology handles it before the
-        # next test. Starting an empty order-db now would create split-brain.
-        _docker_compose("restart", "order-service-1", "order-service-2", "gateway")
+        # Wait for cluster to elect a new master for the affected shard
+        await asyncio.sleep(15.0)
+        _docker_compose("start", "order-cluster-1")
+        await asyncio.sleep(10.0)
+
+        # Restart order service + gateway to clear stale connection state
+        start_service("order-service-1")
+        _docker_compose("restart", "gateway")
         await asyncio.sleep(15.0)
         await wait_gateway_healthy(client)
 

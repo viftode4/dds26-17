@@ -3,11 +3,69 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
+
+
+# ---------------------------------------------------------------------------
+# Auto-detect active Docker Compose file — ensures all docker compose
+# subprocess calls target the correct running stack (small vs full).
+# ---------------------------------------------------------------------------
+
+def _detect_compose_file() -> str | None:
+    """Detect which compose file the running stack was started with.
+
+    Checks COMPOSE_FILE env var first, then inspects running containers
+    to infer which compose file is active.
+    """
+    # If already set (e.g., by the user or CI), respect it
+    if os.environ.get("COMPOSE_FILE"):
+        return os.environ["COMPOSE_FILE"]
+
+    # Infer from running container names: if *-service-1-1 exists,
+    # we're using docker-compose-small.yml (services named *-service-1).
+    # If *-service-1 exists (no double suffix), it's docker-compose.yml.
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "-f", "docker-compose-small.yml", "ps", "-q", "--status", "running"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return "docker-compose-small.yml"
+    except Exception:
+        pass
+
+    return None
+
+
+def _get_compose_services() -> list[str]:
+    """Get list of service names from the active compose file."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "config", "--services"],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        if result.returncode == 0:
+            return [s.strip() for s in result.stdout.strip().splitlines() if s.strip()]
+    except Exception:
+        pass
+    return []
+
+
+# Set COMPOSE_FILE early so all subprocess calls use the right file
+_compose_file = _detect_compose_file()
+if _compose_file:
+    os.environ["COMPOSE_FILE"] = _compose_file
+
+
+# Build app service list from the active compose file
+_all_services = _get_compose_services()
+APP_SERVICES = [s for s in _all_services if s.endswith("-service-1") or s.endswith("-service-2")
+                or s in ("stock-service", "payment-service")]
 
 
 # ---------------------------------------------------------------------------
@@ -158,46 +216,33 @@ def docker_compose(*args, check=False):
 
 
 # ---------------------------------------------------------------------------
-# Integration test isolation (task 0.4)
+# Integration test isolation
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)
 def _ensure_clean_topology(request):
-    """Restore Sentinel topology before each slow/chaos test.
+    """Ensure all cluster containers AND app services are running before each integration test.
 
-    After tests that kill Redis masters (triggering Sentinel failover), the
-    topology is inverted: replicas become masters and vice versa.  This fixture
-    detects the drift and restores the original roles so each test starts clean.
+    After chaos tests that kill cluster nodes or app services, this fixture
+    restarts any stopped containers and waits for a stable state.
     """
     if "integration" not in request.keywords:
         yield
         return
 
-    from topology import (
-        ensure_containers_running,
-        is_topology_drifted,
-        restore_topology,
-        restart_app_services,
-        wait_stack_healthy,
-    )
+    from topology import ensure_containers_running, wait_cluster_stable
 
-    ensure_containers_running()
-
-    drifted = is_topology_drifted()
-    if any(drifted.values()):
-        print(f"\n[topology] Drift detected: {drifted}, restoring...")
-        restore_topology()
-        restart_app_services()
-        wait_stack_healthy(timeout=120)
+    ensure_containers_running(app_services=APP_SERVICES)
+    wait_cluster_stable(timeout=30)
     yield
 
 
 @pytest.fixture(autouse=True)
 def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
-    """Flush all Redis databases before each integration test.
+    """Flush all Redis cluster shards before each integration test.
 
     Only runs when the test is marked with @pytest.mark.integration.
-    Uses `docker compose exec` to issue FLUSHALL on each service DB.
+    Issues FLUSHALL on each cluster master (replicates automatically to replicas).
     Set SKIP_DB_FLUSH=1 to disable (e.g. when running against a remote stack).
     """
     import os
@@ -208,22 +253,17 @@ def _flush_databases_between_integration_tests(request, _ensure_clean_topology):
         yield
         return
 
-    # Flush both master and replica containers for each DB.
-    # After a Sentinel failover, the replica becomes the new master, so we
-    # must flush it too. Flushing a still-replica fails with READONLY (silently
-    # ignored via check=False), which is harmless.
+    # Flush each master shard — FLUSHALL in cluster mode flushes the local
+    # node's slots and is replicated to its replica automatically.
     db_containers = [
-        ("order-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("order-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("stock-db",          "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("stock-db-replica",  "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("payment-db",        "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
-        ("payment-db-replica","redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"),
+        "order-cluster-1", "order-cluster-2", "order-cluster-3",
+        "stock-cluster-1", "stock-cluster-2", "stock-cluster-3",
+        "payment-cluster-1", "payment-cluster-2", "payment-cluster-3",
     ]
-    for container, *cmd in db_containers:
+    for container in db_containers:
         subprocess.run(
-            ["docker", "compose", "exec", "-T", container, *cmd],
+            ["docker", "compose", "exec", "-T", container,
+             "redis-cli", "-a", "redis", "--no-auth-warning", "FLUSHALL"],
             capture_output=True, text=True, timeout=15, check=False,
         )
     yield
-

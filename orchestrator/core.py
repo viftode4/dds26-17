@@ -162,7 +162,5 @@ class Orchestrator:
         result_data = json.dumps(result)
         result_key = f"saga-result:{saga_id}"
         notify_channel = f"saga-notify:{saga_id}"
-        async with self.order_db.pipeline(transaction=False) as pipe:
-            pipe.set(result_key, result_data, ex=60)
-            pipe.publish(notify_channel, "done")
-            await pipe.execute()
+        await self.order_db.set(result_key, result_data, ex=60)
+        await self.order_db.execute_command("PUBLISH", notify_channel, "done")

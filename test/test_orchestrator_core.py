@@ -148,8 +148,7 @@ class TestLeaderElection:
     async def leader(self):
         db = AsyncMock()
         db.set = AsyncMock(return_value=True)
-        # register_script returns a callable AsyncMock (the Lua script handle)
-        db.register_script = MagicMock(return_value=AsyncMock(return_value=1))
+        db.eval = AsyncMock(return_value=1)
         le = LeaderElection(db)
         yield le
         # Cleanup: stop heartbeat if running
@@ -189,29 +188,30 @@ class TestLeaderElection:
             leader._heartbeat_task = None
         await leader.release()
         assert leader.is_leader is False
-        # The release Lua script should have been called
-        leader._release.assert_awaited()
+        # The release Lua script should have been called via db.eval()
+        leader.db.eval.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_release_when_not_leader_noop(self, leader):
         leader.db.set.return_value = None
         await leader.acquire()  # fails
-        # release() on non-leader should not call the Lua script
+        # release() on non-leader should not call db.eval
+        leader.db.eval.reset_mock()
         await leader.release()
-        leader._release.assert_not_awaited()
+        leader.db.eval.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_heartbeat_loss_sets_not_leader(self, leader):
         # Simulate heartbeat renewal returning 0 (lock lost)
-        leader._renew = AsyncMock(return_value=0)
+        leader.db.eval = AsyncMock(return_value=0)
         leader.db.set.return_value = True
         await leader.acquire()
         # Wait for the heartbeat to detect loss (it sleeps HEARTBEAT_INTERVAL first)
         with patch("asyncio.sleep", new_callable=AsyncMock):
             # Manually trigger one heartbeat cycle
             leader._is_leader = True
-            # Run the heartbeat renew directly
-            result = await leader._renew(keys=["orchestrator:leader"], args=[leader.instance_id, "5"])
+            # Run the heartbeat renew directly via db.eval
+            result = await leader.db.eval("script", 1, leader.LOCK_KEY, leader.instance_id, "5")
             if not result:
                 leader._is_leader = False
         assert leader.is_leader is False

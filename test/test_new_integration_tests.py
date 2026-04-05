@@ -19,6 +19,7 @@ from helpers import (
     wait_gateway_healthy,
     OutcomeTracker,
 )
+from topology import start_service
 
 pytestmark = pytest.mark.integration
 
@@ -236,12 +237,12 @@ async def test_payment_crash_mid_saga():
 
         tasks = [asyncio.create_task(_do_checkout()) for _ in range(5)]
         await asyncio.sleep(0.2)
-        _docker_compose("kill", "payment-service")
+        _docker_compose("kill", "payment-service-1")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
         # Restart and wait for recovery
-        _docker_compose("start", "payment-service")
+        start_service("payment-service-1")
 
         async def _payment_healthy():
             try:
@@ -290,11 +291,11 @@ async def test_payment_crash_mid_2pc_prepare():
 
         tasks = [asyncio.create_task(_do_checkout()) for _ in range(3)]
         await asyncio.sleep(0.15)
-        _docker_compose("kill", "payment-service")
+        _docker_compose("kill", "payment-service-1")
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        _docker_compose("start", "payment-service")
+        start_service("payment-service-1")
 
         async def _healthy():
             try:
@@ -392,7 +393,7 @@ async def test_idempotency_after_crash_recovery():
         except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError):
             pass  # Expected — service died
 
-        _docker_compose("start", "order-service-1")
+        start_service("order-service-1")
 
         async def _healthy():
             try:

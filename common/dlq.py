@@ -13,7 +13,7 @@ import structlog
 
 log = structlog.get_logger("dlq")
 
-DLQ_STREAM = "dlq:saga"
+DLQ_STREAM = "{order-wal}:dlq:saga"
 DLQ_MAX_LEN = 10000
 
 

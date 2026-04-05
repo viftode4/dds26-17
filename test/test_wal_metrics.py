@@ -57,7 +57,7 @@ class TestWALEngine:
         assert fields["saga_id"] == "saga-1"
         assert fields["step"] == "PREPARING"
         assert "data" not in fields
-        pipe.sadd.assert_called_once_with("active_sagas", "saga-1")
+        pipe.sadd.assert_called_once_with("{order-wal}:active_sagas", "saga-1")
         pipe.hset.assert_called_once()
 
     @pytest.mark.asyncio
@@ -81,8 +81,8 @@ class TestWALEngine:
         await wal.log("saga-done", "COMPLETED")
 
         # Terminal states should remove from active set + delete state hash
-        pipe.srem.assert_called_once_with("active_sagas", "saga-done")
-        pipe.delete.assert_called_once_with("saga_state:saga-done")
+        pipe.srem.assert_called_once_with("{order-wal}:active_sagas", "saga-done")
+        pipe.delete.assert_called_once_with("{order-wal}:state:saga-done")
         # Should NOT add to active set
         pipe.sadd.assert_not_called()
 
@@ -93,8 +93,8 @@ class TestWALEngine:
 
         await wal.log("saga-fail", "FAILED")
 
-        pipe.srem.assert_called_once_with("active_sagas", "saga-fail")
-        pipe.delete.assert_called_once_with("saga_state:saga-fail")
+        pipe.srem.assert_called_once_with("{order-wal}:active_sagas", "saga-fail")
+        pipe.delete.assert_called_once_with("{order-wal}:state:saga-fail")
 
     @pytest.mark.asyncio
     async def test_get_incomplete_returns_active_sagas(self):
@@ -124,7 +124,7 @@ class TestWALEngine:
 
         result = await wal.get_incomplete_sagas()
         assert len(result) == 0
-        db.srem.assert_called_with("active_sagas", "stale-saga")
+        db.srem.assert_called_with("{order-wal}:active_sagas", "stale-saga")
 
     @pytest.mark.asyncio
     async def test_get_incomplete_cleans_terminal_in_set(self):
@@ -141,7 +141,7 @@ class TestWALEngine:
 
         result = await wal.get_incomplete_sagas()
         assert len(result) == 0
-        db.srem.assert_called_with("active_sagas", "done-saga")
+        db.srem.assert_called_with("{order-wal}:active_sagas", "done-saga")
 
     @pytest.mark.asyncio
     async def test_get_incomplete_malformed_json(self):

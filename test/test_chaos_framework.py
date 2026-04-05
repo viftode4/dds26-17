@@ -31,10 +31,9 @@ from helpers import (
     wait_gateway_healthy,
     OutcomeTracker,
 )
+from topology import start_service
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow]
-
-COMPOSE_FILE = ["-f", "docker-compose-small.yml"]
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +42,7 @@ COMPOSE_FILE = ["-f", "docker-compose-small.yml"]
 
 def _docker_compose(*args: str, check: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["docker", "compose", *COMPOSE_FILE, *args],
+        ["docker", "compose", *args],
         capture_output=True, text=True, check=check, timeout=60,
     )
 
@@ -133,7 +132,7 @@ async def test_crash_after_stock_execute():
         await _fire_checkouts(client, order_ids, tracker)
 
         # Restore: restart stock, clear fault
-        _docker_compose("start", "stock-service-1")
+        start_service("stock-service-1")
         await asyncio.sleep(5)
         await wait_until(
             lambda: _service_healthy(client, "stock"),
@@ -177,7 +176,7 @@ async def test_crash_after_payment_execute():
         await _set_fault(client, "payment", "after_execute", "crash")
         await _fire_checkouts(client, order_ids, tracker)
 
-        _docker_compose("start", "payment-service-1")
+        start_service("payment-service-1")
         await asyncio.sleep(5)
         await wait_until(
             lambda: _service_healthy(client, "payment"),
@@ -304,7 +303,7 @@ async def test_crash_after_prepare():
         await _set_fault(client, "stock", "after_prepare", "crash")
         await _fire_checkouts(client, order_ids, tracker)
 
-        _docker_compose("start", "stock-service-1")
+        start_service("stock-service-1")
         await asyncio.sleep(5)
         await wait_until(
             lambda: _service_healthy(client, "stock"),
@@ -347,7 +346,7 @@ async def test_crash_during_compensate():
         await _fire_checkouts(client, order_ids, tracker)
 
         await asyncio.sleep(3)
-        _docker_compose("start", "payment-service-1")
+        start_service("payment-service-1")
         await asyncio.sleep(5)
         await wait_until(
             lambda: _service_healthy(client, "payment"),
