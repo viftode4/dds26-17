@@ -1,15 +1,13 @@
 Contributions
 
 Vlad George Iftode:
-Primary architect and developer. Designed and implemented the hybrid 2PC/Saga orchestrator,
-Redis Streams (later NATS) inter-service communication, Lua atomic scripts, WAL-based crash
-recovery, HAProxy gateway, active-active architecture, comprehensive test suite (83 unit +
-6 integration tests), performance optimization pipeline, and benchmarking infrastructure.
+System architecture, main contributor to implementation, debugging, testing, optimizing, crunching Claude usage.
 
 Daniel Popovici:
-Contributed to initial microservice implementations, Kubernetes configuration, fault tolerance
-testing (2PC/Saga validation), and 2PC bug fixes.
+System architecture, implementation, debugging, testing, optimizing.
 
 Dinu Blanovschi:
-
 TLA+ model for formal proofs of consistency and fault tolerance of our code.
+
+Alexandru Ojica:
+Testing and debugging.
