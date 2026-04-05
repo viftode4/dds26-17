@@ -168,6 +168,15 @@ class NatsTransport:
 
     async def _reconnected_cb(self) -> None:
         log.info("NATS reconnected", url=self._nc.connected_url.netloc if self._nc else "")
+        # Memory-storage streams are lost when NATS restarts. Recreate idempotently;
+        # add_stream() is a no-op if the stream still exists with the same config.
+        asyncio.create_task(self._reconnect_ensure_stream())
+
+    async def _reconnect_ensure_stream(self) -> None:
+        try:
+            await self._ensure_stream()
+        except Exception as e:
+            log.error("Failed to recreate COMMANDS stream after reconnect", error=str(e))
 
     async def _disconnected_cb(self) -> None:
         log.warning("NATS disconnected")
