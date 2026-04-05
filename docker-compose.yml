@@ -33,8 +33,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
+      - REDIS_MASTER_POOL_SIZE=4096
+      - REDIS_REPLICA_POOL_SIZE=2048
     command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
     env_file:
       - env/order_redis.env

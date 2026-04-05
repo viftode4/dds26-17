@@ -65,7 +65,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.5"
+          cpus: "6"
           memory: 1024M
 
   stock-service-1:
@@ -168,7 +168,7 @@ services:
       dragonfly
         --requirepass redis
         --masterauth redis
-        --maxmemory 400mb
+        --maxmemory 512mb
         --maxclients 10000
     healthcheck:
       test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
@@ -178,7 +178,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.0"
+          cpus: "2.0"
 
   stock-db:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
@@ -238,7 +238,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.3"
+          cpus: "0.6"
 
   order-db-replica-2:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
