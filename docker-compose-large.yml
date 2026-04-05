@@ -1,13 +1,14 @@
 # Large cluster — ~90 CPU total
 # System: ~80 CPU | Locust: ~10 CPU
 # App: 9 order (3 workers) + 7 stock (2 workers) + 7 payment (2 workers) instances
+# Pool: 512 master / 256 replica per instance (27 order processes, 14 stock, 14 payment)
 
 x-order-service: &order-service
   image: order:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=2048
-    - REDIS_REPLICA_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=4096
+    - REDIS_REPLICA_POOL_SIZE=2048
   env_file:
     - env/order_redis.env
   volumes:
@@ -46,8 +47,8 @@ x-stock-service: &stock-service
   image: stock:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=2048
-    - REDIS_REPLICA_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=512
+    - REDIS_REPLICA_POOL_SIZE=256
   env_file:
     - env/stock_redis.env
   volumes:
@@ -86,8 +87,8 @@ x-payment-service: &payment-service
   image: payment:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=2048
-    - REDIS_REPLICA_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=512
+    - REDIS_REPLICA_POOL_SIZE=256
   env_file:
     - env/payment_redis.env
   volumes:
@@ -149,7 +150,7 @@ x-sentinel: &sentinel
   deploy:
     resources:
       limits:
-        cpus: "0.5"
+        cpus: "0.3"
         memory: 64M
 
 services:
@@ -222,8 +223,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-2:
     <<: *order-service
@@ -231,8 +232,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-3:
     <<: *order-service
@@ -240,8 +241,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-4:
     <<: *order-service
@@ -249,8 +250,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-5:
     <<: *order-service
@@ -258,8 +259,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-6:
     <<: *order-service
@@ -267,8 +268,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-7:
     <<: *order-service
@@ -276,8 +277,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-8:
     <<: *order-service
@@ -285,8 +286,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-8
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   order-service-9:
     <<: *order-service
@@ -294,8 +295,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-9
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   # ---- Stock Services (7 instances, 2 Granian workers each) ----
 
@@ -305,56 +306,56 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-2:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-3:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-4:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-5:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-6:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   stock-service-7:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   # ---- Payment Services (7 instances, 2 Granian workers each) ----
 
@@ -364,225 +365,207 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-2:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-3:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-4:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-5:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-6:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   payment-service-7:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=512
+      - REDIS_REPLICA_POOL_SIZE=256
 
   # ---- Redis Masters ----
 
   order-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 1600mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 32768
+        --maxclients 16384
     deploy:
       resources:
         limits:
-          cpus: "8.0"
-          memory: 2G
+          cpus: "6.0"
 
   stock-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
-        --maxmemory 800mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 32768
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
+        --maxmemory 768mb
+        --maxclients 8192
     deploy:
       resources:
         limits:
-          cpus: "7.0"
-          memory: 1G
+          cpus: "3.0"
 
   payment-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
-        --maxmemory 800mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
-        --maxclients 32768
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
+        --maxmemory 768mb
+        --maxclients 8192
     deploy:
       resources:
         limits:
-          cpus: "7.0"
-          memory: 1G
+          cpus: "3.0"
 
   # ---- Redis Replicas ----
 
   order-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 800mb
-        --replicaof order-db 6379
+        --replicaof order-db:6379
         --masterauth redis
+        --maxclients 8192
     depends_on:
       order-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 1G
+          cpus: "1.5"
 
   order-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --maxmemory 800mb
-        --replicaof order-db 6379
+        --replicaof order-db:6379
         --masterauth redis
+        --maxclients 8192
     depends_on:
       order-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "2.0"
-          memory: 1G
+          cpus: "1.5"
 
   stock-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 400mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
+        --maxclients 12288
     depends_on:
       stock-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 512M
+          cpus: "0.75"
 
   stock-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 400mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
+        --maxclients 12288
     depends_on:
       stock-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 512M
+          cpus: "0.75"
 
   payment-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 400mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
+        --maxclients 12288
     depends_on:
       payment-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 512M
+          cpus: "0.75"
 
   payment-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 400mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
+        --maxclients 12288
     depends_on:
       payment-db:
         condition: service_started
     deploy:
       resources:
         limits:
-          cpus: "1.5"
-          memory: 512M
+          cpus: "0.75"
 
   # ---- NATS ----
 
   nats:
     image: nats:2.11-alpine
+    command: ["-js"]
     deploy:
       resources:
         limits:

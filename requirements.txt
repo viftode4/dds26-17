@@ -5,3 +5,10 @@ httpx==0.28.1
 structlog==24.4.0
 prometheus-client==0.21.1
 uvloop>=0.21
+nats-py>=2.9
+msgpack>=1.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp-proto-grpc>=1.25.0
+opentelemetry-instrumentation-starlette>=0.46b0
+opentelemetry-instrumentation-redis>=0.46b0
+opentelemetry-instrumentation-httpx>=0.46b0

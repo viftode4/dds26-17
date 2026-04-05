@@ -2,6 +2,10 @@ import json
 import time
 
 import redis.asyncio as aioredis
+from opentelemetry import trace
+from opentelemetry.trace import SpanKind
+
+_tracer = trace.get_tracer("orchestrator.wal")
 
 
 class WALEngine:
@@ -26,39 +30,47 @@ class WALEngine:
 
     async def log(self, saga_id: str, step: str, data: dict | None = None):
         """Log a state transition to the WAL stream + index."""
-        entry = {
-            "saga_id": saga_id,
-            "step": step,
-            "timestamp": str(time.time()),
-        }
-        if data:
-            entry["data"] = json.dumps(data)
+        with _tracer.start_as_current_span("wal.log", kind=SpanKind.INTERNAL) as span:
+            span.set_attribute("saga_id", saga_id)
+            span.set_attribute("wal.step", step)
 
-        async with self.db.pipeline(transaction=True) as pipe:
-            pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
-            if step in self.TERMINAL_STATES:
-                pipe.srem(self.ACTIVE_SET, saga_id)
-                pipe.delete(f"saga_state:{saga_id}")
-            else:
-                pipe.sadd(self.ACTIVE_SET, saga_id)
-                pipe.hset(f"saga_state:{saga_id}", mapping=entry)
-            await pipe.execute()
+            entry = {
+                "saga_id": saga_id,
+                "step": step,
+                "timestamp": str(time.time()),
+            }
+            if data:
+                entry["data"] = json.dumps(data)
+
+            async with self.db.pipeline(transaction=True) as pipe:
+                pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
+                if step in self.TERMINAL_STATES:
+                    pipe.srem(self.ACTIVE_SET, saga_id)
+                    pipe.delete(f"saga_state:{saga_id}")
+                else:
+                    pipe.sadd(self.ACTIVE_SET, saga_id)
+                    pipe.hset(f"saga_state:{saga_id}", mapping=entry)
+                await pipe.execute()
 
     async def log_terminal(self, saga_id: str, step: str, data: dict | None = None):
         """Log a terminal state with non-transactional pipeline (faster, no MULTI/EXEC)."""
-        entry = {
-            "saga_id": saga_id,
-            "step": step,
-            "timestamp": str(time.time()),
-        }
-        if data:
-            entry["data"] = json.dumps(data)
+        with _tracer.start_as_current_span("wal.log_terminal", kind=SpanKind.INTERNAL) as span:
+            span.set_attribute("saga_id", saga_id)
+            span.set_attribute("wal.step", step)
 
-        async with self.db.pipeline(transaction=False) as pipe:
-            pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
-            pipe.srem(self.ACTIVE_SET, saga_id)
-            pipe.delete(f"saga_state:{saga_id}")
-            await pipe.execute()
+            entry = {
+                "saga_id": saga_id,
+                "step": step,
+                "timestamp": str(time.time()),
+            }
+            if data:
+                entry["data"] = json.dumps(data)
+
+            async with self.db.pipeline(transaction=False) as pipe:
+                pipe.xadd(self.STREAM_KEY, entry, maxlen=self.MAX_LEN, approximate=True)
+                pipe.srem(self.ACTIVE_SET, saga_id)
+                pipe.delete(f"saga_state:{saga_id}")
+                await pipe.execute()
 
     async def get_incomplete_sagas(self) -> dict[str, dict]:
         """Find all sagas not in a terminal state.
@@ -75,12 +87,10 @@ class WALEngine:
             for saga_id in saga_ids:
                 state = await self.db.hgetall(f"saga_state:{saga_id}")
                 if not state:
-                    # Stale entry in SET — clean up
                     await self.db.srem(self.ACTIVE_SET, saga_id)
                     continue
                 step = state.get("step", "")
                 if step in self.TERMINAL_STATES:
-                    # Terminal but not yet cleaned — clean up
                     await self.db.srem(self.ACTIVE_SET, saga_id)
                     await self.db.delete(f"saga_state:{saga_id}")
                     continue

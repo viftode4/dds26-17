@@ -143,7 +143,7 @@ def create_replica_connection(
 
 
 async def wait_for_redis(db: aioredis.Redis, name: str = "Redis",
-                         retries: int = 30, delay: float = 1.0):
+                         retries: int = 60, delay: float = 2.0):
     """Wait for Redis to become available with retry + backoff."""
     for attempt in range(1, retries + 1):
         try:
@@ -157,6 +157,12 @@ async def wait_for_redis(db: aioredis.Redis, name: str = "Redis",
                 ) from e
             logger.warning("Redis not ready", name=name, attempt=attempt,
                            retries=retries, error=str(e))
+            # Disconnect pool so the next attempt re-queries Sentinel for the
+            # current master (handles Sentinel failover and IP reassignment).
+            try:
+                await db.connection_pool.disconnect()
+            except Exception:
+                pass
             await asyncio.sleep(delay)
 
 
@@ -166,9 +172,20 @@ async def subscribe_failover_invalidation(
 ) -> asyncio.Task | None:
     """Subscribe to Sentinel +switch-master events and invalidate connection pools.
 
-    When Sentinel promotes a replica, all existing connections in the pool may
-    still point to the demoted old master.  Disconnecting the pool forces
-    redis-py to re-resolve the master via Sentinel on the next command.
+    Two complementary mechanisms run concurrently:
+
+    1. PubSub listener (fast path): subscribes to Sentinel's +switch-master
+       channel and disconnects pools immediately when a failover is published.
+
+    2. Reconciler (slow path / fallback): every 10 s, queries Sentinel directly
+       for the current master IP.  If the IP has changed since the last check,
+       disconnects pools regardless of whether the PubSub event was received.
+       This catches failovers that occur during the 2 s listener reconnect window
+       (the race condition where +switch-master is published while the PubSub
+       connection is being re-established after an error).
+
+    Disconnecting the pool forces redis-py to re-resolve the master via Sentinel
+    on the next command — the standard reconnection pattern for Sentinel clients.
 
     Returns the background task (caller should cancel it on shutdown) or None
     if Sentinel is not configured.
@@ -179,7 +196,17 @@ async def subscribe_failover_invalidation(
 
     import redis.asyncio as _aioredis
 
-    async def _listener():
+    async def _invalidate(reason: str) -> None:
+        logger.warning("Sentinel failover detected, invalidating pools",
+                       service=service_name, reason=reason)
+        for pool in pools:
+            try:
+                await pool.connection_pool.disconnect()
+            except Exception:
+                pass
+
+    async def _pubsub_listener():
+        """Fast path: event-driven pool invalidation via Sentinel PubSub."""
         while True:
             try:
                 sentinel_conn = _aioredis.Redis(
@@ -189,30 +216,61 @@ async def subscribe_failover_invalidation(
                 )
                 pubsub = sentinel_conn.pubsub()
                 await pubsub.psubscribe("*")
-                logger.info("Sentinel failover listener started",
-                            service=service_name)
+                logger.info("Sentinel failover listener started", service=service_name)
 
                 async for message in pubsub.listen():
                     if message["type"] != "pmessage":
                         continue
-                    channel = message.get("channel", "")
-                    if "+switch-master" not in channel:
+                    if "+switch-master" not in message.get("channel", ""):
                         continue
-
-                    data = message.get("data", "")
-                    logger.warning("Sentinel failover detected, invalidating pools",
-                                   service=service_name, switch_master=data)
-                    for pool in pools:
-                        try:
-                            await pool.connection_pool.disconnect()
-                        except Exception:
-                            pass
+                    await _invalidate(f"pubsub: {message.get('data', '')}")
 
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 logger.warning("Sentinel listener error, reconnecting",
-                               error=str(e))
+                               service=service_name, error=str(e))
                 await asyncio.sleep(2)
 
-    return asyncio.create_task(_listener())
+    async def _reconciler():
+        """Slow path: periodic Sentinel query to catch missed +switch-master events."""
+        sentinel_svc = os.environ.get("REDIS_SENTINEL_SERVICE", "")
+        if not sentinel_svc:
+            return  # Cannot reconcile without knowing which service to monitor
+
+        last_ip: str | None = None
+        while True:
+            await asyncio.sleep(10)
+            try:
+                for host, port in sentinel_hosts:
+                    r = _aioredis.Redis(
+                        host=host, port=port, decode_responses=True,
+                        socket_connect_timeout=3, socket_timeout=3,
+                    )
+                    try:
+                        result = await r.execute_command(
+                            "SENTINEL", "get-master-addr-by-name", sentinel_svc
+                        )
+                    finally:
+                        try:
+                            await r.aclose()
+                        except Exception:
+                            pass
+                    if result:
+                        current_ip = result[0]
+                        if last_ip is not None and current_ip != last_ip:
+                            await _invalidate(
+                                f"reconciler: master IP changed {last_ip} → {current_ip}"
+                            )
+                        last_ip = current_ip
+                        break  # Got a valid response from this sentinel, no need to try others
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning("Sentinel reconciler error",
+                               service=service_name, error=str(e))
+
+    async def _watcher():
+        await asyncio.gather(_pubsub_listener(), _reconciler())
+
+    return asyncio.create_task(_watcher())

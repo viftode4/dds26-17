@@ -33,8 +33,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=1024
-      - REDIS_REPLICA_POOL_SIZE=512
+      - REDIS_MASTER_POOL_SIZE=4096
+      - REDIS_REPLICA_POOL_SIZE=2048
     command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
     env_file:
       - env/order_redis.env
@@ -115,71 +115,52 @@ services:
 
   # ---- Redis Masters ----
   order-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 400mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
         --maxclients 8192
     deploy:
       resources:
         limits:
-          cpus: "5.0"
-          memory: 512M
+          cpus: "1.0"
 
   stock-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 350mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
         --maxclients 8192
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 512M
+          cpus: "1.0"
 
   payment-db:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
         --masterauth redis
         --maxmemory 350mb
-        --appendonly yes
-        --appendfsync everysec
-        --io-threads 8
-        --io-threads-do-reads yes
         --maxclients 8192
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     deploy:
       resources:
         limits:
-          cpus: "4.0"
-          memory: 512M
+          cpus: "1.0"
 
   # ---- Redis Replicas ----
   order-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
+        --maxmemory 300mb
+        --replicaof order-db:6379
         --masterauth redis
     depends_on:
       order-db:
@@ -188,15 +169,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   order-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
+        --maxmemory 300mb
+        --replicaof order-db:6379
         --masterauth redis
     depends_on:
       order-db:
@@ -205,15 +185,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   stock-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
     depends_on:
       stock-db:
@@ -222,15 +201,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   stock-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
     depends_on:
       stock-db:
@@ -239,15 +217,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   payment-db-replica:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
     depends_on:
       payment-db:
@@ -256,15 +233,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   payment-db-replica-2:
-    image: valkey/valkey:8.1-bookworm
+    image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
-      redis-server
+      dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
     depends_on:
       payment-db:
@@ -273,11 +249,14 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 256M
 
   # ---- NATS ----
   nats:
     image: nats:2.11-alpine
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
     deploy:
       resources:
         limits:
@@ -542,3 +521,48 @@ services:
         limits:
           cpus: "1.0"
           memory: 384M
+
+  # ---- Observability ----
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M

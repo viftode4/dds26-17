@@ -22,6 +22,8 @@ from common.config import create_redis_connection, create_replica_connection, wa
 from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
+from common.tracing import setup_tracing, shutdown_tracing
+from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 from orchestrator import (
     Orchestrator, TransactionDefinition, Step,
     LeaderElection, RecoveryWorker,
@@ -36,6 +38,7 @@ log = get_logger("order")
 
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
+_scripts: dict[str, str] = {}
 orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
@@ -55,7 +58,7 @@ def stock_payload(saga_id: str, action: str, context: dict) -> dict:
     cmd: dict[str, str] = {}
     if items:
         cmd["items"] = json.dumps(items)
-    cmd["ttl"] = str(context.get("_reservation_ttl", 60))
+    cmd["ttl"] = str(context.get("_reservation_ttl", 300))
     return cmd
 
 
@@ -64,7 +67,7 @@ def payment_payload(saga_id: str, action: str, context: dict) -> dict:
     return {
         "user_id": context.get("user_id", ""),
         "amount": str(context.get("total_cost", 0)),
-        "ttl": str(context.get("_reservation_ttl", 60)),
+        "ttl": str(context.get("_reservation_ttl", 300)),
     }
 
 
@@ -119,6 +122,7 @@ async def _leadership_loop():
 async def lifespan(app):
     global db, db_read, orchestrator, leader_election, recovery_worker, _leader_task, _http_client, _nats_transport
 
+    setup_tracing("order-service")
     setup_logging("order-service")
 
     # Master connection for writes
@@ -128,20 +132,34 @@ async def lifespan(app):
     # Replica connection for read-only lookups
     db_read = create_replica_connection(prefix="", decode_responses=True)
 
-    # Load Lua function library
-    lua_path = Path(__file__).parent / "lua" / "order_lib.lua"
-    lua_code = lua_path.read_text()
+    # Load Lua scripts into Dragonfly script cache
+    global _scripts
+    script_names = ["order_add_item", "order_load_and_claim"]
+    lua_dir = Path(__file__).parent / "lua"
     try:
-        await db.function_load(lua_code, replace=True)
+        for name in script_names:
+            code = (lua_dir / f"{name}.lua").read_text()
+            _scripts[name] = await db.script_load(code)
     except aioredis.RedisError as e:
-        log.error("Failed to load Lua library", error=str(e))
+        log.error("Failed to load Lua scripts", error=str(e))
         raise
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
-    await asyncio.gather(*[db.ping() for _ in range(32)])
+    await asyncio.gather(*[db.ping() for _ in range(128)])
 
-    # Shared HTTP client for inter-service lookups via gateway
-    _http_client = httpx.AsyncClient(base_url=GATEWAY_URL, timeout=5.0)
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+    HTTPXClientInstrumentor().instrument()
+
+    # Shared HTTP client for inter-service lookups via gateway.
+    # Semaphore caps concurrent outgoing HTTP requests to prevent pool exhaustion
+    # when the event loop is saturated under load (PoolTimeout).
+    global _http_semaphore
+    _http_semaphore = asyncio.Semaphore(50)
+    _http_client = httpx.AsyncClient(
+        base_url=GATEWAY_URL,
+        timeout=httpx.Timeout(5.0, pool=2.0),
+        limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
+    )
 
     # NATS transport for orchestrator-to-service communication
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
@@ -193,6 +211,7 @@ async def lifespan(app):
         await db_read.aclose()
     if db:
         await db.aclose()
+    shutdown_tracing()
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +296,8 @@ async def add_item(request: Request):
     if quantity <= 0:
         raise HTTPException(400, detail="Quantity must be positive")
     try:
-        resp = await _http_client.get(f"/stock/find/{item_id}")
+        async with _http_semaphore:
+            resp = await _http_client.get(f"/stock/find/{item_id}")
     except httpx.HTTPError:
         raise HTTPException(400, detail=DB_ERROR_STR)
     if resp.status_code != 200:
@@ -288,8 +308,8 @@ async def add_item(request: Request):
     items_key = f"order:{order_id}:items"
     order_key = f"order:{order_id}"
     try:
-        await db.fcall("order_add_item", 2, items_key, order_key,
-                       f"{item_id}:{quantity}", cost_increase)
+        await db.evalsha(_scripts["order_add_item"], 2, items_key, order_key,
+                         f"{item_id}:{quantity}", cost_increase)
     except aioredis.ResponseError as e:
         if "ORDER_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -330,7 +350,7 @@ async def checkout(request: Request):
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
     keys = [f"order:{order_id}", f"order:{order_id}:items", idempotency_key]
-    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "120")
+    raw = await db.evalsha(_scripts["order_load_and_claim"], len(keys), *keys, claim_value, "300")
     found, entry_flat_json, items_json, acquired_int = raw[0], raw[1], raw[2], raw[3]
     if not found:
         raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -366,7 +386,9 @@ async def checkout(request: Request):
 
     if not aggregated_items:
         if acquired:
-            await db.delete(idempotency_key)
+            await db.set(idempotency_key,
+                         json.dumps({"status": "failed", "error": "no_items"}),
+                         ex=60)
         raise HTTPException(400, detail="Order has no items")
 
     if not acquired:
@@ -409,9 +431,13 @@ async def checkout(request: Request):
                  protocol=result.get("protocol"))
         return PlainTextResponse("Checkout successful")
     else:
-        # Delete idempotency key — allow client to retry after fixing conditions
-        await db.delete(idempotency_key)
         error = result.get("error", "unknown")
+        # Mark idempotency key as failed (not delete) — prevents a concurrent
+        # request from grabbing the same key before this response is sent.
+        # Short TTL allows retries after conditions improve (stock/credit added).
+        await db.set(idempotency_key,
+                     json.dumps({"status": "failed", "error": error, "saga_id": saga_id}),
+                     ex=60)
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         raise HTTPException(400, detail=f"Checkout failed: {error}")
 
@@ -422,6 +448,18 @@ async def health(request: Request):
     except Exception:
         raise HTTPException(503, detail="Redis unavailable")
     return JSONResponse({"status": "healthy"})
+
+
+async def dlq_status(request: Request):
+    """Return DLQ count and latest entries for monitoring."""
+    count = await db.xlen("dlq:saga")
+    raw_entries = await db.xrevrange("dlq:saga", count=10)
+    entries = []
+    for entry_id, fields in raw_entries:
+        entry = dict(fields)
+        entry["id"] = entry_id
+        entries.append(entry)
+    return JSONResponse({"count": count, "latest": entries})
 
 
 async def metrics(request: Request):
@@ -477,6 +515,7 @@ routes = [
     Route("/checkout/{order_id}", checkout, methods=["POST"]),
     Route("/health", health, methods=["GET"]),
     Route("/metrics", metrics, methods=["GET"]),
+    Route("/dlq/status", dlq_status, methods=["GET"]),
 ]
 
 app = Starlette(
@@ -484,3 +523,4 @@ app = Starlette(
     lifespan=lifespan,
     exception_handlers={HTTPException: http_exception_handler},
 )
+StarletteInstrumentor().instrument_app(app)
