@@ -1,0 +1,2327 @@
+---- MODULE ServicesConsistencyPlusCal ----
+EXTENDS Naturals, Sequences, TLC
+
+CONSTANT Mode, PPU, CheckoutAmount, InitialStock, InitialCredits
+
+ASSUME Mode \in {"2pc", "saga"}
+ASSUME PPU \in Nat
+ASSUME CheckoutAmount \in Nat
+ASSUME InitialStock \in Nat
+ASSUME InitialCredits \in Nat
+
+PAYMENT_STATUS == {"pending", "prepared", "completed", "failed", "compensated"}
+STOCK_STATUS == {"pending", "prepared", "completed", "failed", "compensated"}
+
+(*--algorithm ServicesConsistency
+variables
+    done = FALSE,
+    userCredits = InitialCredits,
+    userHeldCredits = 0,
+    userPaidCredits = 0,
+    stockAvailable = InitialStock,
+    stockHeld = 0,
+    stockSold = 0,
+    paymentStatus = "pending",
+    stockStatus = "pending",
+    orchestratorTxP = <<>>,
+    orchestratorTxS = <<>>,
+    orchestratorRxP = <<>>,
+    orchestratorRxS = <<>>,
+    restarted = <<FALSE, FALSE, FALSE>>,
+    anyRestarted = FALSE;
+
+define
+    TypeInvariant ==
+        /\ done \in BOOLEAN
+        /\ paymentStatus \in PAYMENT_STATUS
+        /\ stockStatus \in STOCK_STATUS
+        /\ userCredits \in Nat
+        /\ userHeldCredits \in Nat
+        /\ userPaidCredits \in Nat
+        /\ stockAvailable \in Nat
+        /\ stockHeld \in Nat
+        /\ stockSold \in Nat
+    
+    UserCreditsConsistent == userCredits + userHeldCredits + userPaidCredits = InitialCredits
+    StockConsistent == stockAvailable + stockHeld + stockSold = InitialStock
+
+    EventuallyCompletes == <>(
+        /\ (
+            \/ paymentStatus = "completed" /\ stockStatus = "completed" /\ userCredits + userPaidCredits = InitialCredits /\ stockAvailable + stockSold = InitialStock
+            \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+            \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+            )
+        /\ userHeldCredits = 0
+        /\ stockHeld = 0
+    )
+end define;
+
+macro maybeRestart() begin
+    if restarted[self] = FALSE /\ anyRestarted = FALSE then
+        either
+            skip;
+        or
+            restarted[self] := TRUE;
+            anyRestarted := TRUE;
+            goto Start;
+        end either;
+    end if;
+end macro;
+
+fair+ process Orchestrator \in {3}
+variables
+    checkoutStatus = <<>>, message = "", retries = <<>>;
+begin
+Start:
+    checkoutStatus := <<"notStarted", "notStarted">>;
+    retries := <<FALSE, FALSE>>;
+    if Mode = "2pc" then
+        goto Checkout2PC;
+    else
+        goto CheckoutSaga;
+    end if;
+
+Checkout2PC:
+    goto CheckoutPayment2PC;
+    CheckoutPayment2PC:
+        orchestratorTxP := Append(orchestratorTxP, "prepare");
+        checkoutStatus[1] := "started";
+    CheckoutStock2PC:
+        maybeRestart();
+    CheckoutStock2PCContinuation:
+        orchestratorTxS := Append(orchestratorTxS, "prepare");
+        checkoutStatus[2] := "started";
+    
+    CheckoutProcess:
+        if orchestratorRxP # <<>> then
+            message := Head(orchestratorRxP);
+            orchestratorRxP := Tail(orchestratorRxP);
+            ProcessMessageCheckout:
+                maybeRestart();
+            ProcessMessageCheckoutContinuation:
+                if message = "prepareOk" then
+                    if checkoutStatus[1] = "started" then
+                        checkoutStatus[1] := "prepared";
+                    end if;
+                elsif message = "prepareFailed" then
+                    if checkoutStatus[1] = "started" then
+                        checkoutStatus[1] := "failed";
+                    end if;
+                elsif message = "commitOk" then
+                    if checkoutStatus[1] = "committing" then
+                        checkoutStatus[1] := "committed";
+                    end if;
+                elsif message = "abortOk" then
+                    if checkoutStatus[1] = "aborting" then
+                        checkoutStatus[1] := "aborted";
+                    end if;
+                end if;
+                goto CheckoutProcess;
+        elsif orchestratorRxS # <<>> then
+            message := Head(orchestratorRxS);
+            orchestratorRxS := Tail(orchestratorRxS);
+            ProcessMessageCheckoutStock:
+                maybeRestart();
+            ProcessMessageCheckoutStockContinuation:
+                if message = "prepareOk" then
+                    if checkoutStatus[2] = "started" then
+                        checkoutStatus[2] := "prepared";
+                    end if;
+                elsif message = "prepareFailed" then
+                    if checkoutStatus[2] = "started" then
+                        checkoutStatus[2] := "failed";
+                    end if;
+                elsif message = "commitOk" then
+                    if checkoutStatus[2] = "committing" then
+                        checkoutStatus[2] := "committed";
+                    end if;
+                elsif message = "abortOk" then
+                    if checkoutStatus[2] = "aborting" then
+                        checkoutStatus[2] := "aborted";
+                    end if;
+                end if;
+                goto CheckoutProcess;
+        else
+            if checkoutStatus = <<"prepared", "prepared">> then
+                orchestratorTxP := Append(orchestratorTxP, "commit");
+            Int1:
+                maybeRestart();
+            Cont1:
+                orchestratorTxS := Append(orchestratorTxS, "commit");
+            Int2:
+                maybeRestart();
+            Cont2:
+                checkoutStatus := <<"committing", "committing">>;
+                goto CheckoutProcess;
+            elsif checkoutStatus[1] = "failed" /\ checkoutStatus[2] \in {"started", "prepared"} then
+                orchestratorTxP := Append(orchestratorTxP, "abort");
+            Int3:
+                maybeRestart();
+            Cont3:
+                orchestratorTxS := Append(orchestratorTxS, "abort");
+            Int4:
+                maybeRestart();
+            Cont4:
+                checkoutStatus := <<"aborting", "aborting">>;
+                goto CheckoutProcess;
+            elsif checkoutStatus[2] = "failed" /\ checkoutStatus[1] \in {"started", "prepared"} then
+                orchestratorTxP := Append(orchestratorTxP, "abort");
+            Int5:
+                maybeRestart();
+            Cont5:
+                orchestratorTxS := Append(orchestratorTxS, "abort");
+            Int6:
+                maybeRestart();
+            Cont6:
+                checkoutStatus := <<"aborting", "aborting">>;
+                goto CheckoutProcess;
+            elsif checkoutStatus = <<"committed", "committed">> then
+                goto 2pcEnd;
+            elsif ~retries[1] /\ restarted[1] then
+                if checkoutStatus[1] \in {"notStarted", "started"} then
+                    orchestratorTxP := Append(orchestratorTxP, "prepare");
+                    checkoutStatus[1] := "started";
+                    retries[1] := TRUE;
+                elsif checkoutStatus[1] = "committing" then
+                    orchestratorTxP := Append(orchestratorTxP, "commit");
+                    retries[1] := TRUE;
+                elsif checkoutStatus[1] = "aborting" then
+                    orchestratorTxP := Append(orchestratorTxP, "abort");
+                    retries[1] := TRUE;
+                end if;
+                goto CheckoutProcess;
+            elsif ~retries[2] /\ restarted[2] then
+                if checkoutStatus[2] \in {"notStarted", "started"} then
+                    orchestratorTxS := Append(orchestratorTxS, "prepare");
+                    checkoutStatus[2] := "started";
+                    retries[2] := TRUE;
+                elsif checkoutStatus[2] = "committing" then
+                    orchestratorTxS := Append(orchestratorTxS, "commit");
+                    retries[2] := TRUE;
+                elsif checkoutStatus[2] = "aborting" then
+                    orchestratorTxS := Append(orchestratorTxS, "abort");
+                    retries[2] := TRUE;
+                end if;
+                goto CheckoutProcess;
+            else
+                goto CheckoutProcess;
+            end if;
+        end if;
+    
+    2pcEnd:
+        done := TRUE;
+        goto Done;
+
+CheckoutSaga:
+    goto CheckoutPaymentSaga;
+    CheckoutPaymentSaga:
+        orchestratorTxP := Append(orchestratorTxP, "checkout");
+        checkoutStatus[1] := "started";
+    CheckoutSagaMaybeR:
+        maybeRestart();
+    CheckoutStockSaga:
+        orchestratorTxS := Append(orchestratorTxS, "checkout");
+        checkoutStatus[2] := "started";
+    
+    CheckoutSagaProcess:
+        if orchestratorRxP # <<>> then
+            message := Head(orchestratorRxP);
+            orchestratorRxP := Tail(orchestratorRxP);
+            SagaProcessPR:
+                maybeRestart();
+            SagaProcessP:
+            if message = "checkoutOk" then
+                checkoutStatus[1] := "completed";
+            elsif message = "checkoutFailed" then
+                checkoutStatus[1] := "failed";
+            elsif message = "compensateOk" then
+                if checkoutStatus[1] = "compensating" then
+                    checkoutStatus[1] := "compensated";
+                end if;
+            end if;
+
+            goto CheckoutSagaProcess;
+        elsif orchestratorRxS # <<>> then
+            message := Head(orchestratorRxS);
+            orchestratorRxS := Tail(orchestratorRxS);
+            SagaProcessSR:
+                maybeRestart();
+            SagaProcessS:
+            if message = "checkoutOk" then
+                checkoutStatus[2] := "completed";
+            elsif message = "checkoutFailed" then
+                checkoutStatus[2] := "failed";
+            elsif message = "compensateOk" then
+                if checkoutStatus[2] = "compensating" then
+                    checkoutStatus[2] := "compensated";
+                end if;
+            end if;
+
+            goto CheckoutSagaProcess;
+        else
+            if checkoutStatus = <<"completed", "completed">> then
+                goto SagaEnd;
+            elsif checkoutStatus[1] = "failed" /\ checkoutStatus[2] \in {"notStarted", "completed"} then
+                orchestratorTxS := Append(orchestratorTxS, "compensate");
+                checkoutStatus[2] := "compensating";
+                goto CheckoutSagaProcess;
+            elsif checkoutStatus[2] = "failed" /\ checkoutStatus[1] \in {"notStarted", "completed"} then
+                orchestratorTxP := Append(orchestratorTxP, "compensate");
+                checkoutStatus[1] := "compensating";
+                goto CheckoutSagaProcess;
+            elsif checkoutStatus[1] \in {"failed", "compensated"} /\ checkoutStatus[2] \in {"failed", "compensated"} then
+                goto SagaEnd;
+            elsif ~retries[1] /\ restarted[1] then
+                if checkoutStatus[1] \in {"notStarted", "started"} then
+                    orchestratorTxP := Append(orchestratorTxP, "checkout");
+                    checkoutStatus[1] := "started";
+                    retries[1] := TRUE;
+                elsif checkoutStatus[1] = "compensating" then
+                    orchestratorTxP := Append(orchestratorTxP, "compensate");
+                    retries[1] := TRUE;
+                end if;
+                goto CheckoutSagaProcess;
+            elsif ~retries[2] /\ restarted[2] then
+                if checkoutStatus[2] \in {"notStarted", "started"} then
+                    orchestratorTxS := Append(orchestratorTxS, "checkout");
+                    checkoutStatus[2] := "started";
+                    retries[2] := TRUE;
+                elsif checkoutStatus[2] = "compensating" then
+                    orchestratorTxS := Append(orchestratorTxS, "compensate");
+                    retries[2] := TRUE;
+                end if;
+                goto CheckoutSagaProcess;
+            else
+                goto CheckoutSagaProcess;
+            end if;
+        end if;
+
+    SagaEnd:
+        done := TRUE;
+        goto Done;
+end process;
+
+fair+ process PaymentWorker \in {1}
+variables
+    message = "";
+begin
+Start:
+    await orchestratorTxP # <<>> \/ done;
+    if done then
+        goto Done;
+    else
+        message := Head(orchestratorTxP);
+        orchestratorTxP := Tail(orchestratorTxP);
+        R:
+            maybeRestart();
+    end if;
+PaymentReqProcessing:
+    if message = "prepare" then
+        if paymentStatus = "pending" then
+            if userCredits >= CheckoutAmount * PPU then
+                userCredits := userCredits - CheckoutAmount * PPU;
+                userHeldCredits := userHeldCredits + CheckoutAmount * PPU;
+                paymentStatus := "prepared";
+                PrepareSuccessResponseR:
+                    maybeRestart();
+                PrepareSuccessResponse:
+                    orchestratorRxP := Append(orchestratorRxP, "prepareOk");
+            else
+                paymentStatus := "failed";
+                PrepareFailedResponseR:
+                    maybeRestart();
+                PrepareFailedResponse:
+                    orchestratorRxP := Append(orchestratorRxP, "prepareFailed");
+            end if;
+        elsif paymentStatus \in {"prepared", "completed"} then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "prepareOk");
+        elsif paymentStatus = "failed" then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "prepareFailed");
+        end if;
+    elsif message = "commit" then
+        if paymentStatus = "prepared" then
+            userHeldCredits := userHeldCredits - CheckoutAmount * PPU;
+            userPaidCredits := userPaidCredits + CheckoutAmount * PPU;
+            paymentStatus := "completed";
+            ReplyCommitResponseR:
+                maybeRestart();
+            ReplyCommitResponse:
+                orchestratorRxP := Append(orchestratorRxP, "commitOk");
+        elsif paymentStatus = "completed" then
+            ReplyCommitResponse2:
+                orchestratorRxP := Append(orchestratorRxP, "commitOk");
+        end if;
+    elsif message = "abort" then
+        if paymentStatus = "pending" then
+            paymentStatus := "failed";
+            ReplyAbortPendingR:
+                maybeRestart();
+            ReplyAbortPending:
+                orchestratorRxP := Append(orchestratorRxP, "abortOk");
+        elsif paymentStatus = "prepared" then
+            userHeldCredits := userHeldCredits - CheckoutAmount * PPU;
+            userCredits := userCredits + CheckoutAmount * PPU;
+            paymentStatus := "failed";
+            ReplyAbortMessageR:
+                maybeRestart();
+            ReplyAbortMessage:
+                orchestratorRxP := Append(orchestratorRxP, "abortOk");
+        elsif paymentStatus = "completed" then
+            ReplyAbort2:
+                orchestratorRxP := Append(orchestratorRxP, "abortOk");
+        end if;
+    elsif message = "checkout" then
+        if paymentStatus = "pending" then
+            if userCredits >= CheckoutAmount * PPU then
+                userCredits := userCredits - CheckoutAmount * PPU;
+                userPaidCredits := userPaidCredits + CheckoutAmount * PPU;
+                paymentStatus := "completed";
+                ReplyCheckoutResponseR:
+                    maybeRestart();
+                ReplyCheckoutResponse:
+                    orchestratorRxP := Append(orchestratorRxP, "checkoutOk");
+            else
+                paymentStatus := "failed";
+                FailedCheckoutResponseR:
+                    maybeRestart();
+                FailedCheckoutResponse:
+                    orchestratorRxP := Append(orchestratorRxP, "checkoutFailed");
+            end if;
+        elsif paymentStatus = "completed" then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "checkoutOk");
+        elsif paymentStatus = "failed" then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "checkoutFailed");
+        end if;
+    elsif message = "compensate" then
+        if paymentStatus = "completed" then
+            userCredits := userCredits + CheckoutAmount * PPU;
+            userPaidCredits := userPaidCredits - CheckoutAmount * PPU;
+            paymentStatus := "compensated";
+            ReplyCompensateResponseR:
+                maybeRestart();
+            ReplyCompensateResponse:
+                orchestratorRxP := Append(orchestratorRxP, "compensateOk");
+        elsif paymentStatus \in {"compensated", "failed"} then
+            \* Idempotency
+            orchestratorRxP := Append(orchestratorRxP, "compensateOk");
+        end if;
+    end if;
+    step:
+        goto Start;
+end process;
+
+fair+ process StockWorker \in {2}
+variables
+    message = "";
+begin
+Start:
+    await orchestratorTxS # <<>> \/ done;
+    if done then
+        goto Done;
+    else
+        message := Head(orchestratorTxS);
+        orchestratorTxS := Tail(orchestratorTxS);
+        R:
+            maybeRestart();
+    end if;
+StockReqProcessing:
+    if message = "prepare" then
+        if stockStatus = "pending" then
+            if stockAvailable >= CheckoutAmount then
+                stockAvailable := stockAvailable - CheckoutAmount;
+                stockHeld := stockHeld + CheckoutAmount;
+                stockStatus := "prepared";
+                PrepareSuccessResponseR:
+                    maybeRestart();
+                PrepareSuccessResponse:
+                    orchestratorRxS := Append(orchestratorRxS, "prepareOk");
+            else
+                stockStatus := "failed";
+                PrepareFailedResponseR:
+                    maybeRestart();
+                PrepareFailedResponse:
+                    orchestratorRxS := Append(orchestratorRxS, "prepareFailed");
+            end if;
+        elsif stockStatus \in {"prepared", "completed"} then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "prepareOk");
+        elsif stockStatus = "failed" then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "prepareFailed");
+        end if;
+    elsif message = "commit" then
+        if stockStatus = "prepared" then
+            stockHeld := stockHeld - CheckoutAmount;
+            stockSold := stockSold + CheckoutAmount;
+            stockStatus := "completed";
+            ReplyCommitResponseR:
+                maybeRestart();
+            ReplyCommitResponse:
+                orchestratorRxS := Append(orchestratorRxS, "commitOk");
+        elsif stockStatus = "completed" then
+            ReplyCommitResponse2:
+                orchestratorRxS := Append(orchestratorRxS, "commitOk");
+        end if;
+    elsif message = "abort" then
+        if stockStatus = "pending" then
+            stockStatus := "failed";
+            AbortPendingR:
+                maybeRestart();
+            AbortPending:
+                orchestratorRxS := Append(orchestratorRxS, "abortOk");
+        elsif stockStatus = "prepared" then
+            stockHeld := stockHeld - CheckoutAmount;
+            stockAvailable := stockAvailable + CheckoutAmount;
+            stockStatus := "failed";
+            ReplyAbortMessageR:
+                maybeRestart();
+            ReplyAbortMessage:
+                orchestratorRxS := Append(orchestratorRxS, "abortOk");
+        elsif stockStatus = "completed" then
+            ReplyAbort2:
+                orchestratorRxS := Append(orchestratorRxS, "abortOk");
+        end if;
+    elsif message = "checkout" then
+        if stockStatus = "pending" then
+            if stockAvailable >= CheckoutAmount then
+                stockAvailable := stockAvailable - CheckoutAmount;
+                stockSold := stockSold + CheckoutAmount;
+                stockStatus := "completed";
+                ReplyCheckoutResponseR:
+                    maybeRestart();
+                ReplyCheckoutResponse:
+                    orchestratorRxS := Append(orchestratorRxS, "checkoutOk");
+            else
+                stockStatus := "failed";
+                FailedCheckoutResponseR:
+                    maybeRestart();
+                FailedCheckoutResponse:
+                    orchestratorRxS := Append(orchestratorRxS, "checkoutFailed");
+            end if;
+        elsif stockStatus = "completed" then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "checkoutOk");
+        elsif stockStatus = "failed" then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "checkoutFailed");
+        end if;
+    elsif message = "compensate" then
+        if stockStatus = "completed" then
+            stockAvailable := stockAvailable + CheckoutAmount;
+            stockSold := stockSold - CheckoutAmount;
+            stockStatus := "compensated";
+            ReplyCompensateResponseR:
+                maybeRestart();
+            ReplyCompensateResponse:
+                orchestratorRxS := Append(orchestratorRxS, "compensateOk");
+        elsif stockStatus \in {"compensated", "failed"} then
+            \* Idempotency
+            orchestratorRxS := Append(orchestratorRxS, "compensateOk");
+        end if;
+    end if;
+    step:
+        goto Start;
+end process;
+
+end algorithm;*)
+\* BEGIN TRANSLATION (chksum(pcal) = "c458e0ff" /\ chksum(tla) = "3eebe4c6")
+\* Label Start of process Orchestrator at line 72 col 5 changed to Start_
+\* Label Start of process PaymentWorker at line 305 col 5 changed to Start_P
+\* Label R of process PaymentWorker at line 56 col 5 changed to R_
+\* Label PrepareSuccessResponseR of process PaymentWorker at line 56 col 5 changed to PrepareSuccessResponseR_
+\* Label PrepareSuccessResponse of process PaymentWorker at line 324 col 21 changed to PrepareSuccessResponse_
+\* Label PrepareFailedResponseR of process PaymentWorker at line 56 col 5 changed to PrepareFailedResponseR_
+\* Label PrepareFailedResponse of process PaymentWorker at line 330 col 21 changed to PrepareFailedResponse_
+\* Label ReplyCommitResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCommitResponseR_
+\* Label ReplyCommitResponse of process PaymentWorker at line 347 col 17 changed to ReplyCommitResponse_
+\* Label ReplyCommitResponse2 of process PaymentWorker at line 350 col 17 changed to ReplyCommitResponse2_
+\* Label ReplyAbortMessageR of process PaymentWorker at line 56 col 5 changed to ReplyAbortMessageR_
+\* Label ReplyAbortMessage of process PaymentWorker at line 366 col 17 changed to ReplyAbortMessage_
+\* Label ReplyAbort2 of process PaymentWorker at line 369 col 17 changed to ReplyAbort2_
+\* Label ReplyCheckoutResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCheckoutResponseR_
+\* Label ReplyCheckoutResponse of process PaymentWorker at line 380 col 21 changed to ReplyCheckoutResponse_
+\* Label FailedCheckoutResponseR of process PaymentWorker at line 56 col 5 changed to FailedCheckoutResponseR_
+\* Label FailedCheckoutResponse of process PaymentWorker at line 386 col 21 changed to FailedCheckoutResponse_
+\* Label ReplyCompensateResponseR of process PaymentWorker at line 56 col 5 changed to ReplyCompensateResponseR_
+\* Label ReplyCompensateResponse of process PaymentWorker at line 403 col 17 changed to ReplyCompensateResponse_
+\* Label step of process PaymentWorker at line 410 col 9 changed to step_
+\* Process variable message of process Orchestrator at line 69 col 28 changed to message_
+\* Process variable message of process PaymentWorker at line 302 col 5 changed to message_P
+VARIABLES pc, done, userCredits, userHeldCredits, userPaidCredits, 
+          stockAvailable, stockHeld, stockSold, paymentStatus, stockStatus, 
+          orchestratorTxP, orchestratorTxS, orchestratorRxP, orchestratorRxS, 
+          restarted, anyRestarted
+
+(* define statement *)
+TypeInvariant ==
+    /\ done \in BOOLEAN
+    /\ paymentStatus \in PAYMENT_STATUS
+    /\ stockStatus \in STOCK_STATUS
+    /\ userCredits \in Nat
+    /\ userHeldCredits \in Nat
+    /\ userPaidCredits \in Nat
+    /\ stockAvailable \in Nat
+    /\ stockHeld \in Nat
+    /\ stockSold \in Nat
+
+UserCreditsConsistent == userCredits + userHeldCredits + userPaidCredits = InitialCredits
+StockConsistent == stockAvailable + stockHeld + stockSold = InitialStock
+
+EventuallyCompletes == <>(
+    /\ (
+        \/ paymentStatus = "completed" /\ stockStatus = "completed" /\ userCredits + userPaidCredits = InitialCredits /\ stockAvailable + stockSold = InitialStock
+        \/ paymentStatus = "failed" /\ stockStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+        \/ stockStatus = "failed" /\ paymentStatus \in {"failed", "compensated"} /\ userCredits = InitialCredits /\ stockAvailable = InitialStock
+        )
+    /\ userHeldCredits = 0
+    /\ stockHeld = 0
+)
+
+VARIABLES checkoutStatus, message_, retries, message_P, message
+
+vars == << pc, done, userCredits, userHeldCredits, userPaidCredits, 
+           stockAvailable, stockHeld, stockSold, paymentStatus, stockStatus, 
+           orchestratorTxP, orchestratorTxS, orchestratorRxP, orchestratorRxS, 
+           restarted, anyRestarted, checkoutStatus, message_, retries, 
+           message_P, message >>
+
+ProcSet == ({3}) \cup ({1}) \cup ({2})
+
+Init == (* Global variables *)
+        /\ done = FALSE
+        /\ userCredits = InitialCredits
+        /\ userHeldCredits = 0
+        /\ userPaidCredits = 0
+        /\ stockAvailable = InitialStock
+        /\ stockHeld = 0
+        /\ stockSold = 0
+        /\ paymentStatus = "pending"
+        /\ stockStatus = "pending"
+        /\ orchestratorTxP = <<>>
+        /\ orchestratorTxS = <<>>
+        /\ orchestratorRxP = <<>>
+        /\ orchestratorRxS = <<>>
+        /\ restarted = <<FALSE, FALSE, FALSE>>
+        /\ anyRestarted = FALSE
+        (* Process Orchestrator *)
+        /\ checkoutStatus = [self \in {3} |-> <<>>]
+        /\ message_ = [self \in {3} |-> ""]
+        /\ retries = [self \in {3} |-> <<>>]
+        (* Process PaymentWorker *)
+        /\ message_P = [self \in {1} |-> ""]
+        (* Process StockWorker *)
+        /\ message = [self \in {2} |-> ""]
+        /\ pc = [self \in ProcSet |-> CASE self \in {3} -> "Start_"
+                                        [] self \in {1} -> "Start_P"
+                                        [] self \in {2} -> "Start"]
+
+Start_(self) == /\ pc[self] = "Start_"
+                /\ checkoutStatus' = [checkoutStatus EXCEPT ![self] = <<"notStarted", "notStarted">>]
+                /\ retries' = [retries EXCEPT ![self] = <<FALSE, FALSE>>]
+                /\ IF Mode = "2pc"
+                      THEN /\ pc' = [pc EXCEPT ![self] = "Checkout2PC"]
+                      ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutSaga"]
+                /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                userPaidCredits, stockAvailable, stockHeld, 
+                                stockSold, paymentStatus, stockStatus, 
+                                orchestratorTxP, orchestratorTxS, 
+                                orchestratorRxP, orchestratorRxS, restarted, 
+                                anyRestarted, message_, message_P, message >>
+
+Checkout2PC(self) == /\ pc[self] = "Checkout2PC"
+                     /\ pc' = [pc EXCEPT ![self] = "CheckoutPayment2PC"]
+                     /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                     userPaidCredits, stockAvailable, 
+                                     stockHeld, stockSold, paymentStatus, 
+                                     stockStatus, orchestratorTxP, 
+                                     orchestratorTxS, orchestratorRxP, 
+                                     orchestratorRxS, restarted, anyRestarted, 
+                                     checkoutStatus, message_, retries, 
+                                     message_P, message >>
+
+CheckoutPayment2PC(self) == /\ pc[self] = "CheckoutPayment2PC"
+                            /\ orchestratorTxP' = Append(orchestratorTxP, "prepare")
+                            /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                            /\ pc' = [pc EXCEPT ![self] = "CheckoutStock2PC"]
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxS, orchestratorRxP, 
+                                            orchestratorRxS, restarted, 
+                                            anyRestarted, message_, retries, 
+                                            message_P, message >>
+
+CheckoutStock2PC(self) == /\ pc[self] = "CheckoutStock2PC"
+                          /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                THEN /\ \/ /\ TRUE
+                                           /\ pc' = [pc EXCEPT ![self] = "CheckoutStock2PCContinuation"]
+                                           /\ UNCHANGED <<restarted, anyRestarted>>
+                                        \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                           /\ anyRestarted' = TRUE
+                                           /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                                ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutStock2PCContinuation"]
+                                     /\ UNCHANGED << restarted, anyRestarted >>
+                          /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                          userPaidCredits, stockAvailable, 
+                                          stockHeld, stockSold, paymentStatus, 
+                                          stockStatus, orchestratorTxP, 
+                                          orchestratorTxS, orchestratorRxP, 
+                                          orchestratorRxS, checkoutStatus, 
+                                          message_, retries, message_P, 
+                                          message >>
+
+CheckoutStock2PCContinuation(self) == /\ pc[self] = "CheckoutStock2PCContinuation"
+                                      /\ orchestratorTxS' = Append(orchestratorTxS, "prepare")
+                                      /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
+                                      /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                      /\ UNCHANGED << done, userCredits, 
+                                                      userHeldCredits, 
+                                                      userPaidCredits, 
+                                                      stockAvailable, 
+                                                      stockHeld, stockSold, 
+                                                      paymentStatus, 
+                                                      stockStatus, 
+                                                      orchestratorTxP, 
+                                                      orchestratorRxP, 
+                                                      orchestratorRxS, 
+                                                      restarted, anyRestarted, 
+                                                      message_, retries, 
+                                                      message_P, message >>
+
+CheckoutProcess(self) == /\ pc[self] = "CheckoutProcess"
+                         /\ IF orchestratorRxP # <<>>
+                               THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxP)]
+                                    /\ orchestratorRxP' = Tail(orchestratorRxP)
+                                    /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckout"]
+                                    /\ UNCHANGED << orchestratorTxP, 
+                                                    orchestratorTxS, 
+                                                    orchestratorRxS, 
+                                                    checkoutStatus, retries >>
+                               ELSE /\ IF orchestratorRxS # <<>>
+                                          THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxS)]
+                                               /\ orchestratorRxS' = Tail(orchestratorRxS)
+                                               /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckoutStock"]
+                                               /\ UNCHANGED << orchestratorTxP, 
+                                                               orchestratorTxS, 
+                                                               checkoutStatus, 
+                                                               retries >>
+                                          ELSE /\ IF checkoutStatus[self] = <<"prepared", "prepared">>
+                                                     THEN /\ orchestratorTxP' = Append(orchestratorTxP, "commit")
+                                                          /\ pc' = [pc EXCEPT ![self] = "Int1"]
+                                                          /\ UNCHANGED << orchestratorTxS, 
+                                                                          checkoutStatus, 
+                                                                          retries >>
+                                                     ELSE /\ IF checkoutStatus[self][1] = "failed" /\ checkoutStatus[self][2] \in {"started", "prepared"}
+                                                                THEN /\ orchestratorTxP' = Append(orchestratorTxP, "abort")
+                                                                     /\ pc' = [pc EXCEPT ![self] = "Int3"]
+                                                                     /\ UNCHANGED << orchestratorTxS, 
+                                                                                     checkoutStatus, 
+                                                                                     retries >>
+                                                                ELSE /\ IF checkoutStatus[self][2] = "failed" /\ checkoutStatus[self][1] \in {"started", "prepared"}
+                                                                           THEN /\ orchestratorTxP' = Append(orchestratorTxP, "abort")
+                                                                                /\ pc' = [pc EXCEPT ![self] = "Int5"]
+                                                                                /\ UNCHANGED << orchestratorTxS, 
+                                                                                                checkoutStatus, 
+                                                                                                retries >>
+                                                                           ELSE /\ IF checkoutStatus[self] = <<"committed", "committed">>
+                                                                                      THEN /\ pc' = [pc EXCEPT ![self] = "2pcEnd"]
+                                                                                           /\ UNCHANGED << orchestratorTxP, 
+                                                                                                           orchestratorTxS, 
+                                                                                                           checkoutStatus, 
+                                                                                                           retries >>
+                                                                                      ELSE /\ IF ~retries[self][1] /\ restarted[1]
+                                                                                                 THEN /\ IF checkoutStatus[self][1] \in {"notStarted", "started"}
+                                                                                                            THEN /\ orchestratorTxP' = Append(orchestratorTxP, "prepare")
+                                                                                                                 /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                                                                                                                 /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                            ELSE /\ IF checkoutStatus[self][1] = "committing"
+                                                                                                                       THEN /\ orchestratorTxP' = Append(orchestratorTxP, "commit")
+                                                                                                                            /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                       ELSE /\ IF checkoutStatus[self][1] = "aborting"
+                                                                                                                                  THEN /\ orchestratorTxP' = Append(orchestratorTxP, "abort")
+                                                                                                                                       /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                                  ELSE /\ TRUE
+                                                                                                                                       /\ UNCHANGED << orchestratorTxP, 
+                                                                                                                                                       retries >>
+                                                                                                                 /\ UNCHANGED checkoutStatus
+                                                                                                      /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                                                                                      /\ UNCHANGED orchestratorTxS
+                                                                                                 ELSE /\ IF ~retries[self][2] /\ restarted[2]
+                                                                                                            THEN /\ IF checkoutStatus[self][2] \in {"notStarted", "started"}
+                                                                                                                       THEN /\ orchestratorTxS' = Append(orchestratorTxS, "prepare")
+                                                                                                                            /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
+                                                                                                                            /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                       ELSE /\ IF checkoutStatus[self][2] = "committing"
+                                                                                                                                  THEN /\ orchestratorTxS' = Append(orchestratorTxS, "commit")
+                                                                                                                                       /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                                  ELSE /\ IF checkoutStatus[self][2] = "aborting"
+                                                                                                                                             THEN /\ orchestratorTxS' = Append(orchestratorTxS, "abort")
+                                                                                                                                                  /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                                             ELSE /\ TRUE
+                                                                                                                                                  /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                                                  retries >>
+                                                                                                                            /\ UNCHANGED checkoutStatus
+                                                                                                                 /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                                                                                            ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                                                                                                 /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                 checkoutStatus, 
+                                                                                                                                 retries >>
+                                                                                                      /\ UNCHANGED orchestratorTxP
+                                               /\ UNCHANGED << orchestratorRxS, 
+                                                               message_ >>
+                                    /\ UNCHANGED orchestratorRxP
+                         /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                         userPaidCredits, stockAvailable, 
+                                         stockHeld, stockSold, paymentStatus, 
+                                         stockStatus, restarted, anyRestarted, 
+                                         message_P, message >>
+
+ProcessMessageCheckout(self) == /\ pc[self] = "ProcessMessageCheckout"
+                                /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                      THEN /\ \/ /\ TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckoutContinuation"]
+                                                 /\ UNCHANGED <<restarted, anyRestarted>>
+                                              \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                 /\ anyRestarted' = TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                                      ELSE /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckoutContinuation"]
+                                           /\ UNCHANGED << restarted, 
+                                                           anyRestarted >>
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxP, 
+                                                orchestratorRxS, 
+                                                checkoutStatus, message_, 
+                                                retries, message_P, message >>
+
+ProcessMessageCheckoutContinuation(self) == /\ pc[self] = "ProcessMessageCheckoutContinuation"
+                                            /\ IF message_[self] = "prepareOk"
+                                                  THEN /\ IF checkoutStatus[self][1] = "started"
+                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "prepared"]
+                                                             ELSE /\ TRUE
+                                                                  /\ UNCHANGED checkoutStatus
+                                                  ELSE /\ IF message_[self] = "prepareFailed"
+                                                             THEN /\ IF checkoutStatus[self][1] = "started"
+                                                                        THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "failed"]
+                                                                        ELSE /\ TRUE
+                                                                             /\ UNCHANGED checkoutStatus
+                                                             ELSE /\ IF message_[self] = "commitOk"
+                                                                        THEN /\ IF checkoutStatus[self][1] = "committing"
+                                                                                   THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "committed"]
+                                                                                   ELSE /\ TRUE
+                                                                                        /\ UNCHANGED checkoutStatus
+                                                                        ELSE /\ IF message_[self] = "abortOk"
+                                                                                   THEN /\ IF checkoutStatus[self][1] = "aborting"
+                                                                                              THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "aborted"]
+                                                                                              ELSE /\ TRUE
+                                                                                                   /\ UNCHANGED checkoutStatus
+                                                                                   ELSE /\ TRUE
+                                                                                        /\ UNCHANGED checkoutStatus
+                                            /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                            /\ UNCHANGED << done, userCredits, 
+                                                            userHeldCredits, 
+                                                            userPaidCredits, 
+                                                            stockAvailable, 
+                                                            stockHeld, 
+                                                            stockSold, 
+                                                            paymentStatus, 
+                                                            stockStatus, 
+                                                            orchestratorTxP, 
+                                                            orchestratorTxS, 
+                                                            orchestratorRxP, 
+                                                            orchestratorRxS, 
+                                                            restarted, 
+                                                            anyRestarted, 
+                                                            message_, retries, 
+                                                            message_P, message >>
+
+ProcessMessageCheckoutStock(self) == /\ pc[self] = "ProcessMessageCheckoutStock"
+                                     /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                           THEN /\ \/ /\ TRUE
+                                                      /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckoutStockContinuation"]
+                                                      /\ UNCHANGED <<restarted, anyRestarted>>
+                                                   \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                      /\ anyRestarted' = TRUE
+                                                      /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                                           ELSE /\ pc' = [pc EXCEPT ![self] = "ProcessMessageCheckoutStockContinuation"]
+                                                /\ UNCHANGED << restarted, 
+                                                                anyRestarted >>
+                                     /\ UNCHANGED << done, userCredits, 
+                                                     userHeldCredits, 
+                                                     userPaidCredits, 
+                                                     stockAvailable, stockHeld, 
+                                                     stockSold, paymentStatus, 
+                                                     stockStatus, 
+                                                     orchestratorTxP, 
+                                                     orchestratorTxS, 
+                                                     orchestratorRxP, 
+                                                     orchestratorRxS, 
+                                                     checkoutStatus, message_, 
+                                                     retries, message_P, 
+                                                     message >>
+
+ProcessMessageCheckoutStockContinuation(self) == /\ pc[self] = "ProcessMessageCheckoutStockContinuation"
+                                                 /\ IF message_[self] = "prepareOk"
+                                                       THEN /\ IF checkoutStatus[self][2] = "started"
+                                                                  THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "prepared"]
+                                                                  ELSE /\ TRUE
+                                                                       /\ UNCHANGED checkoutStatus
+                                                       ELSE /\ IF message_[self] = "prepareFailed"
+                                                                  THEN /\ IF checkoutStatus[self][2] = "started"
+                                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "failed"]
+                                                                             ELSE /\ TRUE
+                                                                                  /\ UNCHANGED checkoutStatus
+                                                                  ELSE /\ IF message_[self] = "commitOk"
+                                                                             THEN /\ IF checkoutStatus[self][2] = "committing"
+                                                                                        THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "committed"]
+                                                                                        ELSE /\ TRUE
+                                                                                             /\ UNCHANGED checkoutStatus
+                                                                             ELSE /\ IF message_[self] = "abortOk"
+                                                                                        THEN /\ IF checkoutStatus[self][2] = "aborting"
+                                                                                                   THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "aborted"]
+                                                                                                   ELSE /\ TRUE
+                                                                                                        /\ UNCHANGED checkoutStatus
+                                                                                        ELSE /\ TRUE
+                                                                                             /\ UNCHANGED checkoutStatus
+                                                 /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+                                                 /\ UNCHANGED << done, 
+                                                                 userCredits, 
+                                                                 userHeldCredits, 
+                                                                 userPaidCredits, 
+                                                                 stockAvailable, 
+                                                                 stockHeld, 
+                                                                 stockSold, 
+                                                                 paymentStatus, 
+                                                                 stockStatus, 
+                                                                 orchestratorTxP, 
+                                                                 orchestratorTxS, 
+                                                                 orchestratorRxP, 
+                                                                 orchestratorRxS, 
+                                                                 restarted, 
+                                                                 anyRestarted, 
+                                                                 message_, 
+                                                                 retries, 
+                                                                 message_P, 
+                                                                 message >>
+
+Int1(self) == /\ pc[self] = "Int1"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont1"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont1"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont1(self) == /\ pc[self] = "Cont1"
+               /\ orchestratorTxS' = Append(orchestratorTxS, "commit")
+               /\ pc' = [pc EXCEPT ![self] = "Int2"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorRxP, 
+                               orchestratorRxS, restarted, anyRestarted, 
+                               checkoutStatus, message_, retries, message_P, 
+                               message >>
+
+Int2(self) == /\ pc[self] = "Int2"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont2"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont2"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont2(self) == /\ pc[self] = "Cont2"
+               /\ checkoutStatus' = [checkoutStatus EXCEPT ![self] = <<"committing", "committing">>]
+               /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorTxS, 
+                               orchestratorRxP, orchestratorRxS, restarted, 
+                               anyRestarted, message_, retries, message_P, 
+                               message >>
+
+Int3(self) == /\ pc[self] = "Int3"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont3"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont3"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont3(self) == /\ pc[self] = "Cont3"
+               /\ orchestratorTxS' = Append(orchestratorTxS, "abort")
+               /\ pc' = [pc EXCEPT ![self] = "Int4"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorRxP, 
+                               orchestratorRxS, restarted, anyRestarted, 
+                               checkoutStatus, message_, retries, message_P, 
+                               message >>
+
+Int4(self) == /\ pc[self] = "Int4"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont4"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont4"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont4(self) == /\ pc[self] = "Cont4"
+               /\ checkoutStatus' = [checkoutStatus EXCEPT ![self] = <<"aborting", "aborting">>]
+               /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorTxS, 
+                               orchestratorRxP, orchestratorRxS, restarted, 
+                               anyRestarted, message_, retries, message_P, 
+                               message >>
+
+Int5(self) == /\ pc[self] = "Int5"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont5"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont5"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont5(self) == /\ pc[self] = "Cont5"
+               /\ orchestratorTxS' = Append(orchestratorTxS, "abort")
+               /\ pc' = [pc EXCEPT ![self] = "Int6"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorRxP, 
+                               orchestratorRxS, restarted, anyRestarted, 
+                               checkoutStatus, message_, retries, message_P, 
+                               message >>
+
+Int6(self) == /\ pc[self] = "Int6"
+              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                    THEN /\ \/ /\ TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Cont6"]
+                               /\ UNCHANGED <<restarted, anyRestarted>>
+                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                               /\ anyRestarted' = TRUE
+                               /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                    ELSE /\ pc' = [pc EXCEPT ![self] = "Cont6"]
+                         /\ UNCHANGED << restarted, anyRestarted >>
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                              message_, retries, message_P, message >>
+
+Cont6(self) == /\ pc[self] = "Cont6"
+               /\ checkoutStatus' = [checkoutStatus EXCEPT ![self] = <<"aborting", "aborting">>]
+               /\ pc' = [pc EXCEPT ![self] = "CheckoutProcess"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorTxS, 
+                               orchestratorRxP, orchestratorRxS, restarted, 
+                               anyRestarted, message_, retries, message_P, 
+                               message >>
+
+2pcEnd(self) == /\ pc[self] = "2pcEnd"
+                /\ done' = TRUE
+                /\ pc' = [pc EXCEPT ![self] = "Done"]
+                /\ UNCHANGED << userCredits, userHeldCredits, userPaidCredits, 
+                                stockAvailable, stockHeld, stockSold, 
+                                paymentStatus, stockStatus, orchestratorTxP, 
+                                orchestratorTxS, orchestratorRxP, 
+                                orchestratorRxS, restarted, anyRestarted, 
+                                checkoutStatus, message_, retries, message_P, 
+                                message >>
+
+CheckoutSaga(self) == /\ pc[self] = "CheckoutSaga"
+                      /\ pc' = [pc EXCEPT ![self] = "CheckoutPaymentSaga"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      orchestratorRxS, restarted, anyRestarted, 
+                                      checkoutStatus, message_, retries, 
+                                      message_P, message >>
+
+CheckoutPaymentSaga(self) == /\ pc[self] = "CheckoutPaymentSaga"
+                             /\ orchestratorTxP' = Append(orchestratorTxP, "checkout")
+                             /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                             /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaMaybeR"]
+                             /\ UNCHANGED << done, userCredits, 
+                                             userHeldCredits, userPaidCredits, 
+                                             stockAvailable, stockHeld, 
+                                             stockSold, paymentStatus, 
+                                             stockStatus, orchestratorTxS, 
+                                             orchestratorRxP, orchestratorRxS, 
+                                             restarted, anyRestarted, message_, 
+                                             retries, message_P, message >>
+
+CheckoutSagaMaybeR(self) == /\ pc[self] = "CheckoutSagaMaybeR"
+                            /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                  THEN /\ \/ /\ TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "CheckoutStockSaga"]
+                                             /\ UNCHANGED <<restarted, anyRestarted>>
+                                          \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                             /\ anyRestarted' = TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                                  ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutStockSaga"]
+                                       /\ UNCHANGED << restarted, anyRestarted >>
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxP, orchestratorRxS, 
+                                            checkoutStatus, message_, retries, 
+                                            message_P, message >>
+
+CheckoutStockSaga(self) == /\ pc[self] = "CheckoutStockSaga"
+                           /\ orchestratorTxS' = Append(orchestratorTxS, "checkout")
+                           /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
+                           /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                           /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                           userPaidCredits, stockAvailable, 
+                                           stockHeld, stockSold, paymentStatus, 
+                                           stockStatus, orchestratorTxP, 
+                                           orchestratorRxP, orchestratorRxS, 
+                                           restarted, anyRestarted, message_, 
+                                           retries, message_P, message >>
+
+CheckoutSagaProcess(self) == /\ pc[self] = "CheckoutSagaProcess"
+                             /\ IF orchestratorRxP # <<>>
+                                   THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxP)]
+                                        /\ orchestratorRxP' = Tail(orchestratorRxP)
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessPR"]
+                                        /\ UNCHANGED << orchestratorTxP, 
+                                                        orchestratorTxS, 
+                                                        orchestratorRxS, 
+                                                        checkoutStatus, 
+                                                        retries >>
+                                   ELSE /\ IF orchestratorRxS # <<>>
+                                              THEN /\ message_' = [message_ EXCEPT ![self] = Head(orchestratorRxS)]
+                                                   /\ orchestratorRxS' = Tail(orchestratorRxS)
+                                                   /\ pc' = [pc EXCEPT ![self] = "SagaProcessSR"]
+                                                   /\ UNCHANGED << orchestratorTxP, 
+                                                                   orchestratorTxS, 
+                                                                   checkoutStatus, 
+                                                                   retries >>
+                                              ELSE /\ IF checkoutStatus[self] = <<"completed", "completed">>
+                                                         THEN /\ pc' = [pc EXCEPT ![self] = "SagaEnd"]
+                                                              /\ UNCHANGED << orchestratorTxP, 
+                                                                              orchestratorTxS, 
+                                                                              checkoutStatus, 
+                                                                              retries >>
+                                                         ELSE /\ IF checkoutStatus[self][1] = "failed" /\ checkoutStatus[self][2] \in {"notStarted", "completed"}
+                                                                    THEN /\ orchestratorTxS' = Append(orchestratorTxS, "compensate")
+                                                                         /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "compensating"]
+                                                                         /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                         /\ UNCHANGED << orchestratorTxP, 
+                                                                                         retries >>
+                                                                    ELSE /\ IF checkoutStatus[self][2] = "failed" /\ checkoutStatus[self][1] \in {"notStarted", "completed"}
+                                                                               THEN /\ orchestratorTxP' = Append(orchestratorTxP, "compensate")
+                                                                                    /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "compensating"]
+                                                                                    /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                    /\ UNCHANGED << orchestratorTxS, 
+                                                                                                    retries >>
+                                                                               ELSE /\ IF checkoutStatus[self][1] \in {"failed", "compensated"} /\ checkoutStatus[self][2] \in {"failed", "compensated"}
+                                                                                          THEN /\ pc' = [pc EXCEPT ![self] = "SagaEnd"]
+                                                                                               /\ UNCHANGED << orchestratorTxP, 
+                                                                                                               orchestratorTxS, 
+                                                                                                               checkoutStatus, 
+                                                                                                               retries >>
+                                                                                          ELSE /\ IF ~retries[self][1] /\ restarted[1]
+                                                                                                     THEN /\ IF checkoutStatus[self][1] \in {"notStarted", "started"}
+                                                                                                                THEN /\ orchestratorTxP' = Append(orchestratorTxP, "checkout")
+                                                                                                                     /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "started"]
+                                                                                                                     /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                ELSE /\ IF checkoutStatus[self][1] = "compensating"
+                                                                                                                           THEN /\ orchestratorTxP' = Append(orchestratorTxP, "compensate")
+                                                                                                                                /\ retries' = [retries EXCEPT ![self][1] = TRUE]
+                                                                                                                           ELSE /\ TRUE
+                                                                                                                                /\ UNCHANGED << orchestratorTxP, 
+                                                                                                                                                retries >>
+                                                                                                                     /\ UNCHANGED checkoutStatus
+                                                                                                          /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                          /\ UNCHANGED orchestratorTxS
+                                                                                                     ELSE /\ IF ~retries[self][2] /\ restarted[2]
+                                                                                                                THEN /\ IF checkoutStatus[self][2] \in {"notStarted", "started"}
+                                                                                                                           THEN /\ orchestratorTxS' = Append(orchestratorTxS, "checkout")
+                                                                                                                                /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "started"]
+                                                                                                                                /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                           ELSE /\ IF checkoutStatus[self][2] = "compensating"
+                                                                                                                                      THEN /\ orchestratorTxS' = Append(orchestratorTxS, "compensate")
+                                                                                                                                           /\ retries' = [retries EXCEPT ![self][2] = TRUE]
+                                                                                                                                      ELSE /\ TRUE
+                                                                                                                                           /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                                           retries >>
+                                                                                                                                /\ UNCHANGED checkoutStatus
+                                                                                                                     /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                                ELSE /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                                                                                                                     /\ UNCHANGED << orchestratorTxS, 
+                                                                                                                                     checkoutStatus, 
+                                                                                                                                     retries >>
+                                                                                                          /\ UNCHANGED orchestratorTxP
+                                                   /\ UNCHANGED << orchestratorRxS, 
+                                                                   message_ >>
+                                        /\ UNCHANGED orchestratorRxP
+                             /\ UNCHANGED << done, userCredits, 
+                                             userHeldCredits, userPaidCredits, 
+                                             stockAvailable, stockHeld, 
+                                             stockSold, paymentStatus, 
+                                             stockStatus, restarted, 
+                                             anyRestarted, message_P, message >>
+
+SagaProcessPR(self) == /\ pc[self] = "SagaProcessPR"
+                       /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                             THEN /\ \/ /\ TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessP"]
+                                        /\ UNCHANGED <<restarted, anyRestarted>>
+                                     \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                        /\ anyRestarted' = TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "SagaProcessP"]
+                                  /\ UNCHANGED << restarted, anyRestarted >>
+                       /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                       userPaidCredits, stockAvailable, 
+                                       stockHeld, stockSold, paymentStatus, 
+                                       stockStatus, orchestratorTxP, 
+                                       orchestratorTxS, orchestratorRxP, 
+                                       orchestratorRxS, checkoutStatus, 
+                                       message_, retries, message_P, message >>
+
+SagaProcessP(self) == /\ pc[self] = "SagaProcessP"
+                      /\ IF message_[self] = "checkoutOk"
+                            THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "completed"]
+                            ELSE /\ IF message_[self] = "checkoutFailed"
+                                       THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "failed"]
+                                       ELSE /\ IF message_[self] = "compensateOk"
+                                                  THEN /\ IF checkoutStatus[self][1] = "compensating"
+                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][1] = "compensated"]
+                                                             ELSE /\ TRUE
+                                                                  /\ UNCHANGED checkoutStatus
+                                                  ELSE /\ TRUE
+                                                       /\ UNCHANGED checkoutStatus
+                      /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      orchestratorRxS, restarted, anyRestarted, 
+                                      message_, retries, message_P, message >>
+
+SagaProcessSR(self) == /\ pc[self] = "SagaProcessSR"
+                       /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                             THEN /\ \/ /\ TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "SagaProcessS"]
+                                        /\ UNCHANGED <<restarted, anyRestarted>>
+                                     \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                        /\ anyRestarted' = TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "Start_"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "SagaProcessS"]
+                                  /\ UNCHANGED << restarted, anyRestarted >>
+                       /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                       userPaidCredits, stockAvailable, 
+                                       stockHeld, stockSold, paymentStatus, 
+                                       stockStatus, orchestratorTxP, 
+                                       orchestratorTxS, orchestratorRxP, 
+                                       orchestratorRxS, checkoutStatus, 
+                                       message_, retries, message_P, message >>
+
+SagaProcessS(self) == /\ pc[self] = "SagaProcessS"
+                      /\ IF message_[self] = "checkoutOk"
+                            THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "completed"]
+                            ELSE /\ IF message_[self] = "checkoutFailed"
+                                       THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "failed"]
+                                       ELSE /\ IF message_[self] = "compensateOk"
+                                                  THEN /\ IF checkoutStatus[self][2] = "compensating"
+                                                             THEN /\ checkoutStatus' = [checkoutStatus EXCEPT ![self][2] = "compensated"]
+                                                             ELSE /\ TRUE
+                                                                  /\ UNCHANGED checkoutStatus
+                                                  ELSE /\ TRUE
+                                                       /\ UNCHANGED checkoutStatus
+                      /\ pc' = [pc EXCEPT ![self] = "CheckoutSagaProcess"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      orchestratorRxS, restarted, anyRestarted, 
+                                      message_, retries, message_P, message >>
+
+SagaEnd(self) == /\ pc[self] = "SagaEnd"
+                 /\ done' = TRUE
+                 /\ pc' = [pc EXCEPT ![self] = "Done"]
+                 /\ UNCHANGED << userCredits, userHeldCredits, userPaidCredits, 
+                                 stockAvailable, stockHeld, stockSold, 
+                                 paymentStatus, stockStatus, orchestratorTxP, 
+                                 orchestratorTxS, orchestratorRxP, 
+                                 orchestratorRxS, restarted, anyRestarted, 
+                                 checkoutStatus, message_, retries, message_P, 
+                                 message >>
+
+Orchestrator(self) == Start_(self) \/ Checkout2PC(self)
+                         \/ CheckoutPayment2PC(self)
+                         \/ CheckoutStock2PC(self)
+                         \/ CheckoutStock2PCContinuation(self)
+                         \/ CheckoutProcess(self)
+                         \/ ProcessMessageCheckout(self)
+                         \/ ProcessMessageCheckoutContinuation(self)
+                         \/ ProcessMessageCheckoutStock(self)
+                         \/ ProcessMessageCheckoutStockContinuation(self)
+                         \/ Int1(self) \/ Cont1(self) \/ Int2(self)
+                         \/ Cont2(self) \/ Int3(self) \/ Cont3(self)
+                         \/ Int4(self) \/ Cont4(self) \/ Int5(self)
+                         \/ Cont5(self) \/ Int6(self) \/ Cont6(self)
+                         \/ 2pcEnd(self) \/ CheckoutSaga(self)
+                         \/ CheckoutPaymentSaga(self)
+                         \/ CheckoutSagaMaybeR(self)
+                         \/ CheckoutStockSaga(self)
+                         \/ CheckoutSagaProcess(self)
+                         \/ SagaProcessPR(self) \/ SagaProcessP(self)
+                         \/ SagaProcessSR(self) \/ SagaProcessS(self)
+                         \/ SagaEnd(self)
+
+Start_P(self) == /\ pc[self] = "Start_P"
+                 /\ orchestratorTxP # <<>> \/ done
+                 /\ IF done
+                       THEN /\ pc' = [pc EXCEPT ![self] = "Done"]
+                            /\ UNCHANGED << orchestratorTxP, message_P >>
+                       ELSE /\ message_P' = [message_P EXCEPT ![self] = Head(orchestratorTxP)]
+                            /\ orchestratorTxP' = Tail(orchestratorTxP)
+                            /\ pc' = [pc EXCEPT ![self] = "R_"]
+                 /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                 userPaidCredits, stockAvailable, stockHeld, 
+                                 stockSold, paymentStatus, stockStatus, 
+                                 orchestratorTxS, orchestratorRxP, 
+                                 orchestratorRxS, restarted, anyRestarted, 
+                                 checkoutStatus, message_, retries, message >>
+
+R_(self) == /\ pc[self] = "R_"
+            /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                  THEN /\ \/ /\ TRUE
+                             /\ pc' = [pc EXCEPT ![self] = "PaymentReqProcessing"]
+                             /\ UNCHANGED <<restarted, anyRestarted>>
+                          \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                             /\ anyRestarted' = TRUE
+                             /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                  ELSE /\ pc' = [pc EXCEPT ![self] = "PaymentReqProcessing"]
+                       /\ UNCHANGED << restarted, anyRestarted >>
+            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                            userPaidCredits, stockAvailable, stockHeld, 
+                            stockSold, paymentStatus, stockStatus, 
+                            orchestratorTxP, orchestratorTxS, orchestratorRxP, 
+                            orchestratorRxS, checkoutStatus, message_, retries, 
+                            message_P, message >>
+
+PaymentReqProcessing(self) == /\ pc[self] = "PaymentReqProcessing"
+                              /\ IF message_P[self] = "prepare"
+                                    THEN /\ IF paymentStatus = "pending"
+                                               THEN /\ IF userCredits >= CheckoutAmount * PPU
+                                                          THEN /\ userCredits' = userCredits - CheckoutAmount * PPU
+                                                               /\ userHeldCredits' = userHeldCredits + CheckoutAmount * PPU
+                                                               /\ paymentStatus' = "prepared"
+                                                               /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponseR_"]
+                                                          ELSE /\ paymentStatus' = "failed"
+                                                               /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponseR_"]
+                                                               /\ UNCHANGED << userCredits, 
+                                                                               userHeldCredits >>
+                                                    /\ UNCHANGED orchestratorRxP
+                                               ELSE /\ IF paymentStatus \in {"prepared", "completed"}
+                                                          THEN /\ orchestratorRxP' = Append(orchestratorRxP, "prepareOk")
+                                                          ELSE /\ IF paymentStatus = "failed"
+                                                                     THEN /\ orchestratorRxP' = Append(orchestratorRxP, "prepareFailed")
+                                                                     ELSE /\ TRUE
+                                                                          /\ UNCHANGED orchestratorRxP
+                                                    /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                    /\ UNCHANGED << userCredits, 
+                                                                    userHeldCredits, 
+                                                                    paymentStatus >>
+                                         /\ UNCHANGED userPaidCredits
+                                    ELSE /\ IF message_P[self] = "commit"
+                                               THEN /\ IF paymentStatus = "prepared"
+                                                          THEN /\ userHeldCredits' = userHeldCredits - CheckoutAmount * PPU
+                                                               /\ userPaidCredits' = userPaidCredits + CheckoutAmount * PPU
+                                                               /\ paymentStatus' = "completed"
+                                                               /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponseR_"]
+                                                          ELSE /\ IF paymentStatus = "completed"
+                                                                     THEN /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse2_"]
+                                                                     ELSE /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                               /\ UNCHANGED << userHeldCredits, 
+                                                                               userPaidCredits, 
+                                                                               paymentStatus >>
+                                                    /\ UNCHANGED << userCredits, 
+                                                                    orchestratorRxP >>
+                                               ELSE /\ IF message_P[self] = "abort"
+                                                          THEN /\ IF paymentStatus = "pending"
+                                                                     THEN /\ paymentStatus' = "failed"
+                                                                          /\ pc' = [pc EXCEPT ![self] = "ReplyAbortPendingR"]
+                                                                          /\ UNCHANGED << userCredits, 
+                                                                                          userHeldCredits >>
+                                                                     ELSE /\ IF paymentStatus = "prepared"
+                                                                                THEN /\ userHeldCredits' = userHeldCredits - CheckoutAmount * PPU
+                                                                                     /\ userCredits' = userCredits + CheckoutAmount * PPU
+                                                                                     /\ paymentStatus' = "failed"
+                                                                                     /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessageR_"]
+                                                                                ELSE /\ IF paymentStatus = "completed"
+                                                                                           THEN /\ pc' = [pc EXCEPT ![self] = "ReplyAbort2_"]
+                                                                                           ELSE /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                                                     /\ UNCHANGED << userCredits, 
+                                                                                                     userHeldCredits, 
+                                                                                                     paymentStatus >>
+                                                               /\ UNCHANGED << userPaidCredits, 
+                                                                               orchestratorRxP >>
+                                                          ELSE /\ IF message_P[self] = "checkout"
+                                                                     THEN /\ IF paymentStatus = "pending"
+                                                                                THEN /\ IF userCredits >= CheckoutAmount * PPU
+                                                                                           THEN /\ userCredits' = userCredits - CheckoutAmount * PPU
+                                                                                                /\ userPaidCredits' = userPaidCredits + CheckoutAmount * PPU
+                                                                                                /\ paymentStatus' = "completed"
+                                                                                                /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponseR_"]
+                                                                                           ELSE /\ paymentStatus' = "failed"
+                                                                                                /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponseR_"]
+                                                                                                /\ UNCHANGED << userCredits, 
+                                                                                                                userPaidCredits >>
+                                                                                     /\ UNCHANGED orchestratorRxP
+                                                                                ELSE /\ IF paymentStatus = "completed"
+                                                                                           THEN /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutOk")
+                                                                                           ELSE /\ IF paymentStatus = "failed"
+                                                                                                      THEN /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutFailed")
+                                                                                                      ELSE /\ TRUE
+                                                                                                           /\ UNCHANGED orchestratorRxP
+                                                                                     /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                                                     /\ UNCHANGED << userCredits, 
+                                                                                                     userPaidCredits, 
+                                                                                                     paymentStatus >>
+                                                                     ELSE /\ IF message_P[self] = "compensate"
+                                                                                THEN /\ IF paymentStatus = "completed"
+                                                                                           THEN /\ userCredits' = userCredits + CheckoutAmount * PPU
+                                                                                                /\ userPaidCredits' = userPaidCredits - CheckoutAmount * PPU
+                                                                                                /\ paymentStatus' = "compensated"
+                                                                                                /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponseR_"]
+                                                                                                /\ UNCHANGED orchestratorRxP
+                                                                                           ELSE /\ IF paymentStatus \in {"compensated", "failed"}
+                                                                                                      THEN /\ orchestratorRxP' = Append(orchestratorRxP, "compensateOk")
+                                                                                                      ELSE /\ TRUE
+                                                                                                           /\ UNCHANGED orchestratorRxP
+                                                                                                /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                                                                /\ UNCHANGED << userCredits, 
+                                                                                                                userPaidCredits, 
+                                                                                                                paymentStatus >>
+                                                                                ELSE /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                                                                     /\ UNCHANGED << userCredits, 
+                                                                                                     userPaidCredits, 
+                                                                                                     paymentStatus, 
+                                                                                                     orchestratorRxP >>
+                                                               /\ UNCHANGED userHeldCredits
+                              /\ UNCHANGED << done, stockAvailable, stockHeld, 
+                                              stockSold, stockStatus, 
+                                              orchestratorTxP, orchestratorTxS, 
+                                              orchestratorRxS, restarted, 
+                                              anyRestarted, checkoutStatus, 
+                                              message_, retries, message_P, 
+                                              message >>
+
+PrepareSuccessResponseR_(self) == /\ pc[self] = "PrepareSuccessResponseR_"
+                                  /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                        THEN /\ \/ /\ TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponse_"]
+                                                   /\ UNCHANGED <<restarted, anyRestarted>>
+                                                \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                   /\ anyRestarted' = TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                        ELSE /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponse_"]
+                                             /\ UNCHANGED << restarted, 
+                                                             anyRestarted >>
+                                  /\ UNCHANGED << done, userCredits, 
+                                                  userHeldCredits, 
+                                                  userPaidCredits, 
+                                                  stockAvailable, stockHeld, 
+                                                  stockSold, paymentStatus, 
+                                                  stockStatus, orchestratorTxP, 
+                                                  orchestratorTxS, 
+                                                  orchestratorRxP, 
+                                                  orchestratorRxS, 
+                                                  checkoutStatus, message_, 
+                                                  retries, message_P, message >>
+
+PrepareSuccessResponse_(self) == /\ pc[self] = "PrepareSuccessResponse_"
+                                 /\ orchestratorRxP' = Append(orchestratorRxP, "prepareOk")
+                                 /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxS, restarted, 
+                                                 anyRestarted, checkoutStatus, 
+                                                 message_, retries, message_P, 
+                                                 message >>
+
+PrepareFailedResponseR_(self) == /\ pc[self] = "PrepareFailedResponseR_"
+                                 /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                       THEN /\ \/ /\ TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponse_"]
+                                                  /\ UNCHANGED <<restarted, anyRestarted>>
+                                               \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                  /\ anyRestarted' = TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponse_"]
+                                            /\ UNCHANGED << restarted, 
+                                                            anyRestarted >>
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxP, 
+                                                 orchestratorRxS, 
+                                                 checkoutStatus, message_, 
+                                                 retries, message_P, message >>
+
+PrepareFailedResponse_(self) == /\ pc[self] = "PrepareFailedResponse_"
+                                /\ orchestratorRxP' = Append(orchestratorRxP, "prepareFailed")
+                                /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxS, restarted, 
+                                                anyRestarted, checkoutStatus, 
+                                                message_, retries, message_P, 
+                                                message >>
+
+ReplyCommitResponseR_(self) == /\ pc[self] = "ReplyCommitResponseR_"
+                               /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                     THEN /\ \/ /\ TRUE
+                                                /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse_"]
+                                                /\ UNCHANGED <<restarted, anyRestarted>>
+                                             \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                /\ anyRestarted' = TRUE
+                                                /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                     ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse_"]
+                                          /\ UNCHANGED << restarted, 
+                                                          anyRestarted >>
+                               /\ UNCHANGED << done, userCredits, 
+                                               userHeldCredits, 
+                                               userPaidCredits, stockAvailable, 
+                                               stockHeld, stockSold, 
+                                               paymentStatus, stockStatus, 
+                                               orchestratorTxP, 
+                                               orchestratorTxS, 
+                                               orchestratorRxP, 
+                                               orchestratorRxS, checkoutStatus, 
+                                               message_, retries, message_P, 
+                                               message >>
+
+ReplyCommitResponse_(self) == /\ pc[self] = "ReplyCommitResponse_"
+                              /\ orchestratorRxP' = Append(orchestratorRxP, "commitOk")
+                              /\ pc' = [pc EXCEPT ![self] = "step_"]
+                              /\ UNCHANGED << done, userCredits, 
+                                              userHeldCredits, userPaidCredits, 
+                                              stockAvailable, stockHeld, 
+                                              stockSold, paymentStatus, 
+                                              stockStatus, orchestratorTxP, 
+                                              orchestratorTxS, orchestratorRxS, 
+                                              restarted, anyRestarted, 
+                                              checkoutStatus, message_, 
+                                              retries, message_P, message >>
+
+ReplyCommitResponse2_(self) == /\ pc[self] = "ReplyCommitResponse2_"
+                               /\ orchestratorRxP' = Append(orchestratorRxP, "commitOk")
+                               /\ pc' = [pc EXCEPT ![self] = "step_"]
+                               /\ UNCHANGED << done, userCredits, 
+                                               userHeldCredits, 
+                                               userPaidCredits, stockAvailable, 
+                                               stockHeld, stockSold, 
+                                               paymentStatus, stockStatus, 
+                                               orchestratorTxP, 
+                                               orchestratorTxS, 
+                                               orchestratorRxS, restarted, 
+                                               anyRestarted, checkoutStatus, 
+                                               message_, retries, message_P, 
+                                               message >>
+
+ReplyAbortPendingR(self) == /\ pc[self] = "ReplyAbortPendingR"
+                            /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                  THEN /\ \/ /\ TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "ReplyAbortPending"]
+                                             /\ UNCHANGED <<restarted, anyRestarted>>
+                                          \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                             /\ anyRestarted' = TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                  ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyAbortPending"]
+                                       /\ UNCHANGED << restarted, anyRestarted >>
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxP, orchestratorRxS, 
+                                            checkoutStatus, message_, retries, 
+                                            message_P, message >>
+
+ReplyAbortPending(self) == /\ pc[self] = "ReplyAbortPending"
+                           /\ orchestratorRxP' = Append(orchestratorRxP, "abortOk")
+                           /\ pc' = [pc EXCEPT ![self] = "step_"]
+                           /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                           userPaidCredits, stockAvailable, 
+                                           stockHeld, stockSold, paymentStatus, 
+                                           stockStatus, orchestratorTxP, 
+                                           orchestratorTxS, orchestratorRxS, 
+                                           restarted, anyRestarted, 
+                                           checkoutStatus, message_, retries, 
+                                           message_P, message >>
+
+ReplyAbortMessageR_(self) == /\ pc[self] = "ReplyAbortMessageR_"
+                             /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                   THEN /\ \/ /\ TRUE
+                                              /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessage_"]
+                                              /\ UNCHANGED <<restarted, anyRestarted>>
+                                           \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                              /\ anyRestarted' = TRUE
+                                              /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                   ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessage_"]
+                                        /\ UNCHANGED << restarted, 
+                                                        anyRestarted >>
+                             /\ UNCHANGED << done, userCredits, 
+                                             userHeldCredits, userPaidCredits, 
+                                             stockAvailable, stockHeld, 
+                                             stockSold, paymentStatus, 
+                                             stockStatus, orchestratorTxP, 
+                                             orchestratorTxS, orchestratorRxP, 
+                                             orchestratorRxS, checkoutStatus, 
+                                             message_, retries, message_P, 
+                                             message >>
+
+ReplyAbortMessage_(self) == /\ pc[self] = "ReplyAbortMessage_"
+                            /\ orchestratorRxP' = Append(orchestratorRxP, "abortOk")
+                            /\ pc' = [pc EXCEPT ![self] = "step_"]
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxS, restarted, 
+                                            anyRestarted, checkoutStatus, 
+                                            message_, retries, message_P, 
+                                            message >>
+
+ReplyAbort2_(self) == /\ pc[self] = "ReplyAbort2_"
+                      /\ orchestratorRxP' = Append(orchestratorRxP, "abortOk")
+                      /\ pc' = [pc EXCEPT ![self] = "step_"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxS, 
+                                      restarted, anyRestarted, checkoutStatus, 
+                                      message_, retries, message_P, message >>
+
+ReplyCheckoutResponseR_(self) == /\ pc[self] = "ReplyCheckoutResponseR_"
+                                 /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                       THEN /\ \/ /\ TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponse_"]
+                                                  /\ UNCHANGED <<restarted, anyRestarted>>
+                                               \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                  /\ anyRestarted' = TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponse_"]
+                                            /\ UNCHANGED << restarted, 
+                                                            anyRestarted >>
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxP, 
+                                                 orchestratorRxS, 
+                                                 checkoutStatus, message_, 
+                                                 retries, message_P, message >>
+
+ReplyCheckoutResponse_(self) == /\ pc[self] = "ReplyCheckoutResponse_"
+                                /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutOk")
+                                /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxS, restarted, 
+                                                anyRestarted, checkoutStatus, 
+                                                message_, retries, message_P, 
+                                                message >>
+
+FailedCheckoutResponseR_(self) == /\ pc[self] = "FailedCheckoutResponseR_"
+                                  /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                        THEN /\ \/ /\ TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponse_"]
+                                                   /\ UNCHANGED <<restarted, anyRestarted>>
+                                                \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                   /\ anyRestarted' = TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                        ELSE /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponse_"]
+                                             /\ UNCHANGED << restarted, 
+                                                             anyRestarted >>
+                                  /\ UNCHANGED << done, userCredits, 
+                                                  userHeldCredits, 
+                                                  userPaidCredits, 
+                                                  stockAvailable, stockHeld, 
+                                                  stockSold, paymentStatus, 
+                                                  stockStatus, orchestratorTxP, 
+                                                  orchestratorTxS, 
+                                                  orchestratorRxP, 
+                                                  orchestratorRxS, 
+                                                  checkoutStatus, message_, 
+                                                  retries, message_P, message >>
+
+FailedCheckoutResponse_(self) == /\ pc[self] = "FailedCheckoutResponse_"
+                                 /\ orchestratorRxP' = Append(orchestratorRxP, "checkoutFailed")
+                                 /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxS, restarted, 
+                                                 anyRestarted, checkoutStatus, 
+                                                 message_, retries, message_P, 
+                                                 message >>
+
+ReplyCompensateResponseR_(self) == /\ pc[self] = "ReplyCompensateResponseR_"
+                                   /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                         THEN /\ \/ /\ TRUE
+                                                    /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponse_"]
+                                                    /\ UNCHANGED <<restarted, anyRestarted>>
+                                                 \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                    /\ anyRestarted' = TRUE
+                                                    /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+                                         ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponse_"]
+                                              /\ UNCHANGED << restarted, 
+                                                              anyRestarted >>
+                                   /\ UNCHANGED << done, userCredits, 
+                                                   userHeldCredits, 
+                                                   userPaidCredits, 
+                                                   stockAvailable, stockHeld, 
+                                                   stockSold, paymentStatus, 
+                                                   stockStatus, 
+                                                   orchestratorTxP, 
+                                                   orchestratorTxS, 
+                                                   orchestratorRxP, 
+                                                   orchestratorRxS, 
+                                                   checkoutStatus, message_, 
+                                                   retries, message_P, message >>
+
+ReplyCompensateResponse_(self) == /\ pc[self] = "ReplyCompensateResponse_"
+                                  /\ orchestratorRxP' = Append(orchestratorRxP, "compensateOk")
+                                  /\ pc' = [pc EXCEPT ![self] = "step_"]
+                                  /\ UNCHANGED << done, userCredits, 
+                                                  userHeldCredits, 
+                                                  userPaidCredits, 
+                                                  stockAvailable, stockHeld, 
+                                                  stockSold, paymentStatus, 
+                                                  stockStatus, orchestratorTxP, 
+                                                  orchestratorTxS, 
+                                                  orchestratorRxS, restarted, 
+                                                  anyRestarted, checkoutStatus, 
+                                                  message_, retries, message_P, 
+                                                  message >>
+
+step_(self) == /\ pc[self] = "step_"
+               /\ pc' = [pc EXCEPT ![self] = "Start_P"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorTxS, 
+                               orchestratorRxP, orchestratorRxS, restarted, 
+                               anyRestarted, checkoutStatus, message_, retries, 
+                               message_P, message >>
+
+PaymentWorker(self) == Start_P(self) \/ R_(self)
+                          \/ PaymentReqProcessing(self)
+                          \/ PrepareSuccessResponseR_(self)
+                          \/ PrepareSuccessResponse_(self)
+                          \/ PrepareFailedResponseR_(self)
+                          \/ PrepareFailedResponse_(self)
+                          \/ ReplyCommitResponseR_(self)
+                          \/ ReplyCommitResponse_(self)
+                          \/ ReplyCommitResponse2_(self)
+                          \/ ReplyAbortPendingR(self)
+                          \/ ReplyAbortPending(self)
+                          \/ ReplyAbortMessageR_(self)
+                          \/ ReplyAbortMessage_(self) \/ ReplyAbort2_(self)
+                          \/ ReplyCheckoutResponseR_(self)
+                          \/ ReplyCheckoutResponse_(self)
+                          \/ FailedCheckoutResponseR_(self)
+                          \/ FailedCheckoutResponse_(self)
+                          \/ ReplyCompensateResponseR_(self)
+                          \/ ReplyCompensateResponse_(self) \/ step_(self)
+
+Start(self) == /\ pc[self] = "Start"
+               /\ orchestratorTxS # <<>> \/ done
+               /\ IF done
+                     THEN /\ pc' = [pc EXCEPT ![self] = "Done"]
+                          /\ UNCHANGED << orchestratorTxS, message >>
+                     ELSE /\ message' = [message EXCEPT ![self] = Head(orchestratorTxS)]
+                          /\ orchestratorTxS' = Tail(orchestratorTxS)
+                          /\ pc' = [pc EXCEPT ![self] = "R"]
+               /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                               userPaidCredits, stockAvailable, stockHeld, 
+                               stockSold, paymentStatus, stockStatus, 
+                               orchestratorTxP, orchestratorRxP, 
+                               orchestratorRxS, restarted, anyRestarted, 
+                               checkoutStatus, message_, retries, message_P >>
+
+R(self) == /\ pc[self] = "R"
+           /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                 THEN /\ \/ /\ TRUE
+                            /\ pc' = [pc EXCEPT ![self] = "StockReqProcessing"]
+                            /\ UNCHANGED <<restarted, anyRestarted>>
+                         \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                            /\ anyRestarted' = TRUE
+                            /\ pc' = [pc EXCEPT ![self] = "Start"]
+                 ELSE /\ pc' = [pc EXCEPT ![self] = "StockReqProcessing"]
+                      /\ UNCHANGED << restarted, anyRestarted >>
+           /\ UNCHANGED << done, userCredits, userHeldCredits, userPaidCredits, 
+                           stockAvailable, stockHeld, stockSold, paymentStatus, 
+                           stockStatus, orchestratorTxP, orchestratorTxS, 
+                           orchestratorRxP, orchestratorRxS, checkoutStatus, 
+                           message_, retries, message_P, message >>
+
+StockReqProcessing(self) == /\ pc[self] = "StockReqProcessing"
+                            /\ IF message[self] = "prepare"
+                                  THEN /\ IF stockStatus = "pending"
+                                             THEN /\ IF stockAvailable >= CheckoutAmount
+                                                        THEN /\ stockAvailable' = stockAvailable - CheckoutAmount
+                                                             /\ stockHeld' = stockHeld + CheckoutAmount
+                                                             /\ stockStatus' = "prepared"
+                                                             /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponseR"]
+                                                        ELSE /\ stockStatus' = "failed"
+                                                             /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponseR"]
+                                                             /\ UNCHANGED << stockAvailable, 
+                                                                             stockHeld >>
+                                                  /\ UNCHANGED orchestratorRxS
+                                             ELSE /\ IF stockStatus \in {"prepared", "completed"}
+                                                        THEN /\ orchestratorRxS' = Append(orchestratorRxS, "prepareOk")
+                                                        ELSE /\ IF stockStatus = "failed"
+                                                                   THEN /\ orchestratorRxS' = Append(orchestratorRxS, "prepareFailed")
+                                                                   ELSE /\ TRUE
+                                                                        /\ UNCHANGED orchestratorRxS
+                                                  /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                  /\ UNCHANGED << stockAvailable, 
+                                                                  stockHeld, 
+                                                                  stockStatus >>
+                                       /\ UNCHANGED stockSold
+                                  ELSE /\ IF message[self] = "commit"
+                                             THEN /\ IF stockStatus = "prepared"
+                                                        THEN /\ stockHeld' = stockHeld - CheckoutAmount
+                                                             /\ stockSold' = stockSold + CheckoutAmount
+                                                             /\ stockStatus' = "completed"
+                                                             /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponseR"]
+                                                        ELSE /\ IF stockStatus = "completed"
+                                                                   THEN /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse2"]
+                                                                   ELSE /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                             /\ UNCHANGED << stockHeld, 
+                                                                             stockSold, 
+                                                                             stockStatus >>
+                                                  /\ UNCHANGED << stockAvailable, 
+                                                                  orchestratorRxS >>
+                                             ELSE /\ IF message[self] = "abort"
+                                                        THEN /\ IF stockStatus = "pending"
+                                                                   THEN /\ stockStatus' = "failed"
+                                                                        /\ pc' = [pc EXCEPT ![self] = "AbortPendingR"]
+                                                                        /\ UNCHANGED << stockAvailable, 
+                                                                                        stockHeld >>
+                                                                   ELSE /\ IF stockStatus = "prepared"
+                                                                              THEN /\ stockHeld' = stockHeld - CheckoutAmount
+                                                                                   /\ stockAvailable' = stockAvailable + CheckoutAmount
+                                                                                   /\ stockStatus' = "failed"
+                                                                                   /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessageR"]
+                                                                              ELSE /\ IF stockStatus = "completed"
+                                                                                         THEN /\ pc' = [pc EXCEPT ![self] = "ReplyAbort2"]
+                                                                                         ELSE /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                                                   /\ UNCHANGED << stockAvailable, 
+                                                                                                   stockHeld, 
+                                                                                                   stockStatus >>
+                                                             /\ UNCHANGED << stockSold, 
+                                                                             orchestratorRxS >>
+                                                        ELSE /\ IF message[self] = "checkout"
+                                                                   THEN /\ IF stockStatus = "pending"
+                                                                              THEN /\ IF stockAvailable >= CheckoutAmount
+                                                                                         THEN /\ stockAvailable' = stockAvailable - CheckoutAmount
+                                                                                              /\ stockSold' = stockSold + CheckoutAmount
+                                                                                              /\ stockStatus' = "completed"
+                                                                                              /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponseR"]
+                                                                                         ELSE /\ stockStatus' = "failed"
+                                                                                              /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponseR"]
+                                                                                              /\ UNCHANGED << stockAvailable, 
+                                                                                                              stockSold >>
+                                                                                   /\ UNCHANGED orchestratorRxS
+                                                                              ELSE /\ IF stockStatus = "completed"
+                                                                                         THEN /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutOk")
+                                                                                         ELSE /\ IF stockStatus = "failed"
+                                                                                                    THEN /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutFailed")
+                                                                                                    ELSE /\ TRUE
+                                                                                                         /\ UNCHANGED orchestratorRxS
+                                                                                   /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                                                   /\ UNCHANGED << stockAvailable, 
+                                                                                                   stockSold, 
+                                                                                                   stockStatus >>
+                                                                   ELSE /\ IF message[self] = "compensate"
+                                                                              THEN /\ IF stockStatus = "completed"
+                                                                                         THEN /\ stockAvailable' = stockAvailable + CheckoutAmount
+                                                                                              /\ stockSold' = stockSold - CheckoutAmount
+                                                                                              /\ stockStatus' = "compensated"
+                                                                                              /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponseR"]
+                                                                                              /\ UNCHANGED orchestratorRxS
+                                                                                         ELSE /\ IF stockStatus \in {"compensated", "failed"}
+                                                                                                    THEN /\ orchestratorRxS' = Append(orchestratorRxS, "compensateOk")
+                                                                                                    ELSE /\ TRUE
+                                                                                                         /\ UNCHANGED orchestratorRxS
+                                                                                              /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                                                              /\ UNCHANGED << stockAvailable, 
+                                                                                                              stockSold, 
+                                                                                                              stockStatus >>
+                                                                              ELSE /\ pc' = [pc EXCEPT ![self] = "step"]
+                                                                                   /\ UNCHANGED << stockAvailable, 
+                                                                                                   stockSold, 
+                                                                                                   stockStatus, 
+                                                                                                   orchestratorRxS >>
+                                                             /\ UNCHANGED stockHeld
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, paymentStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxP, restarted, 
+                                            anyRestarted, checkoutStatus, 
+                                            message_, retries, message_P, 
+                                            message >>
+
+PrepareSuccessResponseR(self) == /\ pc[self] = "PrepareSuccessResponseR"
+                                 /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                       THEN /\ \/ /\ TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponse"]
+                                                  /\ UNCHANGED <<restarted, anyRestarted>>
+                                               \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                  /\ anyRestarted' = TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "PrepareSuccessResponse"]
+                                            /\ UNCHANGED << restarted, 
+                                                            anyRestarted >>
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxP, 
+                                                 orchestratorRxS, 
+                                                 checkoutStatus, message_, 
+                                                 retries, message_P, message >>
+
+PrepareSuccessResponse(self) == /\ pc[self] = "PrepareSuccessResponse"
+                                /\ orchestratorRxS' = Append(orchestratorRxS, "prepareOk")
+                                /\ pc' = [pc EXCEPT ![self] = "step"]
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxP, restarted, 
+                                                anyRestarted, checkoutStatus, 
+                                                message_, retries, message_P, 
+                                                message >>
+
+PrepareFailedResponseR(self) == /\ pc[self] = "PrepareFailedResponseR"
+                                /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                      THEN /\ \/ /\ TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponse"]
+                                                 /\ UNCHANGED <<restarted, anyRestarted>>
+                                              \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                 /\ anyRestarted' = TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                      ELSE /\ pc' = [pc EXCEPT ![self] = "PrepareFailedResponse"]
+                                           /\ UNCHANGED << restarted, 
+                                                           anyRestarted >>
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxP, 
+                                                orchestratorRxS, 
+                                                checkoutStatus, message_, 
+                                                retries, message_P, message >>
+
+PrepareFailedResponse(self) == /\ pc[self] = "PrepareFailedResponse"
+                               /\ orchestratorRxS' = Append(orchestratorRxS, "prepareFailed")
+                               /\ pc' = [pc EXCEPT ![self] = "step"]
+                               /\ UNCHANGED << done, userCredits, 
+                                               userHeldCredits, 
+                                               userPaidCredits, stockAvailable, 
+                                               stockHeld, stockSold, 
+                                               paymentStatus, stockStatus, 
+                                               orchestratorTxP, 
+                                               orchestratorTxS, 
+                                               orchestratorRxP, restarted, 
+                                               anyRestarted, checkoutStatus, 
+                                               message_, retries, message_P, 
+                                               message >>
+
+ReplyCommitResponseR(self) == /\ pc[self] = "ReplyCommitResponseR"
+                              /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                    THEN /\ \/ /\ TRUE
+                                               /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse"]
+                                               /\ UNCHANGED <<restarted, anyRestarted>>
+                                            \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                               /\ anyRestarted' = TRUE
+                                               /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                    ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCommitResponse"]
+                                         /\ UNCHANGED << restarted, 
+                                                         anyRestarted >>
+                              /\ UNCHANGED << done, userCredits, 
+                                              userHeldCredits, userPaidCredits, 
+                                              stockAvailable, stockHeld, 
+                                              stockSold, paymentStatus, 
+                                              stockStatus, orchestratorTxP, 
+                                              orchestratorTxS, orchestratorRxP, 
+                                              orchestratorRxS, checkoutStatus, 
+                                              message_, retries, message_P, 
+                                              message >>
+
+ReplyCommitResponse(self) == /\ pc[self] = "ReplyCommitResponse"
+                             /\ orchestratorRxS' = Append(orchestratorRxS, "commitOk")
+                             /\ pc' = [pc EXCEPT ![self] = "step"]
+                             /\ UNCHANGED << done, userCredits, 
+                                             userHeldCredits, userPaidCredits, 
+                                             stockAvailable, stockHeld, 
+                                             stockSold, paymentStatus, 
+                                             stockStatus, orchestratorTxP, 
+                                             orchestratorTxS, orchestratorRxP, 
+                                             restarted, anyRestarted, 
+                                             checkoutStatus, message_, retries, 
+                                             message_P, message >>
+
+ReplyCommitResponse2(self) == /\ pc[self] = "ReplyCommitResponse2"
+                              /\ orchestratorRxS' = Append(orchestratorRxS, "commitOk")
+                              /\ pc' = [pc EXCEPT ![self] = "step"]
+                              /\ UNCHANGED << done, userCredits, 
+                                              userHeldCredits, userPaidCredits, 
+                                              stockAvailable, stockHeld, 
+                                              stockSold, paymentStatus, 
+                                              stockStatus, orchestratorTxP, 
+                                              orchestratorTxS, orchestratorRxP, 
+                                              restarted, anyRestarted, 
+                                              checkoutStatus, message_, 
+                                              retries, message_P, message >>
+
+AbortPendingR(self) == /\ pc[self] = "AbortPendingR"
+                       /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                             THEN /\ \/ /\ TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "AbortPending"]
+                                        /\ UNCHANGED <<restarted, anyRestarted>>
+                                     \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                        /\ anyRestarted' = TRUE
+                                        /\ pc' = [pc EXCEPT ![self] = "Start"]
+                             ELSE /\ pc' = [pc EXCEPT ![self] = "AbortPending"]
+                                  /\ UNCHANGED << restarted, anyRestarted >>
+                       /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                       userPaidCredits, stockAvailable, 
+                                       stockHeld, stockSold, paymentStatus, 
+                                       stockStatus, orchestratorTxP, 
+                                       orchestratorTxS, orchestratorRxP, 
+                                       orchestratorRxS, checkoutStatus, 
+                                       message_, retries, message_P, message >>
+
+AbortPending(self) == /\ pc[self] = "AbortPending"
+                      /\ orchestratorRxS' = Append(orchestratorRxS, "abortOk")
+                      /\ pc' = [pc EXCEPT ![self] = "step"]
+                      /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                      userPaidCredits, stockAvailable, 
+                                      stockHeld, stockSold, paymentStatus, 
+                                      stockStatus, orchestratorTxP, 
+                                      orchestratorTxS, orchestratorRxP, 
+                                      restarted, anyRestarted, checkoutStatus, 
+                                      message_, retries, message_P, message >>
+
+ReplyAbortMessageR(self) == /\ pc[self] = "ReplyAbortMessageR"
+                            /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                  THEN /\ \/ /\ TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessage"]
+                                             /\ UNCHANGED <<restarted, anyRestarted>>
+                                          \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                             /\ anyRestarted' = TRUE
+                                             /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                  ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyAbortMessage"]
+                                       /\ UNCHANGED << restarted, anyRestarted >>
+                            /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                            userPaidCredits, stockAvailable, 
+                                            stockHeld, stockSold, 
+                                            paymentStatus, stockStatus, 
+                                            orchestratorTxP, orchestratorTxS, 
+                                            orchestratorRxP, orchestratorRxS, 
+                                            checkoutStatus, message_, retries, 
+                                            message_P, message >>
+
+ReplyAbortMessage(self) == /\ pc[self] = "ReplyAbortMessage"
+                           /\ orchestratorRxS' = Append(orchestratorRxS, "abortOk")
+                           /\ pc' = [pc EXCEPT ![self] = "step"]
+                           /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                           userPaidCredits, stockAvailable, 
+                                           stockHeld, stockSold, paymentStatus, 
+                                           stockStatus, orchestratorTxP, 
+                                           orchestratorTxS, orchestratorRxP, 
+                                           restarted, anyRestarted, 
+                                           checkoutStatus, message_, retries, 
+                                           message_P, message >>
+
+ReplyAbort2(self) == /\ pc[self] = "ReplyAbort2"
+                     /\ orchestratorRxS' = Append(orchestratorRxS, "abortOk")
+                     /\ pc' = [pc EXCEPT ![self] = "step"]
+                     /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                                     userPaidCredits, stockAvailable, 
+                                     stockHeld, stockSold, paymentStatus, 
+                                     stockStatus, orchestratorTxP, 
+                                     orchestratorTxS, orchestratorRxP, 
+                                     restarted, anyRestarted, checkoutStatus, 
+                                     message_, retries, message_P, message >>
+
+ReplyCheckoutResponseR(self) == /\ pc[self] = "ReplyCheckoutResponseR"
+                                /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                      THEN /\ \/ /\ TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponse"]
+                                                 /\ UNCHANGED <<restarted, anyRestarted>>
+                                              \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                 /\ anyRestarted' = TRUE
+                                                 /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                      ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCheckoutResponse"]
+                                           /\ UNCHANGED << restarted, 
+                                                           anyRestarted >>
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxP, 
+                                                orchestratorRxS, 
+                                                checkoutStatus, message_, 
+                                                retries, message_P, message >>
+
+ReplyCheckoutResponse(self) == /\ pc[self] = "ReplyCheckoutResponse"
+                               /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutOk")
+                               /\ pc' = [pc EXCEPT ![self] = "step"]
+                               /\ UNCHANGED << done, userCredits, 
+                                               userHeldCredits, 
+                                               userPaidCredits, stockAvailable, 
+                                               stockHeld, stockSold, 
+                                               paymentStatus, stockStatus, 
+                                               orchestratorTxP, 
+                                               orchestratorTxS, 
+                                               orchestratorRxP, restarted, 
+                                               anyRestarted, checkoutStatus, 
+                                               message_, retries, message_P, 
+                                               message >>
+
+FailedCheckoutResponseR(self) == /\ pc[self] = "FailedCheckoutResponseR"
+                                 /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                       THEN /\ \/ /\ TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponse"]
+                                                  /\ UNCHANGED <<restarted, anyRestarted>>
+                                               \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                  /\ anyRestarted' = TRUE
+                                                  /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                       ELSE /\ pc' = [pc EXCEPT ![self] = "FailedCheckoutResponse"]
+                                            /\ UNCHANGED << restarted, 
+                                                            anyRestarted >>
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxP, 
+                                                 orchestratorRxS, 
+                                                 checkoutStatus, message_, 
+                                                 retries, message_P, message >>
+
+FailedCheckoutResponse(self) == /\ pc[self] = "FailedCheckoutResponse"
+                                /\ orchestratorRxS' = Append(orchestratorRxS, "checkoutFailed")
+                                /\ pc' = [pc EXCEPT ![self] = "step"]
+                                /\ UNCHANGED << done, userCredits, 
+                                                userHeldCredits, 
+                                                userPaidCredits, 
+                                                stockAvailable, stockHeld, 
+                                                stockSold, paymentStatus, 
+                                                stockStatus, orchestratorTxP, 
+                                                orchestratorTxS, 
+                                                orchestratorRxP, restarted, 
+                                                anyRestarted, checkoutStatus, 
+                                                message_, retries, message_P, 
+                                                message >>
+
+ReplyCompensateResponseR(self) == /\ pc[self] = "ReplyCompensateResponseR"
+                                  /\ IF restarted[self] = FALSE /\ anyRestarted = FALSE
+                                        THEN /\ \/ /\ TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponse"]
+                                                   /\ UNCHANGED <<restarted, anyRestarted>>
+                                                \/ /\ restarted' = [restarted EXCEPT ![self] = TRUE]
+                                                   /\ anyRestarted' = TRUE
+                                                   /\ pc' = [pc EXCEPT ![self] = "Start"]
+                                        ELSE /\ pc' = [pc EXCEPT ![self] = "ReplyCompensateResponse"]
+                                             /\ UNCHANGED << restarted, 
+                                                             anyRestarted >>
+                                  /\ UNCHANGED << done, userCredits, 
+                                                  userHeldCredits, 
+                                                  userPaidCredits, 
+                                                  stockAvailable, stockHeld, 
+                                                  stockSold, paymentStatus, 
+                                                  stockStatus, orchestratorTxP, 
+                                                  orchestratorTxS, 
+                                                  orchestratorRxP, 
+                                                  orchestratorRxS, 
+                                                  checkoutStatus, message_, 
+                                                  retries, message_P, message >>
+
+ReplyCompensateResponse(self) == /\ pc[self] = "ReplyCompensateResponse"
+                                 /\ orchestratorRxS' = Append(orchestratorRxS, "compensateOk")
+                                 /\ pc' = [pc EXCEPT ![self] = "step"]
+                                 /\ UNCHANGED << done, userCredits, 
+                                                 userHeldCredits, 
+                                                 userPaidCredits, 
+                                                 stockAvailable, stockHeld, 
+                                                 stockSold, paymentStatus, 
+                                                 stockStatus, orchestratorTxP, 
+                                                 orchestratorTxS, 
+                                                 orchestratorRxP, restarted, 
+                                                 anyRestarted, checkoutStatus, 
+                                                 message_, retries, message_P, 
+                                                 message >>
+
+step(self) == /\ pc[self] = "step"
+              /\ pc' = [pc EXCEPT ![self] = "Start"]
+              /\ UNCHANGED << done, userCredits, userHeldCredits, 
+                              userPaidCredits, stockAvailable, stockHeld, 
+                              stockSold, paymentStatus, stockStatus, 
+                              orchestratorTxP, orchestratorTxS, 
+                              orchestratorRxP, orchestratorRxS, restarted, 
+                              anyRestarted, checkoutStatus, message_, retries, 
+                              message_P, message >>
+
+StockWorker(self) == Start(self) \/ R(self) \/ StockReqProcessing(self)
+                        \/ PrepareSuccessResponseR(self)
+                        \/ PrepareSuccessResponse(self)
+                        \/ PrepareFailedResponseR(self)
+                        \/ PrepareFailedResponse(self)
+                        \/ ReplyCommitResponseR(self)
+                        \/ ReplyCommitResponse(self)
+                        \/ ReplyCommitResponse2(self)
+                        \/ AbortPendingR(self) \/ AbortPending(self)
+                        \/ ReplyAbortMessageR(self)
+                        \/ ReplyAbortMessage(self) \/ ReplyAbort2(self)
+                        \/ ReplyCheckoutResponseR(self)
+                        \/ ReplyCheckoutResponse(self)
+                        \/ FailedCheckoutResponseR(self)
+                        \/ FailedCheckoutResponse(self)
+                        \/ ReplyCompensateResponseR(self)
+                        \/ ReplyCompensateResponse(self) \/ step(self)
+
+(* Allow infinite stuttering to prevent deadlock on termination. *)
+Terminating == /\ \A self \in ProcSet: pc[self] = "Done"
+               /\ UNCHANGED vars
+
+Next == (\E self \in {3}: Orchestrator(self))
+           \/ (\E self \in {1}: PaymentWorker(self))
+           \/ (\E self \in {2}: StockWorker(self))
+           \/ Terminating
+
+Spec == /\ Init /\ [][Next]_vars
+        /\ \A self \in {3} : SF_vars(Orchestrator(self))
+        /\ \A self \in {1} : SF_vars(PaymentWorker(self))
+        /\ \A self \in {2} : SF_vars(StockWorker(self))
+
+Termination == <>(\A self \in ProcSet: pc[self] = "Done")
+
+\* END TRANSLATION 
+
+=============================================================================
