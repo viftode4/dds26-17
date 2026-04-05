@@ -13,7 +13,7 @@ logger = structlog.get_logger("orchestrator.executor")
 _tracer = trace.get_tracer("orchestrator.executor")
 
 STEP_TIMEOUT = 10.0
-MAX_VERIFIED_RETRIES = 30  # ~10 min with exponential backoff capped at 60s
+MAX_VERIFIED_RETRIES = 15  # ~30s with exponential backoff capped at 5s
 
 
 class CircuitBreaker:
@@ -152,8 +152,8 @@ class _BaseExecutor:
             span.set_attribute("step.count", len(steps))
 
             pending = list(steps)
-            backoff = 0.5
-            max_backoff = 60.0
+            backoff = 0.2
+            max_backoff = 5.0
             attempt = 0
             while pending and attempt < MAX_VERIFIED_RETRIES:
                 attempt += 1
@@ -279,11 +279,12 @@ class SagaExecutor(_BaseExecutor):
 
             await self.wal.log(saga_id, "EXECUTING", {**context, "protocol": "saga", "tx_name": tx_name})
 
-            # Sequential execute
+            # Parallel execute — stock & payment are independent
             completed_steps = []
             failure_reason = ""
-            for step in tx_def.steps:
-                result = await self._try_step(step, saga_id, "execute", context)
+            all_succeeded = True
+            step_results = await self._broadcast("execute", saga_id, tx_def.steps, context)
+            for step, result in step_results:
                 if isinstance(result, dict) and result.get("event") == "executed":
                     completed_steps.append(step)
                     cb = self.circuit_breakers.get(step.service)
@@ -297,10 +298,10 @@ class SagaExecutor(_BaseExecutor):
                             cb.record_failure()
                         completed_steps.append(step)
                     failure_reason = reason
+                    all_succeeded = False
                     span.add_event("saga.step.failed", {"step": step.name, "reason": reason})
-                    break
 
-            if len(completed_steps) == len(tx_def.steps):
+            if all_succeeded:
                 await self.wal.log_terminal(saga_id, "COMPLETED")
                 span.set_attribute("outcome", "success")
                 return {"status": "success"}

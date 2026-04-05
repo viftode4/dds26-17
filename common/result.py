@@ -36,7 +36,7 @@ async def wait_for_result(db: aioredis.Redis, saga_id: str,
             async with asyncio.timeout(timeout):
                 while True:
                     msg = await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=1.0
+                        ignore_subscribe_messages=True, timeout=0.1
                     )
                     if msg:
                         raw = await db.get(result_key)

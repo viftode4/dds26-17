@@ -1,4 +1,5 @@
 import asyncio
+import gc
 import json
 import os
 import uuid
@@ -43,11 +44,14 @@ async def lifespan(app):
     setup_tracing("stock-service")
     setup_logging("stock-service")
 
+    # Reduce GC pause frequency — gen0 threshold 700→50000
+    gc.set_threshold(50000, 500, 1000)
+
     db = create_redis_connection(prefix="", decode_responses=True)
     await wait_for_redis(db, "stock-db")
 
     # Prewarm connection pool
-    await asyncio.gather(*[db.ping() for _ in range(64)])
+    await asyncio.gather(*[db.ping() for _ in range(128)])
 
     # Replica connection for read-only find/list endpoints
     db_read = create_replica_connection(prefix="", decode_responses=True)
