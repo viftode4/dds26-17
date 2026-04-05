@@ -20,9 +20,6 @@ from common.tracing import inject_trace_context
 log = get_logger("nats_transport")
 _tracer = trace.get_tracer("nats_transport")
 
-_NS = 1_000_000_000  # nanoseconds per second
-
-
 class _JsMsgAdapter:
     """Makes a JetStream Msg behave like a Core NATS Msg for service handlers.
 
@@ -88,8 +85,8 @@ class NatsTransport:
             subjects=["svc.>"],
             retention=RetentionPolicy.WORK_QUEUE,
             storage=StorageType.MEMORY,
-            max_age=5 * 60 * _NS,        # 5 min — well beyond any retry window
-            duplicate_window=120 * _NS,  # 2-min dedup window for Msg-Id
+            max_age=300,          # 5 min in seconds — well beyond any retry window
+            duplicate_window=120, # 2-min dedup window in seconds for Msg-Id
         ))
         log.info("JetStream COMMANDS stream ready")
 
