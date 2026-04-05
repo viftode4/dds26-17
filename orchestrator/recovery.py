@@ -3,6 +3,7 @@ import time
 from typing import Callable
 
 import structlog
+from common.dlq import write_to_dlq
 from orchestrator.definition import TransactionDefinition
 from orchestrator.wal import WALEngine
 from orchestrator.executor import STEP_TIMEOUT
@@ -13,6 +14,7 @@ IDLE_THRESHOLD_MS = 15000  # 15 seconds
 
 RECONCILIATION_INTERVAL = 60   # seconds
 ORPHAN_SAGA_TIMEOUT = 120       # seconds
+MAX_RECOVERY_RETRIES = 30       # ~10 min with exponential backoff capped at 60s
 
 
 class RecoveryWorker:
@@ -98,7 +100,7 @@ class RecoveryWorker:
                     logger.warning("send_action_to_all error", service=step.service, error=str(e))
 
     async def _abort_all(self, saga_id: str, data: dict):
-        """Abort all services with infinite retry, then log FAILED."""
+        """Abort all services with retry up to MAX_RECOVERY_RETRIES, then log FAILED."""
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if not tx_def:
             await self._send_action_to_all("abort", saga_id, data)
@@ -107,9 +109,11 @@ class RecoveryWorker:
 
         backoff = 0.5
         max_backoff = 60.0
+        attempt = 0
         pending_steps = list(tx_def.steps)
 
-        while pending_steps:
+        while pending_steps and attempt < MAX_RECOVERY_RETRIES:
+            attempt += 1
             still_pending = []
             for step in pending_steps:
                 try:
@@ -132,14 +136,26 @@ class RecoveryWorker:
             if pending_steps:
                 logger.warning("Recovery abort retry", saga_id=saga_id,
                                pending=[s.name for s in pending_steps],
-                               backoff=backoff)
+                               backoff=backoff, attempt=attempt)
                 await asyncio.sleep(min(backoff, max_backoff))
                 backoff *= 2
+
+        if pending_steps:
+            logger.error("Recovery abort exhausted retries, sending to DLQ",
+                         saga_id=saga_id, steps=[s.name for s in pending_steps])
+            for step in pending_steps:
+                await write_to_dlq(self.wal.db, saga_id, "abort", step.name,
+                                   "recovery_retries_exhausted", attempt, data)
 
         await self.wal.log(saga_id, "FAILED")
 
     async def _commit_all(self, saga_id: str, data: dict):
-        """Commit all services with infinite retry. Never abort a committed transaction."""
+        """Commit all services with retry up to MAX_RECOVERY_RETRIES.
+
+        Commits are irrevocable — if retries exhaust, DLQ entries are flagged
+        as requiring manual resolution. The saga is still logged COMPLETED
+        (optimistic) since prepares already reserved the resources.
+        """
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if not tx_def:
             await self._send_action_to_all("commit", saga_id, data)
@@ -148,9 +164,11 @@ class RecoveryWorker:
 
         backoff = 0.5
         max_backoff = 60.0
+        attempt = 0
         pending_steps = list(tx_def.steps)
 
-        while pending_steps:
+        while pending_steps and attempt < MAX_RECOVERY_RETRIES:
+            attempt += 1
             still_pending = []
             for step in pending_steps:
                 try:
@@ -173,14 +191,22 @@ class RecoveryWorker:
             if pending_steps:
                 logger.warning("Recovery commit retry", saga_id=saga_id,
                                pending=[s.name for s in pending_steps],
-                               backoff=backoff)
+                               backoff=backoff, attempt=attempt)
                 await asyncio.sleep(min(backoff, max_backoff))
                 backoff *= 2
+
+        if pending_steps:
+            logger.error("Recovery commit exhausted retries, sending to DLQ (MANUAL RESOLUTION REQUIRED)",
+                         saga_id=saga_id, steps=[s.name for s in pending_steps])
+            for step in pending_steps:
+                ctx = {**data, "requires_manual_resolution": True}
+                await write_to_dlq(self.wal.db, saga_id, "commit", step.name,
+                                   "recovery_retries_exhausted", attempt, ctx)
 
         await self.wal.log(saga_id, "COMPLETED")
 
     async def _compensate_all(self, saga_id: str, data: dict):
-        """Compensate completed saga steps in reverse order with infinite retry."""
+        """Compensate completed saga steps in reverse order with bounded retry."""
         tx_def = self.definitions.get(data.get("tx_name", ""))
         if not tx_def:
             await self._send_action_to_all("compensate", saga_id, data)
@@ -195,11 +221,14 @@ class RecoveryWorker:
             # Unknown which completed — compensate all (idempotent)
             steps_to_compensate = list(tx_def.steps)
 
-        # Compensate in reverse order, infinite retry per step
+        # Compensate in reverse order, bounded retry per step
         for step in reversed(steps_to_compensate):
             backoff = 0.5
             max_backoff = 60.0
-            while True:
+            attempt = 0
+            succeeded = False
+            while attempt < MAX_RECOVERY_RETRIES:
+                attempt += 1
                 try:
                     payload = {"saga_id": saga_id, "action": "compensate"}
                     if step.payload_builder:
@@ -207,18 +236,25 @@ class RecoveryWorker:
                     result = await self.transport.send_and_wait(step.service, "compensate", payload, STEP_TIMEOUT)
                 except Exception as e:
                     logger.warning("Recovery compensate error", service=step.service,
-                                   saga_id=saga_id, error=str(e))
+                                   saga_id=saga_id, error=str(e), attempt=attempt)
                     await asyncio.sleep(min(backoff, max_backoff))
                     backoff *= 2
                     continue
 
                 if isinstance(result, dict) and result.get("event") == "compensated":
-                    break  # this step done
+                    succeeded = True
+                    break
                 else:
                     logger.warning("Recovery compensate retry", step=step.name,
-                                   saga_id=saga_id, result=result)
+                                   saga_id=saga_id, result=result, attempt=attempt)
                     await asyncio.sleep(min(backoff, max_backoff))
                     backoff *= 2
+
+            if not succeeded:
+                logger.error("Recovery compensate exhausted retries, sending to DLQ",
+                             saga_id=saga_id, step=step.name, attempts=attempt)
+                await write_to_dlq(self.wal.db, saga_id, "compensate", step.name,
+                                   "recovery_retries_exhausted", attempt, data)
 
         await self.wal.log(saga_id, "FAILED")
 

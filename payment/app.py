@@ -13,6 +13,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
+from common.fault_injection import get_injector
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger
 from common.tracing import setup_tracing, shutdown_tracing, extract_trace_context, get_tracer
@@ -83,10 +84,13 @@ async def lifespan(app):
 
 async def handle_command(fields: dict) -> str:
     """Dispatch a command to the appropriate Lua function."""
+    injector = get_injector()
     action = fields.get("action", "")
     saga_id = fields.get("saga_id", "")
     user_id = fields.get("user_id", "")
     amount = fields.get("amount", "0")
+
+    await injector.maybe_inject(f"before_{action}", saga_id)
 
     if action == "prepare":
         ttl = int(fields.get("ttl", "30"))
@@ -107,6 +111,8 @@ async def handle_command(fields: dict) -> str:
     else:
         log.warning("Unknown action", action=action, saga_id=saga_id)
         return "failed"
+
+    await injector.maybe_inject(f"after_{action}", saga_id)
 
     log.info("Command handled", action=action, saga_id=saga_id, result=outcome)
     return outcome
@@ -291,6 +297,29 @@ async def health(request: Request):
 
 
 # ---------------------------------------------------------------------------
+# Fault injection control endpoints
+# ---------------------------------------------------------------------------
+
+async def set_fault(request: Request):
+    body = await request.json()
+    injector = get_injector()
+    injector.set_fault(body["point"], body["action"], body.get("value", 0))
+    return JSONResponse({"status": "ok"})
+
+
+async def clear_fault(request: Request):
+    injector = get_injector()
+    injector.clear_fault(request.query_params.get("point"))
+    return JSONResponse({"status": "ok"})
+
+
+async def get_faults(request: Request):
+    injector = get_injector()
+    rules = {k: {"action": v.action, "value": v.value} for k, v in injector.get_rules().items()}
+    return JSONResponse(rules)
+
+
+# ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
 
@@ -305,6 +334,9 @@ routes = [
     Route("/add_funds/{user_id}/{amount}", add_credit, methods=["POST"]),
     Route("/pay/{user_id}/{amount}", remove_credit, methods=["POST"]),
     Route("/health", health, methods=["GET"]),
+    Route("/fault/set", set_fault, methods=["POST"]),
+    Route("/fault/clear", clear_fault, methods=["POST"]),
+    Route("/fault/rules", get_faults, methods=["GET"]),
 ]
 
 app = Starlette(

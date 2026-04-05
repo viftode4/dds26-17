@@ -448,6 +448,18 @@ async def health(request: Request):
     return JSONResponse({"status": "healthy"})
 
 
+async def dlq_status(request: Request):
+    """Return DLQ count and latest entries for monitoring."""
+    count = await db.xlen("dlq:saga")
+    raw_entries = await db.xrevrange("dlq:saga", count=10)
+    entries = []
+    for entry_id, fields in raw_entries:
+        entry = dict(fields)
+        entry["id"] = entry_id
+        entries.append(entry)
+    return JSONResponse({"count": count, "latest": entries})
+
+
 async def metrics(request: Request):
     """Prometheus-compatible metrics with per-protocol latency histograms."""
     m = orchestrator.metrics
@@ -501,6 +513,7 @@ routes = [
     Route("/checkout/{order_id}", checkout, methods=["POST"]),
     Route("/health", health, methods=["GET"]),
     Route("/metrics", metrics, methods=["GET"]),
+    Route("/dlq/status", dlq_status, methods=["GET"]),
 ]
 
 app = Starlette(

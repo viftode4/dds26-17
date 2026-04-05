@@ -5,6 +5,7 @@ import structlog
 from opentelemetry import trace
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
+from common.dlq import write_to_dlq
 from orchestrator.definition import TransactionDefinition, Step
 from orchestrator.wal import WALEngine
 
@@ -12,6 +13,7 @@ logger = structlog.get_logger("orchestrator.executor")
 _tracer = trace.get_tracer("orchestrator.executor")
 
 STEP_TIMEOUT = 10.0
+MAX_VERIFIED_RETRIES = 30  # ~10 min with exponential backoff capped at 60s
 
 
 class CircuitBreaker:
@@ -137,7 +139,10 @@ class _BaseExecutor:
 
     async def _verified_action(self, action: str, expected_event: str,
                                 saga_id: str, steps: list[Step], context: dict):
-        """Execute action on all steps with infinite retry until all succeed."""
+        """Execute action on all steps with retry up to MAX_VERIFIED_RETRIES.
+
+        If retries are exhausted, remaining steps are written to the DLQ.
+        """
         with _tracer.start_as_current_span(
             f"verified.{action}",
             kind=SpanKind.INTERNAL,
@@ -150,7 +155,7 @@ class _BaseExecutor:
             backoff = 0.5
             max_backoff = 60.0
             attempt = 0
-            while pending:
+            while pending and attempt < MAX_VERIFIED_RETRIES:
                 attempt += 1
                 results = await asyncio.gather(*[
                     self._try_step(step, saga_id, action, context) for step in pending
@@ -175,6 +180,17 @@ class _BaseExecutor:
                     span.add_event(f"{action}.retry", {"attempt": attempt, "pending": len(pending)})
                     await asyncio.sleep(min(backoff, max_backoff))
                     backoff *= 2
+
+            if pending:
+                span.add_event(f"{action}.dlq", {"steps": [s.name for s in pending]})
+                logger.error("Max retries exhausted, sending to DLQ",
+                             action=action, saga_id=saga_id,
+                             steps=[s.name for s in pending], attempts=attempt)
+                for step in pending:
+                    await write_to_dlq(
+                        self.wal.db, saga_id, action, step.name,
+                        "max_retries_exhausted", attempt, context,
+                    )
 
 
 class TwoPCExecutor(_BaseExecutor):

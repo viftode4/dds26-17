@@ -112,20 +112,21 @@ class NatsTransport:
             try:
                 enriched = inject_trace_context(payload)
                 data = json.dumps(enriched).encode()
-                # Dedup key: unique per (saga, service, action) — protects against retry
-                # double-delivery within the 2-minute duplicate_window.
-                # Must include the full subject so svc.stock.execute and
-                # svc.payment.execute don't collide.
-                msg_id = f"{payload.get('saga_id', '')}-{subject}"
+
+                headers = {"Reply-To": inbox}
+                # Dedup via Msg-Id only for prepare/execute — these have side effects
+                # and must not be double-delivered. Commit/abort/compensate are
+                # idempotent at the Lua level and MUST be retryable; a deterministic
+                # Msg-Id would cause JetStream to silently drop retries as duplicates.
+                action = subject.rsplit(".", 1)[-1]
+                if action in ("prepare", "execute"):
+                    headers["Nats-Msg-Id"] = f"{payload.get('saga_id', '')}-{subject}"
 
                 # Run JetStream publish (~28µs stream ack) concurrently with inbox
                 # wait. The reply arrives after service processing (~280µs total),
                 # which is always after the stream ack — no sequential penalty.
                 _, reply_raw = await asyncio.gather(
-                    self._js.publish(
-                        subject, data,
-                        headers={"Nats-Msg-Id": msg_id, "Reply-To": inbox},
-                    ),
+                    self._js.publish(subject, data, headers=headers),
                     asyncio.wait_for(fut, timeout=timeout),
                 )
 
