@@ -26,6 +26,7 @@ log = get_logger("stock")
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
 _nats_transport: NatsTransport | None = None
+_scripts: dict[str, str] = {}
 
 
 @asynccontextmanager
@@ -43,13 +44,20 @@ async def lifespan(app):
     # Replica connection for read-only find/list endpoints
     db_read = create_replica_connection(prefix="", decode_responses=True)
 
-    # Load Lua function library
-    lua_path = Path(__file__).parent / "lua" / "stock_lib.lua"
-    lua_code = lua_path.read_text()
+    # Load Lua scripts into Dragonfly script cache
+    global _scripts
+    script_names = [
+        "stock_2pc_prepare", "stock_2pc_commit", "stock_2pc_abort",
+        "stock_saga_execute", "stock_saga_compensate",
+        "stock_subtract_direct", "stock_add_direct",
+    ]
+    lua_dir = Path(__file__).parent / "lua"
     try:
-        await db.function_load(lua_code, replace=True)
+        for name in script_names:
+            code = (lua_dir / f"{name}.lua").read_text()
+            _scripts[name] = await db.script_load(code)
     except aioredis.RedisError as e:
-        log.error("Failed to load Lua library", error=str(e))
+        log.error("Failed to load Lua scripts", error=str(e))
         raise
 
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
@@ -152,8 +160,7 @@ async def _2pc_prepare(saga_id: str, items: list[tuple[str, int]], ttl: int = 30
     args = [saga_id, str(ttl)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    result = await db.fcall("stock_2pc_prepare", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    result = await db.evalsha(_scripts["stock_2pc_prepare"], len(keys), *keys, *args)
     return result
 
 
@@ -165,8 +172,7 @@ async def _2pc_commit(saga_id: str, items: list[tuple[str, int]]):
     args = [saga_id, str(n)]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    await db.fcall("stock_2pc_commit", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["stock_2pc_commit"], len(keys), *keys, *args)
 
 
 async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
@@ -177,8 +183,7 @@ async def _2pc_abort(saga_id: str, items: list[tuple[str, int]]):
     args = [saga_id, str(n)]
     for item_id, _ in items:
         args.append(item_id)
-    await db.fcall("stock_2pc_abort", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["stock_2pc_abort"], len(keys), *keys, *args)
 
 
 async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
@@ -187,8 +192,7 @@ async def _saga_execute(saga_id: str, items: list[tuple[str, int]]) -> int:
     args = [saga_id]
     for item_id, amount in items:
         args += [item_id, str(amount)]
-    result = await db.fcall("stock_saga_execute", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    result = await db.evalsha(_scripts["stock_saga_execute"], len(keys), *keys, *args)
     return result
 
 
@@ -196,8 +200,7 @@ async def _saga_compensate(saga_id: str, items: list[tuple[str, int]]):
     n = len(items)
     keys = [f"item:{item_id}" for item_id, _ in items]
     keys += [f"saga:{saga_id}:stock:status", f"saga:{saga_id}:stock:amounts"]
-    await db.fcall("stock_saga_compensate", len(keys), *keys, saga_id, str(n))
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["stock_saga_compensate"], len(keys), *keys, saga_id, str(n))
 
 
 # ============================================================================
@@ -266,7 +269,7 @@ async def add_stock(request: Request):
     amount = int(request.path_params["amount"])
     key = f"item:{item_id}"
     try:
-        new_stock = await db.fcall("stock_add_direct", 1, key, amount)
+        new_stock = await db.evalsha(_scripts["stock_add_direct"], 1, key, amount)
     except aioredis.ResponseError as e:
         if "ITEM_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"Item: {item_id} not found!")
@@ -281,7 +284,7 @@ async def remove_stock(request: Request):
     amount = int(request.path_params["amount"])
     key = f"item:{item_id}"
     try:
-        new_stock = await db.fcall("stock_subtract_direct", 1, key, amount)
+        new_stock = await db.evalsha(_scripts["stock_subtract_direct"], 1, key, amount)
     except aioredis.ResponseError as e:
         err_msg = str(e)
         if "ITEM_NOT_FOUND" in err_msg:

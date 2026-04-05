@@ -26,6 +26,7 @@ log = get_logger("payment")
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
 _nats_transport: NatsTransport | None = None
+_scripts: dict[str, str] = {}
 
 
 @asynccontextmanager
@@ -43,13 +44,20 @@ async def lifespan(app):
     # Replica connection for read-only find endpoints
     db_read = create_replica_connection(prefix="", decode_responses=True)
 
-    # Load Lua function library
-    lua_path = Path(__file__).parent / "lua" / "payment_lib.lua"
-    lua_code = lua_path.read_text()
+    # Load Lua scripts into Dragonfly script cache
+    global _scripts
+    script_names = [
+        "payment_2pc_prepare", "payment_2pc_commit", "payment_2pc_abort",
+        "payment_saga_execute", "payment_saga_compensate",
+        "payment_subtract_direct", "payment_add_direct",
+    ]
+    lua_dir = Path(__file__).parent / "lua"
     try:
-        await db.function_load(lua_code, replace=True)
+        for name in script_names:
+            code = (lua_dir / f"{name}.lua").read_text()
+            _scripts[name] = await db.script_load(code)
     except aioredis.RedisError as e:
-        log.error("Failed to load Lua library", error=str(e))
+        log.error("Failed to load Lua scripts", error=str(e))
         raise
 
     _nats_transport = NatsTransport(os.environ.get("NATS_URL", "nats://nats:4222"))
@@ -140,8 +148,7 @@ async def _2pc_prepare(saga_id: str, user_id: str, amount: int, ttl: int = 30) -
         f"saga:{saga_id}:payment:status",
     ]
     args = [str(amount), saga_id, user_id, str(ttl)]
-    result = await db.fcall("payment_2pc_prepare", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    result = await db.evalsha(_scripts["payment_2pc_prepare"], len(keys), *keys, *args)
     return result
 
 
@@ -151,8 +158,7 @@ async def _2pc_commit(saga_id: str, user_id: str, amount: int):
         f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
     ]
-    await db.fcall("payment_2pc_commit", len(keys), *keys, saga_id, str(amount), user_id)
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["payment_2pc_commit"], len(keys), *keys, saga_id, str(amount), user_id)
 
 
 async def _2pc_abort(saga_id: str, user_id: str):
@@ -163,8 +169,7 @@ async def _2pc_abort(saga_id: str, user_id: str):
         f"lock:2pc:{saga_id}:{user_id}",
         f"saga:{saga_id}:payment:status",
     ]
-    await db.fcall("payment_2pc_abort", len(keys), *keys, saga_id)
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["payment_2pc_abort"], len(keys), *keys, saga_id)
 
 
 async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
@@ -174,8 +179,7 @@ async def _saga_execute(saga_id: str, user_id: str, amount: int) -> int:
         f"saga:{saga_id}:payment:amounts",
     ]
     args = [str(amount), saga_id, user_id]
-    result = await db.fcall("payment_saga_execute", len(keys), *keys, *args)
-    await db.execute_command("WAIT", 1, 5000)
+    result = await db.evalsha(_scripts["payment_saga_execute"], len(keys), *keys, *args)
     return result
 
 
@@ -187,8 +191,7 @@ async def _saga_compensate(saga_id: str, user_id: str):
         f"saga:{saga_id}:payment:status",
         f"saga:{saga_id}:payment:amounts",
     ]
-    await db.fcall("payment_saga_compensate", len(keys), *keys, saga_id)
-    await db.execute_command("WAIT", 1, 5000)
+    await db.evalsha(_scripts["payment_saga_compensate"], len(keys), *keys, saga_id)
 
 
 # ============================================================================
@@ -251,7 +254,7 @@ async def add_credit(request: Request):
     amount = int(request.path_params["amount"])
     key = f"user:{user_id}"
     try:
-        await db.fcall("payment_add_direct", 1, key, amount)
+        await db.evalsha(_scripts["payment_add_direct"], 1, key, amount)
     except aioredis.ResponseError as e:
         if "USER_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"User: {user_id} not found!")
@@ -266,7 +269,7 @@ async def remove_credit(request: Request):
     amount = int(request.path_params["amount"])
     key = f"user:{user_id}"
     try:
-        new_credit = await db.fcall("payment_subtract_direct", 1, key, amount)
+        new_credit = await db.evalsha(_scripts["payment_subtract_direct"], 1, key, amount)
     except aioredis.ResponseError as e:
         err_msg = str(e)
         if "USER_NOT_FOUND" in err_msg:

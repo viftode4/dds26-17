@@ -38,6 +38,7 @@ log = get_logger("order")
 
 db: aioredis.Redis | None = None
 db_read: aioredis.Redis | None = None
+_scripts: dict[str, str] = {}
 orchestrator: Orchestrator | None = None
 leader_election: LeaderElection | None = None
 recovery_worker: RecoveryWorker | None = None
@@ -131,13 +132,16 @@ async def lifespan(app):
     # Replica connection for read-only lookups
     db_read = create_replica_connection(prefix="", decode_responses=True)
 
-    # Load Lua function library
-    lua_path = Path(__file__).parent / "lua" / "order_lib.lua"
-    lua_code = lua_path.read_text()
+    # Load Lua scripts into Dragonfly script cache
+    global _scripts
+    script_names = ["order_add_item", "order_load_and_claim"]
+    lua_dir = Path(__file__).parent / "lua"
     try:
-        await db.function_load(lua_code, replace=True)
+        for name in script_names:
+            code = (lua_dir / f"{name}.lua").read_text()
+            _scripts[name] = await db.script_load(code)
     except aioredis.RedisError as e:
-        log.error("Failed to load Lua library", error=str(e))
+        log.error("Failed to load Lua scripts", error=str(e))
         raise
 
     # Prewarm connection pools — prevents first requests from hitting connection creation latency
@@ -295,8 +299,8 @@ async def add_item(request: Request):
     items_key = f"order:{order_id}:items"
     order_key = f"order:{order_id}"
     try:
-        await db.fcall("order_add_item", 2, items_key, order_key,
-                       f"{item_id}:{quantity}", cost_increase)
+        await db.evalsha(_scripts["order_add_item"], 2, items_key, order_key,
+                         f"{item_id}:{quantity}", cost_increase)
     except aioredis.ResponseError as e:
         if "ORDER_NOT_FOUND" in str(e):
             raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -337,7 +341,7 @@ async def checkout(request: Request):
     claim_value = json.dumps({"status": "processing", "saga_id": saga_id})
 
     keys = [f"order:{order_id}", f"order:{order_id}:items", idempotency_key]
-    raw = await db.fcall("order_load_and_claim", len(keys), *keys, claim_value, "300")
+    raw = await db.evalsha(_scripts["order_load_and_claim"], len(keys), *keys, claim_value, "300")
     found, entry_flat_json, items_json, acquired_int = raw[0], raw[1], raw[2], raw[3]
     if not found:
         raise HTTPException(400, detail=f"Order: {order_id} not found!")
@@ -419,9 +423,10 @@ async def checkout(request: Request):
         return PlainTextResponse("Checkout successful")
     else:
         error = result.get("error", "unknown")
-        await db.set(idempotency_key,
-                     json.dumps({"status": "failed", "error": error}),
-                     ex=300)
+        # Delete idempotency key so retries are allowed after conditions improve
+        # (e.g. stock/credit added). Concurrent waiters already hold the saga_id
+        # and wait on saga-result:{saga_id}, not this key.
+        await db.delete(idempotency_key)
         log.info("Checkout failed", order_id=order_id, saga_id=saga_id, error=error)
         raise HTTPException(400, detail=f"Checkout failed: {error}")
 

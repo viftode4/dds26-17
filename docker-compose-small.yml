@@ -179,7 +179,6 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: 512M
 
   stock-db:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
@@ -187,10 +186,8 @@ services:
       dragonfly
         --requirepass redis
         --masterauth redis
-        --maxmemory 200mb
+        --maxmemory 300mb
         --maxclients 5000
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     healthcheck:
       test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
@@ -200,7 +197,6 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
 
   payment-db:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
@@ -208,10 +204,8 @@ services:
       dragonfly
         --requirepass redis
         --masterauth redis
-        --maxmemory 200mb
+        --maxmemory 300mb
         --maxclients 5000
-        --min-replicas-to-write 1
-        --min-replicas-max-lag 10
     healthcheck:
       test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
       interval: 5s
@@ -221,7 +215,6 @@ services:
       resources:
         limits:
           cpus: "0.5"
-          memory: 256M
 
   # ---- Redis Replicas ----
 
@@ -230,8 +223,8 @@ services:
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
+        --maxmemory 300mb
+        --replicaof order-db:6379
         --masterauth redis
         --maxclients 5000
     depends_on:
@@ -246,15 +239,14 @@ services:
       resources:
         limits:
           cpus: "0.3"
-          memory: 256M
 
   order-db-replica-2:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
+        --maxmemory 300mb
+        --replicaof order-db:6379
         --masterauth redis
         --maxclients 5000
     depends_on:
@@ -269,15 +261,14 @@ services:
       resources:
         limits:
           cpus: "0.3"
-          memory: 256M
 
   order-db-replica-3:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 200mb
-        --replicaof order-db 6379
+        --maxmemory 300mb
+        --replicaof order-db:6379
         --masterauth redis
         --maxclients 5000
     depends_on:
@@ -292,15 +283,14 @@ services:
       resources:
         limits:
           cpus: "0.3"
-          memory: 256M
 
   stock-db-replica:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -315,15 +305,14 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   stock-db-replica-2:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -338,15 +327,14 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   stock-db-replica-3:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof stock-db 6379
+        --maxmemory 300mb
+        --replicaof stock-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -361,15 +349,14 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   payment-db-replica:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -384,15 +371,14 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   payment-db-replica-2:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -407,15 +393,14 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   payment-db-replica-3:
     image: docker.dragonflydb.io/dragonflydb/dragonfly
     command: >
       dragonfly
         --requirepass redis
-        --maxmemory 150mb
-        --replicaof payment-db 6379
+        --maxmemory 300mb
+        --replicaof payment-db:6379
         --masterauth redis
         --maxclients 2000
     depends_on:
@@ -430,7 +415,6 @@ services:
       resources:
         limits:
           cpus: "0.2"
-          memory: 192M
 
   # ---- NATS ----
 
