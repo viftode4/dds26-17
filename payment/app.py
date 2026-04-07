@@ -15,7 +15,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
+from common.config import (
+    create_redis_connection,
+    create_replica_connection,
+    subscribe_failover_invalidation,
+    wait_for_redis,
+)
 from common.fault_injection import get_injector
 from common.nats_transport import NatsTransport
 from common.logging import setup_logging, get_logger

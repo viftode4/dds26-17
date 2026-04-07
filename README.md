@@ -40,7 +40,7 @@ Prometheus, 1 Grafana.
 **Transaction Coordination:**
 - **Hybrid 2PC/Saga** with adaptive protocol selection (hysteresis on abort rate: 2PC→Saga at 10%, Saga→2PC at 5%)
 - **Parallel saga execution** — stock and payment steps run concurrently via `_broadcast()`
-- **16 atomic Lua functions** across 3 libraries — 2PC prepare/commit/abort + saga execute/compensate + direct ops, all with idempotency checks and poison pill guards
+- **Script-loaded atomic Lua operations** for order, stock, and payment — 2PC prepare/commit/abort + saga execute/compensate + direct ops, all with idempotency checks and poison pill guards
 - **Transport-agnostic orchestrator** — pluggable `Transport` protocol; zero application-specific code
 - **Idempotent checkout** with TTL differentiation — 60s for failed (allow retry), 86400s for success (prevent re-charge)
 - **Backpressure control** — async semaphore caps 500 concurrent in-flight checkouts
@@ -56,13 +56,13 @@ Prometheus, 1 Grafana.
 **Crash Recovery & Consistency:**
 - **Dual-structure WAL** — Redis Stream (audit trail) + SET (active sagas) + HASH (per-saga state) for O(1) recovery instead of O(n) stream scan
 - **Recovery state machine** — per-state strategy: PREPARING→abort all, COMMITTING→must commit (irrevocable), EXECUTING→compensate, COMPENSATING→retry
-- **Parallel recovery** — recovery worker processes failed sagas concurrently
+- **Bounded recovery retries** — recovery worker retries commit/abort/compensate deterministically from WAL state
 - **Reconciliation loop** — periodic (60s) orphan saga detection; aborts sagas idle >120s
 - **Dead Letter Queue** for permanently failed sagas (audit trail + manual resolution)
 - **Active-active leader election** (atomic Lua SET NX + TTL with heartbeat) — only one order instance runs recovery; all instances execute checkouts
 - **In-process result delivery** — asyncio.Future on happy path (no stream hop); pub/sub + key polling fallback for cross-instance recovery
 
-**8-Layer Consistency Defense:**
+**7-Layer Consistency Defense:**
 
 | # | Mechanism | What it prevents |
 |---|-----------|-----------------|
@@ -73,7 +73,6 @@ Prometheus, 1 Grafana.
 | 5 | No redis-py `retry_on_error` | Late Lua execution after orchestrator moves on |
 | 6 | 2PC commit re-deduction | Lost prepare data after failover (re-applies deduction) |
 | 7 | Saga compensate-on-timeout | Uncompensated mutations from ambiguous timeouts |
-| 8 | 24h status hash TTL in Lua | Recovery data survives lock key expiry |
 
 Five critical conservation bugs were found during chaos testing (2PC data loss on failover,
 NATS double-deduction, late redis-py retry after abort, timeout without compensation,
@@ -82,7 +81,7 @@ See [`docs/CONSISTENCY_REPORT.md`](docs/CONSISTENCY_REPORT.md) for the full root
 
 **High Availability & Performance:**
 - **Sentinel HA** with automatic failover (~5s detection, ~10s failover) and dual detection (fast PubSub event + slow 10s reconciler)
-- **Read replicas** with master-first fallback — GET endpoints use replicas; fall back to master on replica error
+- **Master-first reads with replica fallback** — GET endpoints prefer the current master and fall back to a replica if the master read fails
 - **Circuit breakers** per service (5 failures → open, 30s recovery → half-open probe)
 - **Connection prewarm** — pre-creates Redis pool connections at startup (256 order, 128 stock/payment)
 - **GC tuning** — gen0 threshold raised 70x (700→50000) to reduce pause frequency for stable throughput
@@ -135,7 +134,7 @@ throughput at the cost of a weaker consistency window during compensation.
 
 **Replication strategy:**
 - **Async master-replica replication** for read scaling and fault tolerance (2 replicas per master)
-- GET endpoints read from replicas (round-robin) with master fallback on error
+- GET endpoints prefer the current master and fall back to a replica on read error
 - Write operations always go to master
 - Sentinel monitors all 3 clusters and promotes replicas automatically on master failure
 
@@ -173,7 +172,7 @@ The system went through multiple architectural iterations, each driven by benchm
 | Messaging | Redis Streams (poll) | NATS Core (request-reply) | **NATS JetStream** (durable) + Core inbox |
 | Serialization | JSON | JSON | **msgpack** |
 | Database | Redis/Valkey | — | **Dragonfly** (multi-threaded) |
-| Lua scripts | Individual `.lua` files | — | **Function libraries** (FUNCTION LOAD) |
+| Lua scripts | Individual `.lua` files | — | **SCRIPT LOAD + EVALSHA** |
 | Saga execution | Sequential | — | **Parallel** (`_broadcast()`) |
 
 ## Prerequisites
@@ -247,7 +246,7 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Expected: **0 inconsistencies** across 1000 concurrent checkouts.
+Use the official benchmark as an external consistency check on your machine. Treat the exact outcome as an environment-dependent measurement, not a hardcoded guarantee in this README.
 
 ### 6. Stop the system
 
@@ -383,17 +382,12 @@ curl http://${MINIKUBE_IP}:30080/orders/health
 
 ## Performance Results
 
-Benchmarked using `docker-compose-small.yml` (1/1/1 instances) on an M4 MacBook Air
-(32GB RAM, Docker Desktop):
+Benchmark artifacts and scripts are included in `test/benchmark_results/` and `test/run_*benchmark*.sh`.
+Rerun them on the target machine before citing concrete throughput numbers.
 
-| Metric | Value |
-|--------|-------|
-| Throughput | ~3,000 req/s |
-| Consistency | 0 inconsistencies |
-
-> **Note:** Docker Desktop on macOS adds significant virtualization overhead. On a native
-> Linux machine with 20 CPUs, throughput is expected to be substantially higher. See
-> [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for WSL2/Docker Desktop performance analysis.
+> **Note:** Docker Desktop / WSL2 add significant virtualization overhead. Use a native
+> Linux machine for professor-facing measurements when possible. See
+> [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for environment-related performance caveats.
 
 ## Stress Testing / Benchmarking
 

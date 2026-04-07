@@ -6,7 +6,7 @@ This report documents the conservation bugs found during chaos testing, their ro
 
 > **total_credit_spent == total_stock_sold x price**
 
-All fixes are in production code (not test workarounds). The system is now provably consistent under normal operation and crash recovery. Under network partitions, a layered defense mechanism reduces the conservation violation window to near-zero.
+The fixes described below are implemented in production code (not test workarounds), but this report is intentionally limited to mechanisms and test evidence that are still present on the current branch. Claims here are grounded in the current codebase and fresh reruns.
 
 ---
 
@@ -30,9 +30,8 @@ All fixes are in production code (not test workarounds). The system is now prova
 
 **Fix applied:**
 - `stock_2pc_commit` and `payment_2pc_commit` Lua scripts now accept item amounts as parameters. If `status != prepared` (prepare data lost), they re-apply the deduction. In 2PC, the commit decision is irrevocable — we must ensure the mutation happens.
-- `WAIT 1 5000` called after every mutating Lua operation in NATS handlers. This blocks until at least one replica acknowledges the write, preventing data loss during the normal failover window.
 
-**Files:** `lua/stock_lib.lua`, `lua/payment_lib.lua`, `stock/app.py`, `payment/app.py`
+**Files:** `lua/stock_lib.lua`, `lua/payment_lib.lua`
 
 ---
 
@@ -109,12 +108,11 @@ All fixes are in production code (not test workarounds). The system is now prova
 |-------|-----------|-----------------|
 | 1 | **Force 2PC when circuit breakers open** | Irrevocable SAGA mutations during suspected partitions |
 | 2 | **Pool invalidation on Sentinel failover** | Stale connections reaching demoted old master |
-| 3 | **WAIT 1 5000 after mutations** | Data loss during normal failover (replication confirmed) |
-| 4 | **Poison pill in Lua** | Late prepare/execute after abort/compensate decision |
-| 5 | **No NATS retry for prepare/execute** | Double-deduction across Sentinel failover |
-| 6 | **No redis-py retry_on_error** | Late Lua execution after orchestrator moves on |
-| 7 | **SAGA compensate-on-timeout** | Uncompensated mutations from ambiguous timeouts |
-| 8 | **2PC commit re-deduction** | Lost prepare data after failover |
+| 3 | **Poison pill in Lua** | Late prepare/execute after abort/compensate decision |
+| 4 | **No NATS retry for prepare/execute** | Double-deduction across Sentinel failover |
+| 5 | **No redis-py retry_on_error** | Late Lua execution after orchestrator moves on |
+| 6 | **SAGA compensate-on-timeout** | Uncompensated mutations from ambiguous timeouts |
+| 7 | **2PC commit re-deduction** | Lost prepare data after failover |
 
 ### Normal Operation Impact
 
@@ -122,7 +120,6 @@ All fixes are in production code (not test workarounds). The system is now prova
 |---------|-----------------|
 | Force 2PC | 0ms (2PC is default) |
 | Pool invalidation | 0ms (background listener) |
-| WAIT 1 5000 | 0.1-0.5ms per mutation |
 | Poison pill | 0.01ms (one extra HGET in Lua) |
 | No NATS retry | 0ms (reduces wasted retries) |
 | No redis-py retry | 0ms (faster failure detection) |
@@ -131,26 +128,30 @@ All fixes are in production code (not test workarounds). The system is now prova
 
 ## Test Results
 
-| Suite | Count | Result |
-|-------|-------|--------|
-| Unit tests | 83 | All pass |
-| Integration tests | 19 | All pass |
-| Chaos tests (individual) | 8 | All pass |
-| Chaos tests (sequential) | 8 | 4 pass, 1 skip, 3 fail* |
+| Verification rerun (2026-04-07) | Result |
+|-------|--------|
+| Core unit suite (`test_executor`, `test_recovery`, `test_circuit_breaker`, `test_orchestrator_core`, `test_wal_metrics`, `test_new_unit_tests`) | **85 passed** |
+| Integration rerun (`test_microservices`, `test_stress`, `test_crash_recovery`) | **9 passed** |
+| Sentinel failover rerun (`test_sentinel_failover.py`) | **1 passed, 1 skipped** |
+| Chaos rerun (`test_network_partition_stock_db`) | **1 passed** |
 
-*Sequential failures are caused by **Sentinel TILT mode** on Docker/Windows — not conservation violations. See below.
+The skip is currently an explicit infrastructure precondition in the failover test: it only proceeds when replication confirmation is available from the backend.
 
 ---
 
 ## Known Limitation: Sentinel TILT on Docker/Windows
 
-When running all 8 chaos tests sequentially, tests that kill Redis masters cause Docker CPU throttling on the Sentinel containers. Sentinel's timer interrupt (runs every 100ms) detects a >2s gap and enters TILT mode, refusing all failover operations for 30 seconds.
+When running multiple failover-heavy tests sequentially, tests that kill Redis masters can cause Docker CPU throttling on the Sentinel containers. Sentinel's timer interrupt (runs every 100ms) detects a >2s gap and enters TILT mode, refusing failover operations for 30 seconds.
 
 **Impact:** After a chaos test kills a Redis master, Sentinel cannot promote the replica. Subsequent tests fail with "503 Service Unavailable" or "Item not found" because services can't reach a working master.
 
 **Verification:** `docker compose logs sentinel-1 | grep tilt`
 
-**Not a consistency bug.** The conservation invariant is never violated — services simply become unavailable. All chaos tests pass individually on a clean stack.
+**Not a consistency bug.** The conservation invariant can still hold while availability temporarily drops. On this branch, the individual chaos scenario rerun passed on a clean stack.
+
+### Current backend note: Dragonfly and `WAIT`
+
+Fresh verification on this branch showed that the Dragonfly backend in the local stack responds to `WAIT` with `ERR unknown command 'WAIT'`. Because of that, this branch does **not** claim production use of `WAIT 1 5000`; the active failover defenses are the ones listed above and implemented in code today.
 
 **Mitigation options:**
 1. Run on Linux with 16+ CPU cores (eliminates Docker throttling)
@@ -162,15 +163,10 @@ When running all 8 chaos tests sequentially, tests that kill Redis masters cause
 ## Reproduction
 
 ```bash
-# All unit + integration tests
+# Fresh reruns used for this report
 docker compose up -d
-python -m pytest test/ -v                                    # 83 unit tests
-python -m pytest test/ -v -m "integration and not slow"      # 19 integration tests
-
-# Individual chaos tests (recommended)
-python -m pytest test/test_chaos.py::test_network_partition_stock_db -v -m integration
-python -m pytest test/test_chaos.py::test_cascade_failure -v -m integration
-
-# All chaos tests (requires 16+ CPU cores to avoid Sentinel TILT)
-python -m pytest test/ -v -m slow
+python -m pytest test/test_executor.py test/test_recovery.py test/test_circuit_breaker.py test/test_orchestrator_core.py test/test_wal_metrics.py test/test_new_unit_tests.py -q
+python -m pytest test/test_microservices.py test/test_stress.py test/test_crash_recovery.py -q -m integration
+python -m pytest test/test_sentinel_failover.py -q -m integration
+python -m pytest test/test_chaos.py::test_network_partition_stock_db -q -m integration
 ```

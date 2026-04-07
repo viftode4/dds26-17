@@ -22,7 +22,9 @@ def _make_orchestrator(protocol: str = "auto") -> Orchestrator:
     order_db = AsyncMock()
     order_db.pipeline = MagicMock()
     # Make pipeline return an async context manager
-    pipe_mock = AsyncMock()
+    pipe_mock = MagicMock()
+    pipe_mock.set = MagicMock(return_value=pipe_mock)
+    pipe_mock.publish = MagicMock(return_value=pipe_mock)
     pipe_mock.execute = AsyncMock(return_value=[True, 1])
     order_db.pipeline.return_value.__aenter__ = AsyncMock(return_value=pipe_mock)
     order_db.pipeline.return_value.__aexit__ = AsyncMock(return_value=False)

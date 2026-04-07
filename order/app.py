@@ -19,7 +19,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.routing import Route
 
-from common.config import create_redis_connection, create_replica_connection, wait_for_redis, subscribe_failover_invalidation
+from common.config import (
+    create_redis_connection,
+    create_replica_connection,
+    subscribe_failover_invalidation,
+    wait_for_redis,
+)
 from common.nats_transport import NatsTransport, NatsOrchestratorTransport
 from common.logging import setup_logging, get_logger
 from common.result import wait_for_result
@@ -33,6 +38,12 @@ from orchestrator import (
 
 DB_ERROR_STR = "DB error"
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://gateway:80")
+ORCHESTRATOR_PROTOCOL = os.environ.get("ORCHESTRATOR_PROTOCOL", "auto").lower()
+
+if ORCHESTRATOR_PROTOCOL not in {"auto", "2pc", "saga"}:
+    raise RuntimeError(
+        "ORCHESTRATOR_PROTOCOL must be one of: auto, 2pc, saga"
+    )
 
 
 log = get_logger("order")
@@ -174,7 +185,7 @@ async def lifespan(app):
         order_db=db,
         transport=orch_transport,
         definitions=[checkout_tx],
-        protocol="saga",
+        protocol=ORCHESTRATOR_PROTOCOL,
     )
     await orchestrator.start()
 

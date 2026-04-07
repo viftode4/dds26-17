@@ -73,6 +73,16 @@ class CircuitBreaker:
 class _BaseExecutor:
     """Shared infrastructure for TwoPCExecutor and SagaExecutor."""
 
+    _FAILURE_REASON_PRIORITY = {
+        "": 0,
+        "failed": 0,
+        "unknown": 0,
+        "insufficient_resources": 0,
+        "timeout": 3,
+        "insufficient_stock": 2,
+        "insufficient_credit": 2,
+    }
+
     def __init__(self, transport, wal: WALEngine,
                  circuit_breakers: dict[str, CircuitBreaker] | None = None,
                  metrics=None):
@@ -94,6 +104,14 @@ class _BaseExecutor:
                 )
                 return f"service_{step.service}_unavailable"
         return None
+
+    def _choose_failure_reason(self, current: str, candidate: str) -> str:
+        """Keep the most informative failure reason across parallel step results."""
+        current_priority = self._FAILURE_REASON_PRIORITY.get(current, 1 if current else 0)
+        candidate_priority = self._FAILURE_REASON_PRIORITY.get(candidate, 1 if candidate else 0)
+        if candidate_priority > current_priority:
+            return candidate
+        return current
 
     async def _try_step(self, step: Step, saga_id: str, action: str,
                          context: dict) -> dict:
@@ -297,7 +315,7 @@ class SagaExecutor(_BaseExecutor):
                         if cb:
                             cb.record_failure()
                         completed_steps.append(step)
-                    failure_reason = reason
+                    failure_reason = self._choose_failure_reason(failure_reason, reason)
                     all_succeeded = False
                     span.add_event("saga.step.failed", {"step": step.name, "reason": reason})
 

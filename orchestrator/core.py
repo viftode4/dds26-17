@@ -89,6 +89,7 @@ class Orchestrator:
                               context: dict, saga_id_override: str | None) -> dict:
         saga_id = saga_id_override or str(uuid.uuid4())
         protocol = self._select_protocol()
+        self.metrics.current_protocol = protocol
 
         with _tracer.start_as_current_span("orchestrator.execute", kind=SpanKind.INTERNAL) as span:
             span.set_attribute("tx.name", tx_name)

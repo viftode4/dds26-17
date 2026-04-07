@@ -2,7 +2,7 @@
 
 Architecture:
 - 2PC: parallel prepare (lock, no mutations) -> commit (apply) or abort (release locks)
-- Saga: sequential execute (direct mutation) -> compensate in reverse on failure
+- Saga: parallel execute (direct mutation) -> compensate completed steps in reverse on failure
 - WAL writes awaited before side effects (PREPARING, EXECUTING, COMMITTING, COMPENSATING)
 - Transport.send_and_wait replaces Redis Streams for inter-service communication
 """
@@ -245,7 +245,7 @@ class TestSagaExecutor:
     @pytest.mark.asyncio
     async def test_saga_happy_path(self, mock_transport, mock_wal,
                                     circuit_breakers, metrics, checkout_tx):
-        """Sequential execute: stock then payment -> COMPLETED (no confirm phase)."""
+        """Parallel execute: stock and payment both succeed -> COMPLETED."""
         _route_transport(mock_transport, {
             ("stock", "execute"): {"event": "executed"},
             ("payment", "execute"): {"event": "executed"},
@@ -270,10 +270,10 @@ class TestSagaExecutor:
         assert len(confirm_calls) == 0
 
     @pytest.mark.asyncio
-    async def test_saga_early_abort_on_first_failure(self, mock_transport, mock_wal,
-                                                      circuit_breakers, metrics,
-                                                      checkout_tx):
-        """Stock fails -> payment never tried (early abort), no compensation needed, FAILED."""
+    async def test_saga_parallel_failure_preserves_reason(self, mock_transport, mock_wal,
+                                                          circuit_breakers, metrics,
+                                                          checkout_tx):
+        """Parallel saga keeps the specific failure reason even if a sibling returns a generic result."""
         _route_transport(mock_transport, {
             ("stock", "execute"): {"event": "failed", "reason": "insufficient_stock"},
         })
@@ -286,12 +286,12 @@ class TestSagaExecutor:
 
         assert result["status"] == "failed"
         assert "insufficient_stock" in result["error"]
-        # Payment should NOT have received an execute (early abort)
+        # Parallel saga still sends the sibling execute.
         payment_executes = [
             c for c in mock_transport.send_and_wait.call_args_list
             if c.args[0] == "payment" and c.args[1] == "execute"
         ]
-        assert len(payment_executes) == 0
+        assert len(payment_executes) == 1
         wal_steps = [c.args[1] for c in mock_wal.log.call_args_list if c.args[0] == saga_id]
         # No completed steps -> COMPENSATING logged but nothing to compensate
         assert wal_steps == ["EXECUTING", "COMPENSATING"]

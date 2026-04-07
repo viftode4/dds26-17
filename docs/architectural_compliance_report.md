@@ -68,19 +68,18 @@ Each service owns its database exclusively — no cross-service database access.
 
 ### Why this is NOT a violation
 
-**Lua scripts inside Redis/Valkey are stored procedures, not "another language."** They are part of Redis's native execution model, loaded via `FUNCTION LOAD` and invoked via `FCALL`. This is equivalent to:
+**Lua scripts inside Redis/Valkey/Dragonfly are stored procedures, not "another language."** They are part of Redis-compatible execution, and on this branch they are loaded via `SCRIPT LOAD` and invoked via `EVALSHA`. This is equivalent to:
 
 - **SQL** in PostgreSQL — nobody claims SQL is a "separate language" when using Python + PostgreSQL
 - **Aggregation pipelines** in MongoDB — they use their own syntax
 - **Redis commands themselves** — `XADD`, `HSET`, `EXPIRE` are already a DSL
 
-The assignment says to use *"Python Flask and Redis"*. Using Redis's built-in Lua scripting IS "using Redis." The Lua functions are loaded at service startup:
+The assignment says to use *"Python Flask and Redis"*. Using Redis's built-in Lua scripting IS "using Redis." The scripts are loaded at service startup:
 
 ```python
 # stock/app.py
-lua_path = Path(__file__).parent / "lua" / "stock_lib.lua"
-lua_code = lua_path.read_text()
-await db.function_load(lua_code, replace=True)
+code = (lua_dir / "stock_2pc_prepare.lua").read_text()
+_scripts["stock_2pc_prepare"] = await db.script_load(code)
 ```
 
 ### Why Lua is necessary
@@ -215,8 +214,8 @@ Redis Lua functions for atomic operations are used in production at:
 
 | Feature | This Project | Typical Student Project |
 |---------|-------------|------------------------|
-| **Consistency under concurrency** | 0 inconsistencies at 1000 concurrent checkouts | Often breaks at 10-50 concurrent |
-| **Throughput** | 585 req/s at 10K users, 0% failures | Usually degrades significantly under load |
+| **Consistency under concurrency** | Conservation checks, stress tests, and failover scenarios are part of the checked-in test suite | Often breaks at 10-50 concurrent |
+| **Throughput** | Performance-oriented implementation (Granian, uvloop, msgpack, JetStream, pooled Redis) plus benchmark harnesses | Usually degrades significantly under load |
 | **Fault tolerance** | WAL + Sentinel failover + NATS reconnect | Usually just retries or nothing |
 | **Idempotency** | Full exactly-once via idempotency keys + Lua guards | Often at-least-once with duplicate side effects |
 | **Crash recovery** | Recovers any in-flight saga from any crash point | Usually loses in-flight transactions |
@@ -233,4 +232,4 @@ The project is **architecturally sound** and **compliant with the assignment**. 
 2. Inter-service communication via NATS message bus (loosely coupled)
 3. The orchestrator is a separate pip-installable package with zero application coupling
 4. Lua scripts are Redis stored procedures (not "another language")
-5. The system delivers measurable results: 585 req/s, 0% failures, 0 inconsistencies
+5. The system includes a performance-focused implementation plus benchmark/observability tooling, without relying on stale numbers in this compliance report
