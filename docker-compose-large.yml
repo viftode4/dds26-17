@@ -1,14 +1,13 @@
-# Large cluster — 90 CPU budget (78 system + 12 locust)
-# Order: heaviest (7 Redis ops + 2 NATS waits/checkout + WAL + leader election)
-# Stock/Payment: 1 fcall each, called sequentially — must never queue
-# App: 9 order (4 workers, 3.5 CPU) + 7 stock (3 workers, 2.5 CPU) + 7 payment (3 workers, 2.5 CPU)
-# Total: 36 + 21 + 21 = 78 app workers, pool 1024/node
+# Large cluster — ~90 CPU benchmark budget
+# Order: heaviest (cluster writes + 2 NATS waits + WAL + leader election)
+# App: 9 order + 7 stock + 7 payment instances
+# Benchmark profile omits observability to leave room for Locust and the OS
 
 x-order-service: &order-service
   image: order:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 4 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=256
   env_file:
     - env/order_redis.env
   volumes:
@@ -24,9 +23,9 @@ x-order-service: &order-service
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
-    timeout: 3s
+    timeout: 5s
     start_period: 30s
-    retries: 3
+    retries: 6
   deploy:
     resources:
       limits:
@@ -37,7 +36,7 @@ x-stock-service: &stock-service
   image: stock:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=256
   env_file:
     - env/stock_redis.env
   volumes:
@@ -53,9 +52,9 @@ x-stock-service: &stock-service
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
-    timeout: 3s
+    timeout: 5s
     start_period: 30s
-    retries: 3
+    retries: 6
   deploy:
     resources:
       limits:
@@ -66,7 +65,7 @@ x-payment-service: &payment-service
   image: payment:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=256
   env_file:
     - env/payment_redis.env
   volumes:
@@ -82,9 +81,9 @@ x-payment-service: &payment-service
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
-    timeout: 3s
+    timeout: 5s
     start_period: 30s
-    retries: 3
+    retries: 6
   deploy:
     resources:
       limits:
@@ -160,7 +159,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "3.0"
+          cpus: "4.0"
           memory: 512M
 
   # ---- Order Services (9 instances, 3 Granian workers each) ----
@@ -172,7 +171,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-2:
@@ -181,7 +179,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-3:
@@ -190,7 +187,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-4:
@@ -199,7 +195,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-5:
@@ -208,7 +203,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-5
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-6:
@@ -217,7 +211,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-6
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-7:
@@ -226,7 +219,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-7
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-8:
@@ -235,7 +227,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-8
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   order-service-9:
@@ -244,7 +235,6 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-9
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Stock Services (7 instances, 2 Granian workers each) ----
@@ -255,7 +245,6 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-2:
@@ -263,7 +252,6 @@ services:
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-3:
@@ -271,7 +259,6 @@ services:
     environment:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-4:
@@ -279,7 +266,6 @@ services:
     environment:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-5:
@@ -287,7 +273,6 @@ services:
     environment:
       - INSTANCE_ID=stock-5
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-6:
@@ -295,7 +280,6 @@ services:
     environment:
       - INSTANCE_ID=stock-6
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   stock-service-7:
@@ -303,7 +287,6 @@ services:
     environment:
       - INSTANCE_ID=stock-7
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Payment Services (7 instances, 2 Granian workers each) ----
@@ -314,7 +297,6 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-2:
@@ -322,7 +304,6 @@ services:
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-3:
@@ -330,7 +311,6 @@ services:
     environment:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-4:
@@ -338,7 +318,6 @@ services:
     environment:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-5:
@@ -346,7 +325,6 @@ services:
     environment:
       - INSTANCE_ID=payment-5
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-6:
@@ -354,7 +332,6 @@ services:
     environment:
       - INSTANCE_ID=payment-6
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   payment-service-7:
@@ -362,7 +339,6 @@ services:
     environment:
       - INSTANCE_ID=payment-7
       - NATS_URL=nats://nats:4222
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - REDIS_MASTER_POOL_SIZE=256
 
   # ---- Order Cluster (3 masters + 3 replicas) ----
@@ -371,8 +347,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=530mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -383,8 +359,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=530mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -395,8 +371,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=530mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=4
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -407,8 +383,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=265mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -419,8 +395,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=265mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -431,8 +407,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=265mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -445,8 +421,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -458,8 +434,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -471,8 +447,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -484,8 +460,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -496,8 +472,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -508,8 +484,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -522,8 +498,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -535,8 +511,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -548,8 +524,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=200mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=3
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     deploy:
       resources:
@@ -561,8 +537,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -573,8 +549,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -585,8 +561,8 @@ services:
     <<: *cluster-node
     environment:
       - MAXMEMORY=100mb
-      - MAXCLIENTS=4096
-      - IO_THREADS=2
+      - MAXCLIENTS=16384
+      - IO_THREADS=1
     deploy:
       resources:
         limits:
@@ -601,7 +577,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4.0"
+          cpus: "2.0"
           memory: 512M
 
   # ---- Cluster Init (one-shot) ----
@@ -654,49 +630,3 @@ services:
         limits:
           cpus: "0.3"
           memory: 64M
-
-  # ---- Observability ----
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.57
-    environment:
-      - COLLECTOR_OTLP_ENABLED=true
-    ports:
-      - "16686:16686"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-
-  prometheus:
-    image: prom/prometheus:v2.53.0
-    volumes:
-      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.3"
-          memory: 256M
-
-  grafana:
-    image: grafana/grafana:11.1.0
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-    volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-    deploy:
-      resources:
-        limits:
-          cpus: "0.3"
-          memory: 256M

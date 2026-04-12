@@ -147,13 +147,13 @@ Five compose files target different hardware profiles:
 
 | Config | File | App Instances | CPU Target | Use Case |
 |--------|------|---------------|------------|----------|
-| Small | `docker-compose-small.yml` | 1/1/1 | ~6 CPU | Docker Desktop / WSL2 |
+| Small | `docker-compose-small.yml` | 1/1/1 | ~18 CPU | 16-20 CPU benchmark host with observability |
 | 6 CPU | `docker-compose-6cpu.yml` | 2/2/2 | ~6 CPU | Horizontal scaling validation |
 | Default | `docker-compose.yml` | 2/2/2 | ~30 CPU | Development / CI |
-| Medium | `docker-compose-medium.yml` | 4/4/4 | ~50 CPU | Stress testing |
-| Large | `docker-compose-large.yml` | 9/7/7 | ~90 CPU | Production benchmark |
+| Medium | `docker-compose-medium.yml` | 4/4/4 | ~48 CPU | Throughput benchmark profile (observability removed) |
+| Large | `docker-compose-large.yml` | 9/7/7 | ~90 CPU | Highest-throughput benchmark profile (observability removed) |
 
-"App Instances" = order / stock / payment service replicas.
+"App Instances" = order / stock / payment service replicas. Medium and large intentionally omit Jaeger/Prometheus/Grafana so benchmark hosts devote CPU to the data path.
 
 Usage:
 
@@ -380,10 +380,10 @@ The WAL ensures the saga is either completed or compensated on recovery.
 ├── tla/                    # TLA+ formal specification (CheckoutProtocol.tla)
 ├── env/                    # Redis connection env vars
 ├── docker-compose.yml            # Default 20-container deployment (~30 CPU)
-├── docker-compose-small.yml      # Minimal single-instance (~6 CPU)
+├── docker-compose-small.yml      # Single-instance benchmark profile (~18 CPU)
 ├── docker-compose-6cpu.yml       # Dual-instance, constrained (~6 CPU)
-├── docker-compose-medium.yml     # 4× instances (~50 CPU)
-├── docker-compose-large.yml      # 9/7/7 instances (~90 CPU)
+├── docker-compose-medium.yml     # 4× instances benchmark profile (~48 CPU)
+├── docker-compose-large.yml      # 9/7/7 instances benchmark profile (~90 CPU)
 ├── haproxy.cfg                   # HAProxy config (default)
 ├── haproxy-small.cfg             # HAProxy config (small)
 ├── haproxy-6cpu.cfg              # HAProxy config (6cpu)

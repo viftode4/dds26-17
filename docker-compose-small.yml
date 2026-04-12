@@ -19,7 +19,7 @@ services:
           cpus: "1.5"
           memory: 512M
 
-  # ---- Application Services (1 instance each, tuned for ~16-20 CPU) ----
+  # ---- Application Services (1 instance each, benchmark-focused ~18 CPU budget) ----
   # Order: heaviest — 7 Redis round-trips + 2 NATS waits per checkout + WAL + leader election
   # Stock/Payment: 1 fcall each but called sequentially — must never queue
 
@@ -48,9 +48,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       start_period: 30s
-      retries: 3
+      retries: 6
     deploy:
       resources:
         limits:
@@ -81,9 +81,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       start_period: 30s
-      retries: 3
+      retries: 6
     deploy:
       resources:
         limits:
@@ -114,9 +114,9 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 5s
-      timeout: 3s
+      timeout: 5s
       start_period: 30s
-      retries: 3
+      retries: 6
     deploy:
       resources:
         limits:
@@ -131,7 +131,7 @@ services:
     environment:
       - MAXMEMORY=130mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -151,7 +151,7 @@ services:
     environment:
       - MAXMEMORY=130mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -171,7 +171,7 @@ services:
     environment:
       - MAXMEMORY=130mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -191,7 +191,7 @@ services:
     environment:
       - MAXMEMORY=60mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -211,7 +211,7 @@ services:
     environment:
       - MAXMEMORY=60mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -231,7 +231,7 @@ services:
     environment:
       - MAXMEMORY=60mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -253,7 +253,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -274,7 +274,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -295,7 +295,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -316,7 +316,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -336,7 +336,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -356,7 +356,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -378,7 +378,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -399,7 +399,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -420,7 +420,7 @@ services:
     environment:
       - MAXMEMORY=65mb
       - MAXCLIENTS=100000
-      - IO_THREADS=2
+      - IO_THREADS=1
       - MIN_REPLICAS_TO_WRITE=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
@@ -441,7 +441,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -461,7 +461,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -481,7 +481,7 @@ services:
     environment:
       - MAXMEMORY=45mb
       - MAXCLIENTS=10000
-      - IO_THREADS=2
+      - IO_THREADS=1
     volumes:
       - ./cluster-node-entrypoint.sh:/etc/redis/cluster-node-entrypoint.sh:ro
     healthcheck:
@@ -506,8 +506,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.5"
-          memory: 512M
+          cpus: "1.0"
+          memory: 256M
 
   # ---- Cluster Init (one-shot) ----
 
