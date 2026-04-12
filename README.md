@@ -191,7 +191,7 @@ For Kubernetes deployment, see [Kubernetes Deployment (Minikube)](#kubernetes-de
 docker compose up --build -d
 ```
 
-> **Low-resource machines (<16 CPUs / Docker Desktop / WSL2):** use the small config:
+> **Low-resource machines / shared-host benchmarks:** use the small config. It now targets roughly a 15-CPU system budget so a 16-20 CPU host can keep some headroom for Locust and the OS:
 > ```bash
 > docker compose -f docker-compose-small.yml up --build -d
 > ```
@@ -261,10 +261,10 @@ Four compose files target different hardware profiles:
 
 | Config | File | App Instances | CPU Target | Containers | Use Case |
 |--------|------|---------------|------------|------------|----------|
-| Small | `docker-compose-small.yml` | 1/1/1 | ~16 CPU | 23 | Docker Desktop / WSL2 |
+| Small | `docker-compose-small.yml` | 1/1/1 | ~15 CPU system budget | 23 | 16-20 CPU host, or Docker Desktop / WSL2 with reduced load |
 | Default | `docker-compose.yml` | 2/2/2 | ~30 CPU | 23 | Development / CI |
-| Medium | `docker-compose-medium.yml` | 4/4/4 | ~47 CPU | 26 | Stress testing |
-| Large | `docker-compose-large.yml` | 9/7/7 | ~90 CPU | 36 | Production benchmark |
+| Medium | `docker-compose-medium.yml` | 4/4/4 | ~34 CPU system budget | 26 | ~40 CPU host with headroom for Locust / OS |
+| Large | `docker-compose-large.yml` | 9/7/7 | ~80 CPU system budget | 36 | ~90 CPU Linux host with dedicated Locust headroom |
 
 "App Instances" = order / stock / payment service replicas. Small and default configs
 include the full observability stack (Jaeger, Prometheus, Grafana); medium and large
@@ -501,9 +501,9 @@ The WAL ensures the saga is either completed or compensated on recovery.
 │   ├── tla_consistency_fault_tolerance.md    # TLA+ consistency proofs
 │   └── stress_test_results.png               # Benchmark chart
 ├── docker-compose.yml            # Default 23-container deployment (~30 CPU)
-├── docker-compose-small.yml      # Single-instance + observability (~16 CPU)
-├── docker-compose-medium.yml     # 4x instances (~47 CPU)
-├── docker-compose-large.yml      # 9/7/7 instances (~90 CPU)
+├── docker-compose-small.yml      # Single-instance + observability (~15 CPU budget)
+├── docker-compose-medium.yml     # 4x instances (~34 CPU budget)
+├── docker-compose-large.yml      # 9/7/7 instances (~80 CPU budget)
 ├── haproxy*.cfg                  # HAProxy configs per deployment size
 ├── sentinel.conf                 # Sentinel configuration
 ├── sentinel-entrypoint.sh        # Sentinel startup script

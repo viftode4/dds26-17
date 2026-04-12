@@ -39,6 +39,7 @@ from orchestrator import (
 DB_ERROR_STR = "DB error"
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://gateway:80")
 ORCHESTRATOR_PROTOCOL = os.environ.get("ORCHESTRATOR_PROTOCOL", "auto").lower()
+BATCH_INIT_CHUNK_SIZE = max(1, int(os.environ.get("BATCH_INIT_CHUNK_SIZE", "5000")))
 
 if ORCHESTRATOR_PROTOCOL not in {"auto", "2pc", "saga"}:
     raise RuntimeError(
@@ -252,20 +253,32 @@ async def batch_init_users(request: Request):
     n_items = int(request.path_params["n_items"])
     n_users = int(request.path_params["n_users"])
     item_price = int(request.path_params["item_price"])
+    chunk_start = 0
+    chunk_end = 0
     try:
-        async with db.pipeline(transaction=False) as pipe:
-            for i in range(n):
-                user_id = random.randint(0, n_users - 1)
-                item1_id = random.randint(0, n_items - 1)
-                item2_id = random.randint(0, n_items - 1)
-                pipe.hset(f"order:{i}", mapping={
-                    "user_id": str(user_id),
-                    "paid": "false",
-                    "total_cost": 2 * item_price,
-                })
-                pipe.rpush(f"order:{i}:items", f"{item1_id}:1", f"{item2_id}:1")
-            await pipe.execute()
-    except aioredis.RedisError:
+        for chunk_start in range(0, n, BATCH_INIT_CHUNK_SIZE):
+            chunk_end = min(chunk_start + BATCH_INIT_CHUNK_SIZE, n)
+            async with db.pipeline(transaction=False) as pipe:
+                for i in range(chunk_start, chunk_end):
+                    user_id = random.randint(0, n_users - 1)
+                    item1_id = random.randint(0, n_items - 1)
+                    item2_id = random.randint(0, n_items - 1)
+                    pipe.hset(f"order:{i}", mapping={
+                        "user_id": str(user_id),
+                        "paid": "false",
+                        "total_cost": 2 * item_price,
+                    })
+                    pipe.rpush(f"order:{i}:items", f"{item1_id}:1", f"{item2_id}:1")
+                await pipe.execute()
+    except aioredis.RedisError as e:
+        log.error(
+            "Order batch init failed",
+            error=str(e),
+            n=n,
+            chunk_start=chunk_start,
+            chunk_end=chunk_end,
+            chunk_size=BATCH_INIT_CHUNK_SIZE,
+        )
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for orders successful"})
 

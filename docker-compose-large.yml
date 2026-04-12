@@ -1,14 +1,14 @@
-# Large cluster — ~90 CPU total
-# System: ~80 CPU | Locust: ~10 CPU
+# Large cluster — ~80 CPU system budget
+# System: ~80 CPU | reserve ~10 CPU for Locust + OS on a 90-core host
 # App: 9 order (3 workers) + 7 stock (2 workers) + 7 payment (2 workers) instances
-# Pool: 512 master / 256 replica per instance (27 order processes, 14 stock, 14 payment)
+# Pool: order 256/128, stock+payment 128/64 per service
 
 x-order-service: &order-service
   image: order:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 3 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=4096
-    - REDIS_REPLICA_POOL_SIZE=2048
+    - REDIS_MASTER_POOL_SIZE=256
+    - REDIS_REPLICA_POOL_SIZE=128
   env_file:
     - env/order_redis.env
   volumes:
@@ -17,26 +17,26 @@ x-order-service: &order-service
     - ./lua:/app/lua:ro
   depends_on:
     order-db:
-      condition: service_started
+      condition: service_healthy
     order-db-replica:
-      condition: service_started
+      condition: service_healthy
     order-db-replica-2:
-      condition: service_started
+      condition: service_healthy
     nats:
       condition: service_started
     sentinel-1:
-      condition: service_started
+      condition: service_healthy
     sentinel-2:
-      condition: service_started
+      condition: service_healthy
     sentinel-3:
-      condition: service_started
+      condition: service_healthy
   restart: on-failure
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
     timeout: 3s
-    start_period: 10s
-    retries: 3
+    start_period: 20s
+    retries: 6
   deploy:
     resources:
       limits:
@@ -47,8 +47,8 @@ x-stock-service: &stock-service
   image: stock:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=2048
-    - REDIS_REPLICA_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=128
+    - REDIS_REPLICA_POOL_SIZE=64
   env_file:
     - env/stock_redis.env
   volumes:
@@ -57,26 +57,26 @@ x-stock-service: &stock-service
     - ./lua:/app/lua:ro
   depends_on:
     stock-db:
-      condition: service_started
+      condition: service_healthy
     stock-db-replica:
-      condition: service_started
+      condition: service_healthy
     stock-db-replica-2:
-      condition: service_started
+      condition: service_healthy
     nats:
       condition: service_started
     sentinel-1:
-      condition: service_started
+      condition: service_healthy
     sentinel-2:
-      condition: service_started
+      condition: service_healthy
     sentinel-3:
-      condition: service_started
+      condition: service_healthy
   restart: on-failure
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
     timeout: 3s
-    start_period: 10s
-    retries: 3
+    start_period: 20s
+    retries: 6
   deploy:
     resources:
       limits:
@@ -87,8 +87,8 @@ x-payment-service: &payment-service
   image: payment:latest
   command: granian --interface asgi --host 0.0.0.0 --port 5000 --workers 2 --loop uvloop app:app
   environment:
-    - REDIS_MASTER_POOL_SIZE=2048
-    - REDIS_REPLICA_POOL_SIZE=1024
+    - REDIS_MASTER_POOL_SIZE=128
+    - REDIS_REPLICA_POOL_SIZE=64
   env_file:
     - env/payment_redis.env
   volumes:
@@ -97,26 +97,26 @@ x-payment-service: &payment-service
     - ./lua:/app/lua:ro
   depends_on:
     payment-db:
-      condition: service_started
+      condition: service_healthy
     payment-db-replica:
-      condition: service_started
+      condition: service_healthy
     payment-db-replica-2:
-      condition: service_started
+      condition: service_healthy
     nats:
       condition: service_started
     sentinel-1:
-      condition: service_started
+      condition: service_healthy
     sentinel-2:
-      condition: service_started
+      condition: service_healthy
     sentinel-3:
-      condition: service_started
+      condition: service_healthy
   restart: on-failure
   healthcheck:
     test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
     interval: 5s
     timeout: 3s
-    start_period: 10s
-    retries: 3
+    start_period: 20s
+    retries: 6
   deploy:
     resources:
       limits:
@@ -130,23 +130,29 @@ x-sentinel: &sentinel
     - ./sentinel-entrypoint.sh:/etc/redis/sentinel-entrypoint.sh:ro
   depends_on:
     order-db:
-      condition: service_started
+      condition: service_healthy
     order-db-replica:
-      condition: service_started
+      condition: service_healthy
     order-db-replica-2:
-      condition: service_started
+      condition: service_healthy
     stock-db:
-      condition: service_started
+      condition: service_healthy
     stock-db-replica:
-      condition: service_started
+      condition: service_healthy
     stock-db-replica-2:
-      condition: service_started
+      condition: service_healthy
     payment-db:
-      condition: service_started
+      condition: service_healthy
     payment-db-replica:
-      condition: service_started
+      condition: service_healthy
     payment-db-replica-2:
-      condition: service_started
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "redis-cli", "-p", "26379", "ping"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
   deploy:
     resources:
       limits:
@@ -223,8 +229,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-2:
     <<: *order-service
@@ -232,8 +238,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-3:
     <<: *order-service
@@ -241,8 +247,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-4:
     <<: *order-service
@@ -250,8 +256,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-5:
     <<: *order-service
@@ -259,8 +265,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-6:
     <<: *order-service
@@ -268,8 +274,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-7:
     <<: *order-service
@@ -277,8 +283,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-8:
     <<: *order-service
@@ -286,8 +292,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-8
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   order-service-9:
     <<: *order-service
@@ -295,8 +301,8 @@ services:
       - GATEWAY_URL=http://gateway:80
       - INSTANCE_ID=order-9
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=256
+      - REDIS_REPLICA_POOL_SIZE=128
 
   # ---- Stock Services (7 instances, 2 Granian workers each) ----
 
@@ -306,56 +312,56 @@ services:
     environment:
       - INSTANCE_ID=stock-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-2:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-3:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-4:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-5:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-6:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   stock-service-7:
     <<: *stock-service
     environment:
       - INSTANCE_ID=stock-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   # ---- Payment Services (7 instances, 2 Granian workers each) ----
 
@@ -365,56 +371,56 @@ services:
     environment:
       - INSTANCE_ID=payment-1
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-2:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-2
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-3:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-3
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-4:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-4
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-5:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-5
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-6:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-6
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   payment-service-7:
     <<: *payment-service
     environment:
       - INSTANCE_ID=payment-7
       - NATS_URL=nats://nats:4222
-      - REDIS_MASTER_POOL_SIZE=2048
-      - REDIS_REPLICA_POOL_SIZE=1024
+      - REDIS_MASTER_POOL_SIZE=128
+      - REDIS_REPLICA_POOL_SIZE=64
 
   # ---- Redis Masters ----
 
@@ -426,6 +432,11 @@ services:
         --masterauth redis
         --maxmemory 1600mb
         --maxclients 50000
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -439,6 +450,11 @@ services:
         --masterauth redis
         --maxmemory 768mb
         --maxclients 30000
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -452,6 +468,11 @@ services:
         --masterauth redis
         --maxmemory 768mb
         --maxclients 30000
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -470,7 +491,12 @@ services:
         --maxclients 30000
     depends_on:
       order-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -487,7 +513,12 @@ services:
         --maxclients 30000
     depends_on:
       order-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -504,7 +535,12 @@ services:
         --maxclients 30000
     depends_on:
       stock-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -521,7 +557,12 @@ services:
         --maxclients 30000
     depends_on:
       stock-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -538,7 +579,12 @@ services:
         --maxclients 30000
     depends_on:
       payment-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -555,7 +601,12 @@ services:
         --maxclients 30000
     depends_on:
       payment-db:
-        condition: service_started
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "-a", "redis", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     deploy:
       resources:
         limits:
