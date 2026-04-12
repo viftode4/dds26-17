@@ -24,6 +24,7 @@ from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 
 DB_ERROR_STR = "DB error"
+BATCH_INIT_CHUNK_SIZE = max(1, int(os.environ.get("BATCH_INIT_CHUNK_SIZE", "5000")))
 
 log = get_logger("stock")
 
@@ -269,16 +270,28 @@ async def batch_init_users(request: Request):
     n = int(request.path_params["n"])
     starting_stock = int(request.path_params["starting_stock"])
     item_price = int(request.path_params["item_price"])
+    chunk_start = 0
+    chunk_end = 0
     try:
-        async with db.pipeline(transaction=False) as pipe:
-            for i in range(n):
-                pipe.hset(f"{{item_{i}}}:data", mapping={
-                    "available_stock": starting_stock,
-                    "reserved_stock": 0,
-                    "price": item_price,
-                })
-            await pipe.execute()
-    except Exception:
+        for chunk_start in range(0, n, BATCH_INIT_CHUNK_SIZE):
+            chunk_end = min(chunk_start + BATCH_INIT_CHUNK_SIZE, n)
+            async with db.pipeline(transaction=False) as pipe:
+                for i in range(chunk_start, chunk_end):
+                    pipe.hset(f"{{item_{i}}}:data", mapping={
+                        "available_stock": starting_stock,
+                        "reserved_stock": 0,
+                        "price": item_price,
+                    })
+                await pipe.execute()
+    except Exception as e:
+        log.error(
+            "Stock batch init failed",
+            error=str(e),
+            n=n,
+            chunk_start=chunk_start,
+            chunk_end=chunk_end,
+            chunk_size=BATCH_INIT_CHUNK_SIZE,
+        )
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for stock successful"})
 

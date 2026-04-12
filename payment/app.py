@@ -24,6 +24,7 @@ from opentelemetry.instrumentation.starlette import StarletteInstrumentor
 
 
 DB_ERROR_STR = "DB error"
+BATCH_INIT_CHUNK_SIZE = max(1, int(os.environ.get("BATCH_INIT_CHUNK_SIZE", "5000")))
 
 log = get_logger("payment")
 
@@ -229,15 +230,27 @@ async def create_user(request: Request):
 async def batch_init_users(request: Request):
     n = int(request.path_params["n"])
     starting_money = int(request.path_params["starting_money"])
+    chunk_start = 0
+    chunk_end = 0
     try:
-        async with db.pipeline(transaction=False) as pipe:
-            for i in range(n):
-                pipe.hset(f"{{user_{i}}}:data", mapping={
-                    "available_credit": starting_money,
-                    "held_credit": 0,
-                })
-            await pipe.execute()
-    except Exception:
+        for chunk_start in range(0, n, BATCH_INIT_CHUNK_SIZE):
+            chunk_end = min(chunk_start + BATCH_INIT_CHUNK_SIZE, n)
+            async with db.pipeline(transaction=False) as pipe:
+                for i in range(chunk_start, chunk_end):
+                    pipe.hset(f"{{user_{i}}}:data", mapping={
+                        "available_credit": starting_money,
+                        "held_credit": 0,
+                    })
+                await pipe.execute()
+    except Exception as e:
+        log.error(
+            "Payment batch init failed",
+            error=str(e),
+            n=n,
+            chunk_start=chunk_start,
+            chunk_end=chunk_end,
+            chunk_size=BATCH_INIT_CHUNK_SIZE,
+        )
         raise HTTPException(400, detail=DB_ERROR_STR)
     return JSONResponse({"msg": "Batch init for users successful"})
 

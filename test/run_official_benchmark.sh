@@ -57,18 +57,7 @@ echo ""
 # 1. Health check
 # -------------------------------------------------------------------
 echo ">>> Checking gateway health..."
-for i in $(seq 1 30); do
-    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
-        echo "    Gateway healthy"
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        echo "ERROR: Gateway not reachable at $GATEWAY"
-        echo "  Start services: docker compose up -d"
-        exit 1
-    fi
-    sleep 1
-done
+python "$SCRIPT_DIR/wait_for_stack.py" --gateway "$GATEWAY" --timeout 180 --interval 2 --stable-rounds 3
 
 # -------------------------------------------------------------------
 # 2. Official Consistency Test

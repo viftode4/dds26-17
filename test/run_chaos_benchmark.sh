@@ -50,6 +50,13 @@ log_pass()    { echo -e "${GRN}[PASS]${NC} $*"; }
 log_fail()    { echo -e "${RED}[FAIL]${NC} $*"; }
 
 # -------------------------------------------------------------------
+# Initial stack readiness gate
+# -------------------------------------------------------------------
+wait_initial_stack() {
+    python "$SCRIPT_DIR/wait_for_stack.py" --gateway "$GATEWAY" --timeout 180 --interval 2 --stable-rounds 3
+}
+
+# -------------------------------------------------------------------
 # Helper: wait for a URL to respond
 # -------------------------------------------------------------------
 wait_healthy() {
@@ -175,11 +182,7 @@ echo "  Scenario: $SCENARIO | Users: $USERS | Workers: $WORKERS"
 echo "=================================================="
 
 log_info "Checking gateway health..."
-for i in $(seq 1 30); do
-    curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1 && log_info "Gateway healthy" && break
-    [ "$i" -eq 30 ] && echo "ERROR: gateway not up" && exit 1
-    sleep 1
-done
+wait_initial_stack
 
 init_data
 

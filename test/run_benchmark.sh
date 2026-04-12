@@ -15,17 +15,7 @@ echo ">>> Starting Docker Compose..."
 docker compose up -d
 
 echo ">>> Waiting for services to be healthy..."
-for i in $(seq 1 60); do
-    if curl -sf "$GATEWAY/orders/health" > /dev/null 2>&1; then
-        echo "    Services healthy after ${i}s"
-        break
-    fi
-    if [ "$i" -eq 60 ]; then
-        echo "ERROR: Services did not become healthy within 60s"
-        exit 1
-    fi
-    sleep 1
-done
+python "$SCRIPT_DIR/wait_for_stack.py" --gateway "$GATEWAY" --timeout 120 --interval 2 --stable-rounds 3
 
 # -------------------------------------------------------------------
 # 2. Batch init
