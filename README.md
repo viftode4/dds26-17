@@ -5,6 +5,8 @@ TU Delft Distributed Data Systems course (DDS26). Implements hybrid 2PC/Saga
 transaction coordination over NATS JetStream with automatic protocol selection,
 crash recovery, and horizontal scaling.
 
+# VERY IMPORTANT ALSO CHECK THE CLUSTER-FINAL BRANCH FOR THE REDIS CLUSTER IMPLEMENTATION!!!!!!! WE HAVE 2 VERSIONS. AND WE HAVE 2PC and SAGA IMPLEMENTED ASWELL!!!! LOOK AT WHATEVER FLOATS YOUR BOAT!!!!
+
 ## Architecture
 
 ```
